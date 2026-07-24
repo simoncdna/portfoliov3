@@ -1,10 +1,17 @@
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+
 /**
  * Real EAN-13 barcode (the retail standard: 13 digits, the last being a
- * computed check digit). Renders genuine, scannable bar modules plus the
- * digits underneath in the classic 1 + 6 + 6 layout.
+ * computed check digit). Renders genuine bar modules plus the digits below.
+ * On hover, the digits scramble (same decode/glitch as the nav) and resolve
+ * to a word (default "OPEN"), centered.
  *
  * Pass 12 meaningful digits via `code`; the 13th (check) digit is computed.
  */
+
+const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&/*+<>";
 
 // 7-module encodings
 const L = ["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"];
@@ -39,13 +46,63 @@ export function BarcodeEAN13({
   code,
   className = "",
   gaps = [3, 6, 9],
+  hoverWord = "OPEN",
 }: {
   code: string;
   className?: string;
   /** 0-based digit positions to blank out (leaves a hole in the number row) */
   gaps?: number[];
+  /** word revealed (centered, scrambled) when hovering the barcode */
+  hoverWord?: string;
 }) {
   const hidden = new Set(gaps);
+
+  const [hovering, setHovering] = useState(false);
+  const [word, setWord] = useState(hoverWord);
+  const [glitch, setGlitch] = useState(false);
+  const raf = useRef(0);
+
+  const scrambleTo = useCallback((target: string) => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setWord(target);
+      return;
+    }
+    cancelAnimationFrame(raf.current);
+    const start = performance.now();
+    const DUR = 520;
+    setGlitch(true);
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - start) / DUR);
+      const revealed = p * target.length;
+      let out = "";
+      for (let i = 0; i < target.length; i++) {
+        out +=
+          target[i] === " "
+            ? " "
+            : i < revealed
+            ? target[i]
+            : GLYPHS[(Math.random() * GLYPHS.length) | 0];
+      }
+      setWord(out);
+      if (p < 1) raf.current = requestAnimationFrame(tick);
+      else {
+        setWord(target);
+        setGlitch(false);
+      }
+    };
+    raf.current = requestAnimationFrame(tick);
+  }, []);
+
+  const onEnter = () => {
+    setHovering(true);
+    scrambleTo(hoverWord);
+  };
+  const onLeave = () => {
+    cancelAnimationFrame(raf.current);
+    setGlitch(false);
+    setHovering(false);
+  };
+
   const d = normalize(code);
   const mods = modules(d);
   const digits = d.join("");
@@ -61,7 +118,11 @@ export function BarcodeEAN13({
   });
 
   return (
-    <span className={`inline-flex flex-col gap-1 ${className}`}>
+    <span
+      className={`inline-flex flex-col gap-1 ${className}`}
+      onPointerEnter={onEnter}
+      onPointerLeave={onLeave}
+    >
       <svg
         aria-hidden
         viewBox={`0 0 ${mods.length} 40`}
@@ -71,15 +132,25 @@ export function BarcodeEAN13({
       >
         {rects}
       </svg>
-      {/* 13 digits spread edge-to-edge so they span the full barcode width */}
-      <span
-        aria-label={`Barcode ${digits}`}
-        className="flex w-full justify-between font-mono text-[0.58rem] leading-none text-silver-muted"
-      >
-        {digits.split("").map((c, i) => (
-          <span key={i}>{hidden.has(i) ? " " : c}</span>
-        ))}
-      </span>
+      {hovering ? (
+        /* hover → scrambled word, centered */
+        <span
+          aria-hidden
+          className="flex w-full justify-center font-mono text-[0.58rem] uppercase leading-none tracking-[0.35em] text-silver"
+        >
+          <span className={glitch ? "text-glitch" : ""}>{word}</span>
+        </span>
+      ) : (
+        /* rest → 13 digits spread edge-to-edge across the full barcode width */
+        <span
+          aria-label={`Barcode ${digits}`}
+          className="flex w-full justify-between font-mono text-[0.58rem] leading-none text-silver-muted"
+        >
+          {digits.split("").map((c, i) => (
+            <span key={i}>{hidden.has(i) ? " " : c}</span>
+          ))}
+        </span>
+      )}
     </span>
   );
 }
