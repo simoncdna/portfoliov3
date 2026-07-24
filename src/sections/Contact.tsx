@@ -1,5 +1,5 @@
-import { ChromeMount } from "@/components/chrome/ChromeMount";
 import { Reveal } from "@/components/Reveal";
+import { ScrubReveal } from "@/components/ScrubReveal";
 import { Kicker, Index } from "@/components/Bits";
 import { MagneticLink } from "@/components/MagneticLink";
 import { site } from "@/data/site";
@@ -11,21 +11,6 @@ export function Contact() {
       className="relative overflow-hidden py-[var(--section-y)]"
       style={{ scrollMarginTop: "6rem" }}
     >
-      {/* chrome accent, upper right */}
-      <div
-        className="pointer-events-none absolute top-0 opacity-90"
-        style={{ right: "-8%" }}
-      >
-        <ChromeMount
-          style={{ width: "min(78vw, 78vh, 680px)", height: "min(78vw, 78vh, 680px)" }}
-          distort={0.34}
-          speed={0.45}
-          scale={1.5}
-          reactToScroll={false}
-          glow={0.2}
-        />
-      </div>
-
       <div className="shell relative z-10">
         <div className="flex items-center justify-between">
           <Reveal>
@@ -45,7 +30,7 @@ export function Contact() {
         </Reveal>
 
         <div className="mt-8 mix-blend-difference">
-          <Reveal variant="mask" delay={160}>
+          <ScrubReveal>
             <MagneticLink
               href={`mailto:${site.email}`}
               strength={10}
@@ -56,7 +41,7 @@ export function Contact() {
                 <br />a chat.
               </span>
             </MagneticLink>
-          </Reveal>
+          </ScrubReveal>
         </div>
 
         <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-12">

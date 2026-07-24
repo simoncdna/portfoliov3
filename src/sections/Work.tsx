@@ -1,4 +1,5 @@
 import { Reveal } from "@/components/Reveal";
+import { ScrubReveal } from "@/components/ScrubReveal";
 import { Kicker, Index, ArrowRight } from "@/components/Bits";
 import { works } from "@/data/site";
 
@@ -19,11 +20,9 @@ export function Work() {
           </Reveal>
         </div>
 
-        <Reveal variant="mask" delay={80}>
-          <h2 className="mt-6 font-display fs-h1 text-chrome">
-            Around the work<span className="text-silver-muted"> //</span>
-          </h2>
-        </Reveal>
+        <ScrubReveal as="h2" className="mt-6 font-display fs-h1 text-chrome">
+          Around the work<span className="text-silver-muted"> //</span>
+        </ScrubReveal>
 
         <ul className="mt-14">
           {works.map((w, i) => (

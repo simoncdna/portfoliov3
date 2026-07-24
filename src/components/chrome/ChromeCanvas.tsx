@@ -1,10 +1,34 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { Environment, Lightformer } from "@react-three/drei";
+import type { Group } from "three";
 import { ChromeBlob } from "./ChromeBlob";
 import type { BlobShape } from "./ChromeBlob";
+import { ParticleBlob } from "./ParticleBlob";
+
+const smoothstep = (e0: number, e1: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+/** Drives `hover` (0..1) from the cursor's proximity to screen centre (the blob). */
+function HoverDriver({
+  pointer,
+  hover,
+}: {
+  pointer: React.MutableRefObject<{ x: number; y: number }>;
+  hover: React.MutableRefObject<number>;
+}) {
+  useFrame((_, dt) => {
+    const p = pointer.current;
+    const d = Math.hypot(p.x, p.y);
+    const target = 1 - smoothstep(0.32, 0.82, d);
+    hover.current += (target - hover.current) * (1 - Math.pow(0.01, dt));
+  });
+  return null;
+}
 
 /**
  * Clean procedural environment — a smooth dark→light gradient plus ONE big soft
@@ -100,7 +124,7 @@ type Props = Partial<BlobShape> & {
   /** softly follow global scroll for spin intensity */
   reactToScroll?: boolean;
   lights?: LightsConfig;
-  /** "studio" = rich HDRI reflections; "clean" = procedural gradient studio */
+  /** reflection environment */
   envMode?: "clean" | "studio";
   /** which drei HDRI preset to reflect (studio mode) */
   hdriPreset?: HdriPreset;
@@ -117,8 +141,13 @@ export function ChromeCanvas({
   ...shape
 }: Props) {
   const scroll = useRef(0);
-  const pointer = useRef({ x: 0, y: 0 });
+  // start off-screen so the blob loads SOLID (cursor not over it yet)
+  const pointer = useRef({ x: 2, y: 2 });
+  const hover = useRef(0);
   const click = useRef({ fire: false, strength: 0, ripple: 0 });
+  // shared so the particle blob overlays the solid one exactly
+  const blobGroup = useRef<Group | null>(null);
+  const shapeRef = useRef({ flow: 0, distort: 0.3, freq: 0.4 });
   const [reduced, setReduced] = useState(false);
   const [dpr, setDpr] = useState<[number, number]>([1, 1.75]);
 
@@ -151,17 +180,18 @@ export function ChromeCanvas({
     };
     window.addEventListener("pointermove", onPointer, { passive: true });
 
-    // Click anywhere → shockwave ripple through the metal.
-    const onDown = () => {
-      click.current.fire = true;
+    // cursor leaves the window → push it far away so the blob re-solidifies
+    const onLeave = () => {
+      pointer.current.x = 2;
+      pointer.current.y = 2;
     };
-    window.addEventListener("pointerdown", onDown);
+    document.addEventListener("mouseleave", onLeave);
 
     return () => {
       mq.removeEventListener("change", onChange);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("pointermove", onPointer);
-      window.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("mouseleave", onLeave);
     };
   }, [reactToScroll]);
 
@@ -207,12 +237,22 @@ export function ChromeCanvas({
           ) : (
             <ChromeClean intensity={lights.streaks} />
           )}
+          <HoverDriver pointer={pointer} hover={hover} />
           <ChromeBlob
             scroll={scroll}
             pointer={pointer}
             click={click}
             reduced={reduced}
+            hover={hover}
+            groupRef={blobGroup}
+            shapeOut={shapeRef}
             {...shape}
+          />
+          <ParticleBlob
+            hover={hover}
+            reduced={reduced}
+            blobGroup={blobGroup}
+            shape={shapeRef}
           />
         </Suspense>
       </Canvas>

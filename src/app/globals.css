@@ -79,7 +79,8 @@ html {
 body {
   margin: 0;
   min-height: 100dvh;
-  background: var(--void);
+  /* transparent so the fixed z-[-1] chrome stage shows above html's void bg */
+  background: transparent;
   color: var(--silver-bright);
   font-family: var(--font-sans), system-ui, sans-serif;
   font-size: clamp(1rem, 1.1vw, 1.15rem);
@@ -143,6 +144,38 @@ a {
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
+}
+
+/* Real chrome type: hard reflection horizon + bevel + a slow sweeping sheen */
+.chrome-text {
+  background: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    #eaedf3 16%,
+    #9a9ea8 40%,
+    #45484f 49%,
+    #202228 51%,
+    #838893 60%,
+    #e6e9ef 82%,
+    #ffffff 100%
+  );
+  background-size: 100% 260%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.35))
+    drop-shadow(0 3px 10px rgba(0, 0, 0, 0.55));
+  animation: chrome-sheen 5s ease-in-out infinite;
+}
+@keyframes chrome-sheen {
+  0%,
+  100% {
+    background-position: 50% 12%;
+  }
+  50% {
+    background-position: 50% 88%;
+  }
 }
 
 /* ============================================================

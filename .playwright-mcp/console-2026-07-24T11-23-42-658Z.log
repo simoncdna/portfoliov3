@@ -1,3 +1,0 @@
-[     261ms] [WARNING] Origin trial controlled feature not enabled: 'rewriter'. @ https://codepen.io/Tibixx/full/poxBzYJ:89
-[     261ms] [WARNING] Origin trial controlled feature not enabled: 'writer'. @ https://codepen.io/Tibixx/full/poxBzYJ:89
-[    1559ms] [WARNING] THREE.Texture: Property .encoding has been replaced by .colorSpace. @ https://unpkg.com/three@0.152.0/build/three.module.js:1490

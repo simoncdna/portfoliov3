@@ -4,6 +4,7 @@ import "./globals.css";
 import { SmoothScroll } from "@/components/SmoothScroll";
 import { Cursor } from "@/components/Cursor";
 import { Grain } from "@/components/Grain";
+import { Preloader } from "@/components/Preloader";
 
 const display = Anton({
   variable: "--font-display",
@@ -50,6 +51,7 @@ export default function RootLayout({
       className={`${display.variable} ${sans.variable} ${mono.variable} antialiased`}
     >
       <body>
+				{/*<Preloader />*/}
         <Grain />
         <Cursor />
         <SmoothScroll>{children}</SmoothScroll>

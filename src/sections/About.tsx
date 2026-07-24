@@ -1,4 +1,5 @@
 import { Reveal } from "@/components/Reveal";
+import { ScrubReveal } from "@/components/ScrubReveal";
 import { Kicker, Index } from "@/components/Bits";
 import { site } from "@/data/site";
 
@@ -25,15 +26,13 @@ export function About() {
         <div className="grid grid-cols-1 gap-x-10 gap-y-14 md:grid-cols-12">
           {/* Big statement */}
           <div className="md:col-span-7">
-            <Reveal variant="mask">
-              <h2 className="font-display fs-h1 text-chrome-grad">
-                Crafting modern,
-                <br />
-                responsive
-                <br />
-                interfaces.
-              </h2>
-            </Reveal>
+            <ScrubReveal as="h2" className="font-display fs-h1 text-chrome-grad">
+              Crafting modern,
+              <br />
+              responsive
+              <br />
+              interfaces.
+            </ScrubReveal>
           </div>
 
           {/* Bio */}

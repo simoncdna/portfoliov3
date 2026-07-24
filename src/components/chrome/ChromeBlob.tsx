@@ -4,7 +4,7 @@ import { Component, Suspense, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF, useFBX } from "@react-three/drei";
-import { Vector3, Quaternion, Color } from "three";
+import { Vector3, Quaternion, Color, DoubleSide } from "three";
 import type {
   BufferGeometry,
   Group,
@@ -29,6 +29,10 @@ export type BlobShape = {
   envMapIntensity: number;
   color: string;
   pointerStrength: number;
+  /** how much fast mouse movement makes the metal slosh/wobble */
+  slosh: number;
+  /** how much a click punches holes in the metal (0 = off) */
+  clickHoles: number;
   geometry: "torusKnot" | "glb";
   glbUrl?: string;
 };
@@ -38,6 +42,12 @@ type Props = {
   pointer: Vec2Ref;
   click: ClickRef;
   reduced: boolean;
+  /** 0 = solid blob, 1 = fully dissolved (handed over to the particle blob) */
+  hover?: React.MutableRefObject<number>;
+  /** share this group's transform so the particle blob can overlay it exactly */
+  groupRef?: React.MutableRefObject<Group | null>;
+  /** publish the live shape params so the particle blob matches the surface */
+  shapeOut?: React.MutableRefObject<{ flow: number; distort: number; freq: number }>;
 } & Partial<BlobShape>;
 
 /* GLSL injected into MeshStandardMaterial's vertex program. Keeps PBR chrome
@@ -46,14 +56,18 @@ type Props = {
    from neighbour samples so reflections stay correct on the deformed skin. */
 const PRELUDE = /* glsl */ `
 uniform float uTime;
+uniform float uFlow;
 uniform float uDistort;
 uniform float uFreq;
-uniform float uSpeed;
+uniform float uMorph;   // 0..3 : blend across radically different shape modes
+uniform float uWobble;  // slosh/kick extra
 uniform vec3  uPointerDir;
 uniform float uPointerStrength;
 uniform vec3  uClickDir;
 uniform float uRipple;
 uniform float uClickStrength;
+uniform float uHoleAmount;
+varying float vBand;
 
 vec4 mod289(vec4 x){return x - floor(x*(1.0/289.0))*289.0;}
 vec3 mod289(vec3 x){return x - floor(x*(1.0/289.0))*289.0;}
@@ -104,34 +118,59 @@ float snoise(vec3 v){
 
 vec3 vDispPos;
 
-float getDisp(vec3 pos, vec3 nrm){
-  vec3 sp = pos * uFreq;
-  float ft = uTime * uSpeed;
+float fbm(vec3 p){ return snoise(p) * 0.7 + snoise(p * 2.1) * 0.3; }
 
-  // domain warp: displace the sampling space with noise so the folds flow and
-  // curl into each other — the "melted metal" / metaball read (vs. a potato).
-  vec3 w = vec3(
-    snoise(sp + vec3(0.0, ft * 0.6, 0.0)),
-    snoise(sp + vec3(3.1, 1.7, ft * 0.4)),
-    snoise(sp + vec3(9.2, 5.3, ft * 0.5))
-  );
-  vec3 wp = sp + w * 0.9;
+// expanding ring mask around the click point (0..1), sharp enough to punch holes
+float holeMask(vec3 nrm){
+  float ang = acos(clamp(dot(normalize(nrm), uClickDir), -1.0, 1.0));
+  return exp(-pow(ang * 3.0 - uRipple, 2.0) * 3.0);
+}
 
-  // FBM: big lobes + medium folds (kept smooth — no fine cauliflower)
-  float base   = snoise(wp);
-  float detail = snoise(wp * 2.1 + w * 0.4);
-  float d = (base * 0.82 + detail * 0.18) * uDistort;
+// Radically different shape MODES on a unit-sphere vertex bp, blended by uMorph.
+// Each mode moves the vertex differently (not just noise amplitude).
+vec3 shapeBase(vec3 bp){
+  vec3 n = normalize(bp);
+  float fl = uFlow;
 
-  // cursor bulge
+  // 0 — smooth flowing blob (domain-warped fbm)
+  vec3 sp = bp * uFreq;
+  vec3 wrp = sp + vec3(snoise(sp + vec3(0.0, fl, 0.0)),
+                       snoise(sp + vec3(3.1, 1.7, fl * 0.6)),
+                       snoise(sp + vec3(9.2, 5.3, fl * 0.4))) * 0.9;
+  vec3 m0 = bp + n * (fbm(wrp) * uDistort);
+
+  // 1 — TWIST / stretch (taffy): rotate around Y by height, elongate
+  float ang = bp.y * 3.4 + fl * 0.5;
+  float ca = cos(ang), sa = sin(ang);
+  vec3 tw = vec3(bp.x * ca - bp.z * sa, bp.y * 1.4, bp.x * sa + bp.z * ca);
+  vec3 m1 = tw + n * (fbm(bp * 1.6 + fl) * 0.16);
+
+  // 2 — SPIKES (urchin): sharp radial thorns from thresholded noise
+  float sp2 = pow(max(snoise(bp * 3.4 + vec3(fl)), 0.0), 3.0);
+  vec3 m2 = bp * 0.9 + n * (0.1 + sp2 * 1.3);
+
+  // 3 — MELT: big, low-freq, stretched-down smooth mass
+  vec3 md = bp * 1.2;
+  md.y -= smoothstep(0.0, -1.0, bp.y) * 0.35;
+  vec3 m3 = md + n * (snoise(bp * 0.7 + vec3(0.0, fl * 0.5, 0.0)) * 0.14);
+
+  vec3 r;
+  if (uMorph < 1.0) r = mix(m0, m1, smoothstep(0.0, 1.0, uMorph));
+  else if (uMorph < 2.0) r = mix(m1, m2, smoothstep(0.0, 1.0, uMorph - 1.0));
+  else r = mix(m2, m3, smoothstep(0.0, 1.0, uMorph - 2.0));
+  return r;
+}
+
+// pointer bulge + click ripple + slosh, added along the base normal
+float extraDisp(vec3 nrm){
+  float d = 0.0;
   float aim = max(dot(normalize(nrm), uPointerDir), 0.0);
   d += pow(aim, 3.0) * uPointerStrength;
-
-  // travelling click ripple
-  if(uClickStrength > 0.001){
+  if (uClickStrength > 0.001) {
     float ang = acos(clamp(dot(normalize(nrm), uClickDir), -1.0, 1.0));
-    float band = exp(-pow(ang*3.0 - uRipple, 2.0) * 2.5);
-    d += band * uClickStrength * 0.5;
+    d += exp(-pow(ang * 3.0 - uRipple, 2.0) * 2.5) * uClickStrength * 0.5;
   }
+  d += fbm(nrm * 1.5 + vec3(uFlow)) * uWobble;
   return d;
 }
 `;
@@ -139,19 +178,18 @@ float getDisp(vec3 pos, vec3 nrm){
 const NORMAL_BLOCK = /* glsl */ `
 vec3 objectNormal = vec3(normal);
 {
-  vec3 nrm = normalize(objectNormal);
-  vec3 tang = normalize(cross(nrm, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
-  vec3 bitang = normalize(cross(nrm, tang));
-  float e = 0.08;
-  float d0 = getDisp(position, nrm);
-  vDispPos = position + nrm * d0;
-  vec3 pa = position + tang * e;
-  vec3 pb = position + bitang * e;
-  vec3 da = pa + nrm * getDisp(pa, nrm);
-  vec3 db = pb + nrm * getDisp(pb, nrm);
-  vec3 nn = normalize(cross(da - vDispPos, db - vDispPos));
-  if(dot(nn, nrm) < 0.0) nn = -nn;
+  vec3 n0 = normalize(position);
+  vec3 p0 = shapeBase(position);
+  vec3 tang = normalize(cross(n0, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
+  vec3 bitang = normalize(cross(n0, tang));
+  float e = 0.05;
+  vec3 da = shapeBase(normalize(position + tang * e));
+  vec3 db = shapeBase(normalize(position + bitang * e));
+  vec3 nn = normalize(cross(da - p0, db - p0));
+  if(dot(nn, n0) < 0.0) nn = -nn;
+  vDispPos = p0 + n0 * extraDisp(n0);
   objectNormal = nn;
+  vBand = holeMask(n0) * uClickStrength * uHoleAmount;
 }
 `;
 
@@ -160,6 +198,9 @@ export function ChromeBlob({
   pointer,
   click,
   reduced,
+  hover,
+  groupRef,
+  shapeOut,
   distort = 0.3,
   speed = 0.5,
   scale = 1.7,
@@ -168,14 +209,21 @@ export function ChromeBlob({
   envMapIntensity = 1.05,
   color = "#cbccca",
   pointerStrength = 0.24,
+  slosh = 0.4,
+  clickHoles = 0.7,
   geometry = "torusKnot",
   glbUrl,
 }: Props) {
-  const group = useRef<Group>(null);
+  const internalGroup = useRef<Group>(null);
+  const group = groupRef ?? internalGroup;
   const mat = useRef<MeshStandardMaterial>(null);
   const rot = useRef({ x: 0, y: 0 });
   const kick = useRef(0);
   const lastColor = useRef("");
+  const prevP = useRef({ x: 0, y: 0 });
+  const sloshV = useRef(0);
+  const flowV = useRef(0); // continuous flow phase (never modulate time*speed)
+  const morphV = useRef(0); // eased 0..3 shape-mode position (scroll-scrubbed)
 
   // uniforms object is stable; values are mutated live in useFrame
   const uniforms = useMemo(
@@ -183,12 +231,15 @@ export function ChromeBlob({
       uTime: { value: 0 },
       uDistort: { value: distort },
       uFreq: { value: freq },
-      uSpeed: { value: speed },
+      uFlow: { value: 0 },
+      uMorph: { value: 0 },
+      uWobble: { value: 0 },
       uPointerDir: { value: new Vector3(0, 0, 1) },
       uPointerStrength: { value: 0 },
       uClickDir: { value: new Vector3(0, 0, 1) },
       uRipple: { value: 0 },
       uClickStrength: { value: 0 },
+      uHoleAmount: { value: 0 },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -207,6 +258,13 @@ export function ChromeBlob({
         .replace("#include <common>", `#include <common>\n${PRELUDE}`)
         .replace("#include <beginnormal_vertex>", NORMAL_BLOCK)
         .replace("#include <begin_vertex>", "vec3 transformed = vDispPos;");
+      // fragment: punch holes where the click ring passes
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", "#include <common>\nvarying float vBand;")
+        .replace(
+          "#include <clipping_planes_fragment>",
+          "#include <clipping_planes_fragment>\n  if (vBand > 0.4) discard;"
+        );
     },
     [uniforms]
   );
@@ -216,8 +274,16 @@ export function ChromeBlob({
     if (!g) return;
     const t = state.clock.elapsedTime;
     uniforms.uTime.value = t;
+    uniforms.uHoleAmount.value = reduced ? 0 : clickHoles;
+
+    // ---- scroll-scrubbed shape MODE (0..3): smooth → twist → spikes → melt ----
+    const sp = Math.max(0, Math.min(1, scroll.current));
+    const morphTarget = sp * 3; // 4 modes
+    const ms = reduced ? 1 : 1 - Math.pow(0.1, delta);
+    morphV.current += (morphTarget - morphV.current) * ms;
+    uniforms.uMorph.value = morphV.current;
     uniforms.uFreq.value = freq;
-    uniforms.uSpeed.value = speed;
+    uniforms.uDistort.value = distort;
 
     // live material tuning (from dev controls)
     if (mat.current) {
@@ -228,22 +294,60 @@ export function ChromeBlob({
       }
     }
 
+    // hover fade: solid melts away as the particle blob takes over
+    const hv = hover ? hover.current : 0;
+    if (mat.current) {
+      mat.current.opacity = 1 - hv;
+      mat.current.depthWrite = hv < 0.5;
+    }
+    g.visible = hv < 0.996;
+
     if (reduced) {
       g.rotation.set(0.2, 0.7, -0.15);
-      uniforms.uDistort.value = distort;
+      // flow not advanced → frozen
+      uniforms.uWobble.value = 0;
       uniforms.uPointerStrength.value = 0;
       uniforms.uClickStrength.value = 0;
       g.scale.setScalar(scale);
       if (mat.current) mat.current.roughness = roughness;
+      if (shapeOut) {
+        shapeOut.current.flow = flowV.current;
+        shapeOut.current.distort = distort;
+        shapeOut.current.freq = freq;
+      }
       return;
     }
 
     const s = scroll.current;
     const p = pointer.current;
 
-    // ---- rotation: idle drift + gentle pointer steer + scroll spin ----
-    const targetY = t * 0.1 + p.x * 0.5 + s * 2.0;
-    const targetX = Math.sin(t * 0.14) * 0.1 - p.y * 0.35 - s * 0.5;
+    // ---- mouse velocity → slosh (the liquid reacts to being shaken) ----
+    const dx = p.x - prevP.current.x;
+    const dy = p.y - prevP.current.y;
+    prevP.current.x = p.x;
+    prevP.current.y = p.y;
+    const mvel = Math.min(Math.hypot(dx, dy) / Math.max(delta, 0.001), 6);
+    const sloshTarget = Math.min(mvel * 0.09, 1);
+    // quick (but not instant) attack, slow release (settles)
+    const sRate =
+      sloshTarget > sloshV.current
+        ? 1 - Math.pow(0.02, delta)
+        : 1 - Math.pow(0.25, delta);
+    sloshV.current += (sloshTarget - sloshV.current) * sRate;
+    const sl = sloshV.current * slosh;
+    // advance a CONTINUOUS flow phase — never modulate time*speed (phase jumps)
+    flowV.current += delta * (speed + sl * 2.0);
+    uniforms.uFlow.value = flowV.current;
+    uniforms.uWobble.value = sl * 0.3 + kick.current * 0.2;
+    if (shapeOut) {
+      shapeOut.current.flow = flowV.current;
+      shapeOut.current.distort = distort;
+      shapeOut.current.freq = freq;
+    }
+
+    // ---- rotation: idle drift + pointer steer + strong scroll-scrub spin ----
+    const targetY = t * 0.08 + p.x * 0.5 + s * Math.PI * 1.6;
+    const targetX = Math.sin(t * 0.14) * 0.1 - p.y * 0.35 - s * 0.9;
     const k = 1 - Math.pow(0.0018, delta);
     rot.current.y += (targetY - rot.current.y) * k;
     rot.current.x += (targetX - rot.current.x) * k;
@@ -255,7 +359,7 @@ export function ChromeBlob({
     scratch.op.copy(scratch.wp).applyQuaternion(scratch.q);
     uniforms.uPointerDir.value.copy(scratch.op);
     uniforms.uPointerStrength.value +=
-      (pointerStrength - uniforms.uPointerStrength.value) *
+      (pointerStrength + sl * 0.15 - uniforms.uPointerStrength.value) *
       (1 - Math.pow(0.02, delta));
 
     // ---- click ripple + scale kick ----
@@ -280,7 +384,6 @@ export function ChromeBlob({
     kick.current *= Math.exp(-delta * 4.5);
     const sc = scale * (1 + kick.current * 0.06);
     g.scale.setScalar(sc);
-    uniforms.uDistort.value = distort + s * 0.1 + kick.current * 0.15;
     // brief sharpen (spec flash) on click
     if (mat.current)
       mat.current.roughness = Math.max(0.01, roughness - kick.current * 0.05);
@@ -294,6 +397,8 @@ export function ChromeBlob({
       roughness={roughness}
       envMapIntensity={envMapIntensity}
       color={color}
+      side={DoubleSide}
+      transparent
       onBeforeCompile={onBeforeCompile}
     />
   );
