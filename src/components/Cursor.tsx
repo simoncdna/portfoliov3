@@ -9,36 +9,27 @@ import { useEffect, useRef } from "react";
  */
 export function Cursor() {
   const posRef = useRef<HTMLDivElement>(null);
-  const scaleRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const finePointer = window.matchMedia(
       "(hover: hover) and (pointer: fine)"
     ).matches;
-    if (!finePointer) return;
+    const reduced = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
+    // reduced-motion users keep the native cursor (see globals.css)
+    if (!finePointer || reduced) return;
 
     const pos = posRef.current!;
-    const inner = scaleRef.current!;
     let visible = false;
-    let hovering = false;
 
     const onMove = (e: PointerEvent) => {
       if (!visible) {
         visible = true;
         pos.style.opacity = "1";
       }
-      // precise: the reticle snaps to the pointer (no trail)
+      // precise: the reticle snaps to the pointer (no trail, constant size)
       pos.style.transform = `translate3d(${e.clientX}px, ${e.clientY}px, 0) translate(-50%, -50%)`;
-
-      const interactive = (e.target as HTMLElement)?.closest?.(
-        'a, button, [data-cursor="hover"], input, textarea'
-      );
-      const next = Boolean(interactive);
-      if (next !== hovering) {
-        hovering = next;
-        inner.style.setProperty("--scale", next ? "1.9" : "1");
-        inner.style.setProperty("--op", next ? "1" : "0.85");
-      }
     };
 
     const onLeave = () => {
@@ -78,17 +69,7 @@ export function Cursor() {
           willChange: "transform",
         }}
       >
-        <div
-          ref={scaleRef}
-          style={{
-            position: "absolute",
-            inset: 0,
-            transform: "scale(var(--scale, 1))",
-            opacity: "var(--op, 0.85)" as unknown as number,
-            transition:
-              "transform var(--dur-med) var(--ease-out), opacity var(--dur-med) var(--ease-out)",
-          }}
-        >
+        <div style={{ position: "absolute", inset: 0, opacity: 0.9 }}>
           {/* horizontal + vertical hairlines forming the crosshair */}
           <span style={{ ...line, top: "50%", left: 0, width: "100%", height: 1, transform: "translateY(-50%)" }} />
           <span style={{ ...line, left: "50%", top: 0, height: "100%", width: 1, transform: "translateX(-50%)" }} />

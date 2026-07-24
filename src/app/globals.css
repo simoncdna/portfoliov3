@@ -88,10 +88,12 @@ body {
   overflow-x: hidden;
 }
 
-/* Hide native cursor when custom cursor is active (pointer devices only) */
-@media (hover: hover) and (pointer: fine) {
-  body {
-    cursor: none;
+/* Hide the native cursor everywhere (incl. links/buttons that force a pointer)
+   while the custom crosshair is active — fine-pointer + motion-allowed only. */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  body,
+  body * {
+    cursor: none !important;
   }
 }
 
