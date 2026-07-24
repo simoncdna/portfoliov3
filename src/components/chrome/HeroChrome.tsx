@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useControls, folder, Leva } from "leva";
 import { ChromeMount } from "./ChromeMount";
+import type { HdriPreset } from "./ChromeCanvas";
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -16,7 +17,24 @@ export function HeroChrome() {
   useEffect(() => setMounted(true), []);
 
   const c = useControls("Chrome blob", {
-    envMode: { value: "studio", options: ["studio", "lights"] },
+    envMode: { value: "studio", options: ["studio", "clean"] },
+    hdriPreset: {
+      value: "studio",
+      options: [
+        "studio",
+        "city",
+        "apartment",
+        "lobby",
+        "warehouse",
+        "dawn",
+        "sunset",
+        "park",
+        "forest",
+        "night",
+      ],
+      label: "hdri",
+    },
+    envRotationY: { value: 2.4, min: 0, max: 6.28, step: 0.05, label: "env rotation" },
     geometry: { value: "torusKnot", options: ["torusKnot", "glb"] },
     modelUrl: { value: "/models/chrome-blob.glb", label: "model (glb/fbx)" },
     Layout: folder({
@@ -80,7 +98,9 @@ export function HeroChrome() {
             transform: `translate(${c.offsetX}%, ${c.offsetY}%)`,
           }}
           glow={0.3}
-          envMode={c.envMode as "studio" | "lights"}
+          envMode={c.envMode as "clean" | "studio"}
+          hdriPreset={c.hdriPreset as HdriPreset}
+          envRotationY={c.envRotationY}
           geometry={c.geometry as "torusKnot" | "glb"}
           glbUrl={c.modelUrl}
           color={c.color}

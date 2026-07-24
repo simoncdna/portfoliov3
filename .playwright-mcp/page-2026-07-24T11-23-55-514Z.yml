@@ -1,0 +1,178 @@
+- generic [active] [ref=f73e1]:
+  - generic [ref=f73e2]:
+    - heading "⚠️ Do not enter passwords or personal information on this page. ⚠️" [level=1] [ref=f73e3]
+    - text: This is a code demo posted by a web developer on
+    - link "CodePen" [ref=f73e4] [cursor=pointer]:
+      - /url: https://codepen.io
+    - text: . A referer from CodePen is required to render this page view, and your browser is not sending one (
+    - link "more details" [ref=f73e5] [cursor=pointer]:
+      - /url: https://blog.codepen.io/2017/10/05/regarding-referer-headers/
+    - text: ).
+  - main [ref=f73e6]:
+    - iframe [ref=f73e7]:
+      - generic [ref=f74e3]:
+        - list [ref=f74e5]:
+          - listitem [ref=f74e6]:
+            - list [ref=f74e8]:
+              - listitem [ref=f74e9] [cursor=pointer]: General
+              - listitem:
+                - generic:
+                  - generic [ref=f74e10] [cursor=pointer]: HDR
+                  - checkbox [checked] [ref=f74e12] [cursor=pointer]
+              - listitem:
+                - generic:
+                  - generic [ref=f74e13]: Camera Distance
+                  - textbox [ref=f74e15]: "4.8"
+          - listitem [ref=f74e18]:
+            - list [ref=f74e20]:
+              - listitem [ref=f74e21] [cursor=pointer]: Blob Material
+              - listitem:
+                - generic:
+                  - generic [ref=f74e22] [cursor=pointer]: Wireframe
+                  - checkbox [ref=f74e24] [cursor=pointer]
+              - listitem:
+                - generic:
+                  - generic [ref=f74e25] [cursor=pointer]: Flat Shading
+                  - checkbox [ref=f74e27] [cursor=pointer]
+              - listitem:
+                - generic:
+                  - generic [ref=f74e28]: Roughness
+                  - textbox [ref=f74e30]: "0.25"
+              - listitem:
+                - generic:
+                  - generic [ref=f74e33]: Metalness
+                  - textbox [ref=f74e35]: "0.75"
+              - listitem:
+                - generic:
+                  - generic [ref=f74e38]: Color
+                  - textbox [ref=f74e40]: "#dfc5f7"
+          - listitem [ref=f74e41]:
+            - list [ref=f74e43]:
+              - listitem [ref=f74e44] [cursor=pointer]: Blob Geometry
+              - listitem:
+                - generic:
+                  - generic [ref=f74e45]: Segments
+                  - textbox [ref=f74e47]: "256"
+          - listitem [ref=f74e50]:
+            - list [ref=f74e52]:
+              - listitem [ref=f74e53] [cursor=pointer]: Lighting
+              - listitem:
+                - generic:
+                  - list:
+                    - listitem: Point Light 1
+                    - listitem:
+                      - generic:
+                        - list:
+                          - listitem: Position
+                          - listitem:
+                            - generic:
+                              - generic [ref=f74e54]: X
+                              - textbox [ref=f74e56]: "0"
+                          - listitem:
+                            - generic:
+                              - generic [ref=f74e59]: "Y"
+                              - textbox [ref=f74e61]: "0"
+                          - listitem:
+                            - generic:
+                              - generic [ref=f74e64]: Z
+                              - textbox [ref=f74e66]: "15"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e69]: Color
+                        - textbox [ref=f74e71]: "#ffa2a2"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e72]: Intensity
+                        - textbox [ref=f74e74]: "3"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e77]: Distance
+                        - textbox [ref=f74e79]: "30"
+              - listitem:
+                - generic:
+                  - list:
+                    - listitem: Point Light 2
+                    - listitem:
+                      - generic:
+                        - list:
+                          - listitem: Position
+                          - listitem:
+                            - generic:
+                              - generic [ref=f74e82]: X
+                              - textbox [ref=f74e84]: "0"
+                          - listitem:
+                            - generic:
+                              - generic [ref=f74e87]: "Y"
+                              - textbox [ref=f74e89]: "0"
+                          - listitem:
+                            - generic:
+                              - generic [ref=f74e92]: Z
+                              - textbox [ref=f74e94]: "-15"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e97]: Color
+                        - textbox [ref=f74e99]: "#08088e"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e100]: Intensity
+                        - textbox [ref=f74e102]: "3"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e105]: Distance
+                        - textbox [ref=f74e107]: "86"
+              - listitem:
+                - generic:
+                  - list:
+                    - listitem: Ambient Light
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e110]: Color
+                        - textbox [ref=f74e112]: "#ffffff"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e113]: Intensity
+                        - textbox [ref=f74e115]: "0"
+          - listitem [ref=f74e117]:
+            - list [ref=f74e119]:
+              - listitem [ref=f74e120] [cursor=pointer]: Noise
+              - listitem:
+                - generic:
+                  - list:
+                    - listitem: Velocity
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e121]: X
+                        - textbox [ref=f74e123]: "0"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e126]: "Y"
+                        - textbox [ref=f74e128]: "-1"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e131]: Z
+                        - textbox [ref=f74e133]: "1"
+              - listitem:
+                - generic:
+                  - list:
+                    - listitem: Distortion
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e136]: X
+                        - textbox [ref=f74e138]: "1.5"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e141]: "Y"
+                        - textbox [ref=f74e143]: "0.8"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f74e146]: Z
+                        - textbox [ref=f74e148]: "1.1"
+              - listitem:
+                - generic:
+                  - generic [ref=f74e151] [cursor=pointer]: Perlin / Simplex
+                  - checkbox [checked] [ref=f74e153] [cursor=pointer]
+              - listitem:
+                - generic:
+                  - generic [ref=f74e154]: Roughness
+                  - textbox [ref=f74e156]: "2"
+        - generic [ref=f74e159] [cursor=pointer]: Close Controls

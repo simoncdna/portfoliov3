@@ -7,70 +7,76 @@ import { ChromeBlob } from "./ChromeBlob";
 import type { BlobShape } from "./ChromeBlob";
 
 /**
- * Dark "lights" rig (no studio wash) — a near-black environment with a few
- * bright light bars/points that the mirror metal reflects as sharp streaks and
- * hotspots on a dark body. The dramatic, high-contrast chrome look.
+ * Clean procedural environment — a smooth dark→light gradient plus ONE big soft
+ * key light. No photographed studio, so no tripods / light stands reflected in
+ * the metal: just a clean silver gradient and a single dominant highlight.
  * Fully self-contained (no external HDRI).
  */
-function ChromeLights({ intensity = 1.2 }: { intensity?: number }) {
+function ChromeClean({ intensity = 1.2 }: { intensity?: number }) {
   const k = intensity;
   return (
-    <Environment resolution={256}>
-      {/* dark-grey base so unlit areas read as silver-grey, not pure black */}
-      <color attach="background" args={["#191a1d"]} />
-      {/* broad soft fill — the base sheen across the whole body */}
+    <Environment resolution={512}>
+      {/* dark base → the lower/darker half of the vertical gradient */}
+      <color attach="background" args={["#0e0f13"]} />
+      {/* ceiling wash: smooth bright-top → dark-bottom silver gradient */}
       <Lightformer
         form="rect"
-        intensity={1.1 * k}
-        color="#c8ccd6"
-        position={[0, 1, 7]}
-        scale={[16, 12, 1]}
+        intensity={1.3 * k}
+        color="#eef0f6"
+        position={[0, 7, 1]}
+        rotation={[Math.PI / 2, 0, 0]}
+        scale={[28, 28, 1]}
       />
-      {/* KEY reflection — the big bright soft box that sweeps across the metal
-          (the main light you actually see mirrored). */}
+      {/* two big soft key boxes (angled) — the rich silver body + main highlights,
+          large & soft so they read as clean gradients, not hard shapes */}
       <Lightformer
         form="rect"
-        intensity={4.5 * k}
+        intensity={3 * k}
         color="#ffffff"
-        position={[-1.6, 2.4, 5]}
-        rotation={[0.1, 0.2, 0]}
-        scale={[5.5, 4.5, 1]}
-      />
-      {/* long specular streaks */}
-      <Lightformer
-        form="rect"
-        intensity={6 * k}
-        color="#ffffff"
-        position={[-3.5, 2, 3]}
-        rotation={[0, Math.PI / 3, 0]}
-        scale={[0.5, 7, 1]}
+        position={[-3, 2, 5]}
+        rotation={[0, 0.5, 0]}
+        scale={[5, 6, 1]}
       />
       <Lightformer
         form="rect"
-        intensity={5 * k}
-        color="#dfe8ff"
-        position={[3.6, -1, 3]}
-        rotation={[0, -Math.PI / 3, 0]}
-        scale={[0.5, 7, 1]}
+        intensity={2.2 * k}
+        color="#eaf0ff"
+        position={[3.5, 0.5, 5]}
+        rotation={[0, -0.5, 0]}
+        scale={[4, 6, 1]}
       />
-      {/* bright key hotspot + cool accent */}
+      {/* broad cool floor fill → graded horizon under the form */}
       <Lightformer
-        form="circle"
-        intensity={8 * k}
-        color="#ffffff"
-        position={[1, 3, 4]}
-        scale={[1.4, 1.4, 1]}
+        form="rect"
+        intensity={0.6 * k}
+        color="#aab0c0"
+        position={[0, -5, 4]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        scale={[22, 22, 1]}
       />
+      {/* subtle back rim for depth */}
       <Lightformer
-        form="circle"
-        intensity={3.5 * k}
-        color="#9fc0ff"
-        position={[-4, -2.5, 2]}
-        scale={[1.2, 1.2, 1]}
+        form="rect"
+        intensity={1.2 * k}
+        color="#c6cede"
+        position={[0, 1, -6]}
+        scale={[12, 12, 1]}
       />
     </Environment>
   );
 }
+
+export type HdriPreset =
+  | "apartment"
+  | "city"
+  | "dawn"
+  | "forest"
+  | "lobby"
+  | "night"
+  | "park"
+  | "studio"
+  | "sunset"
+  | "warehouse";
 
 type Vec3 = [number, number, number];
 type Lamp = { intensity: number; color: string; position: Vec3 };
@@ -94,14 +100,20 @@ type Props = Partial<BlobShape> & {
   /** softly follow global scroll for spin intensity */
   reactToScroll?: boolean;
   lights?: LightsConfig;
-  /** "studio" = rich HDRI reflections; "lights" = dark custom rig */
-  envMode?: "studio" | "lights";
+  /** "studio" = rich HDRI reflections; "clean" = procedural gradient studio */
+  envMode?: "clean" | "studio";
+  /** which drei HDRI preset to reflect (studio mode) */
+  hdriPreset?: HdriPreset;
+  /** rotate the HDRI to spin unwanted features out of view (radians) */
+  envRotationY?: number;
 };
 
 export function ChromeCanvas({
   reactToScroll = true,
   lights = DEFAULT_LIGHTS,
   envMode = "studio",
+  hdriPreset = "studio",
+  envRotationY = 2.4,
   ...shape
 }: Props) {
   const scroll = useRef(0);
@@ -187,9 +199,13 @@ export function ChromeCanvas({
             distance={40}
           />
           {envMode === "studio" ? (
-            <Environment preset="studio" environmentIntensity={lights.streaks * 2.4} />
+            <Environment
+              preset={hdriPreset}
+              environmentIntensity={lights.streaks * 2.4}
+              environmentRotation={[0, envRotationY, 0]}
+            />
           ) : (
-            <ChromeLights intensity={lights.streaks} />
+            <ChromeClean intensity={lights.streaks} />
           )}
           <ChromeBlob
             scroll={scroll}

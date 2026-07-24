@@ -1,0 +1,192 @@
+- generic [active] [ref=f61e1]:
+  - banner [ref=f61e2]:
+    - generic [ref=f61e3]:
+      - link "CodePen Home" [ref=f61e5] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f61e10]:
+        - generic [ref=f61e11]:
+          - link "Tibix" [ref=f61e12] [cursor=pointer]:
+            - /url: /Tibixx
+          - link "PRO" [ref=f61e13] [cursor=pointer]:
+            - /url: https://codepen.io/pro
+          - button "Follow" [ref=f61e17] [cursor=pointer]
+        - heading "Energy Blob" [level=1] [ref=f61e18]
+      - button "Love" [ref=f61e20] [cursor=pointer]
+      - link "View Source Code" [ref=f61e22] [cursor=pointer]:
+        - /url: https://codepen.io/Tibixx/pen/poxBzYJ
+      - link "Sign Up" [ref=f61e24] [cursor=pointer]:
+        - /url: /accounts/signup/user/free
+      - link "Log In" [ref=f61e25] [cursor=pointer]:
+        - /url: /login
+  - main [ref=f61e26]:
+    - iframe [ref=f61e27]:
+      - generic [ref=f62e3]:
+        - list [ref=f62e5]:
+          - listitem [ref=f62e6]:
+            - list [ref=f62e8]:
+              - listitem [ref=f62e9] [cursor=pointer]: General
+              - listitem:
+                - generic:
+                  - generic [ref=f62e10] [cursor=pointer]: HDR
+                  - checkbox [checked] [ref=f62e12] [cursor=pointer]
+              - listitem:
+                - generic:
+                  - generic [ref=f62e13]: Camera Distance
+                  - textbox [ref=f62e15]: "4.8"
+          - listitem [ref=f62e18]:
+            - list [ref=f62e20]:
+              - listitem [ref=f62e21] [cursor=pointer]: Blob Material
+              - listitem:
+                - generic:
+                  - generic [ref=f62e22] [cursor=pointer]: Wireframe
+                  - checkbox [ref=f62e24] [cursor=pointer]
+              - listitem:
+                - generic:
+                  - generic [ref=f62e25] [cursor=pointer]: Flat Shading
+                  - checkbox [ref=f62e27] [cursor=pointer]
+              - listitem:
+                - generic:
+                  - generic [ref=f62e28]: Roughness
+                  - textbox [ref=f62e30]: "0.25"
+              - listitem:
+                - generic:
+                  - generic [ref=f62e33]: Metalness
+                  - textbox [ref=f62e35]: "0.75"
+              - listitem:
+                - generic:
+                  - generic [ref=f62e38]: Color
+                  - textbox [ref=f62e40]: "#dfc5f7"
+          - listitem [ref=f62e41]:
+            - list [ref=f62e43]:
+              - listitem [ref=f62e44] [cursor=pointer]: Blob Geometry
+              - listitem:
+                - generic:
+                  - generic [ref=f62e45]: Segments
+                  - textbox [ref=f62e47]: "256"
+          - listitem [ref=f62e50]:
+            - list [ref=f62e52]:
+              - listitem [ref=f62e53] [cursor=pointer]: Lighting
+              - listitem:
+                - generic:
+                  - list:
+                    - listitem: Point Light 1
+                    - listitem:
+                      - generic:
+                        - list:
+                          - listitem: Position
+                          - listitem:
+                            - generic:
+                              - generic [ref=f62e54]: X
+                              - textbox [ref=f62e56]: "0"
+                          - listitem:
+                            - generic:
+                              - generic [ref=f62e59]: "Y"
+                              - textbox [ref=f62e61]: "0"
+                          - listitem:
+                            - generic:
+                              - generic [ref=f62e64]: Z
+                              - textbox [ref=f62e66]: "15"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e69]: Color
+                        - textbox [ref=f62e71]: "#ffa2a2"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e72]: Intensity
+                        - textbox [ref=f62e74]: "3"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e77]: Distance
+                        - textbox [ref=f62e79]: "30"
+              - listitem:
+                - generic:
+                  - list:
+                    - listitem: Point Light 2
+                    - listitem:
+                      - generic:
+                        - list:
+                          - listitem: Position
+                          - listitem:
+                            - generic:
+                              - generic [ref=f62e82]: X
+                              - textbox [ref=f62e84]: "0"
+                          - listitem:
+                            - generic:
+                              - generic [ref=f62e87]: "Y"
+                              - textbox [ref=f62e89]: "0"
+                          - listitem:
+                            - generic:
+                              - generic [ref=f62e92]: Z
+                              - textbox [ref=f62e94]: "-15"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e97]: Color
+                        - textbox [ref=f62e99]: "#08088e"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e100]: Intensity
+                        - textbox [ref=f62e102]: "3"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e105]: Distance
+                        - textbox [ref=f62e107]: "86"
+              - listitem:
+                - generic:
+                  - list:
+                    - listitem: Ambient Light
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e110]: Color
+                        - textbox [ref=f62e112]: "#ffffff"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e113]: Intensity
+                        - textbox [ref=f62e115]: "0"
+          - listitem [ref=f62e117]:
+            - list [ref=f62e119]:
+              - listitem [ref=f62e120] [cursor=pointer]: Noise
+              - listitem:
+                - generic:
+                  - list:
+                    - listitem: Velocity
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e121]: X
+                        - textbox [ref=f62e123]: "0"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e126]: "Y"
+                        - textbox [ref=f62e128]: "-1"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e131]: Z
+                        - textbox [ref=f62e133]: "1"
+              - listitem:
+                - generic:
+                  - list:
+                    - listitem: Distortion
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e136]: X
+                        - textbox [ref=f62e138]: "1.5"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e141]: "Y"
+                        - textbox [ref=f62e143]: "0.8"
+                    - listitem:
+                      - generic:
+                        - generic [ref=f62e146]: Z
+                        - textbox [ref=f62e148]: "1.1"
+              - listitem:
+                - generic:
+                  - generic [ref=f62e151] [cursor=pointer]: Perlin / Simplex
+                  - checkbox [checked] [ref=f62e153] [cursor=pointer]
+              - listitem:
+                - generic:
+                  - generic [ref=f62e154]: Roughness
+                  - textbox [ref=f62e156]: "2"
+        - generic [ref=f62e159] [cursor=pointer]: Close Controls
+  - generic [ref=f61e28]:
+    - insertion
+    - button "Refresh Ad" [ref=f61e29] [cursor=pointer]
+    - button "Close Ad" [ref=f61e32] [cursor=pointer]
