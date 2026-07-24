@@ -1,0 +1,343 @@
+- generic [active] [ref=f52e1]:
+  - link "Skip to work" [ref=f52e2] [cursor=pointer]:
+    - /url: "#work"
+  - banner [ref=f52e3]:
+    - navigation [ref=f52e4]:
+      - link "Back to top" [ref=f52e5] [cursor=pointer]:
+        - /url: "#top"
+        - generic [ref=f52e6]:
+          - generic [ref=f52e7]: Simon Cardona
+          - generic [ref=f52e8]: // Frontend Developer
+      - generic [ref=f52e9]:
+        - list [ref=f52e10]:
+          - listitem [ref=f52e11]:
+            - link "About" [ref=f52e12] [cursor=pointer]:
+              - /url: "#about"
+          - listitem [ref=f52e13]:
+            - link "Work" [ref=f52e14] [cursor=pointer]:
+              - /url: "#work"
+          - listitem [ref=f52e15]:
+            - link "Contact" [ref=f52e16] [cursor=pointer]:
+              - /url: "#contact"
+        - generic [ref=f52e17]: Available
+  - main [ref=f52e22]:
+    - generic [ref=f52e23]:
+      - generic [ref=f52e24]:
+        - generic [ref=f52e25]: Blob (dev)
+        - textbox "[Open filter with CMD+SHIFT+L]" [ref=f52e34]
+        - generic:
+          - generic:
+            - generic:
+              - generic: Chrome blob
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic "geometry"
+                        - generic "Click to copy geometry value"
+                      - generic:
+                        - combobox "geometry":
+                          - option "torusKnot" [selected]
+                          - option "glb"
+                        - generic: torusKnot
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic "model (glb/fbx)"
+                        - generic "Click to copy model (glb/fbx) value"
+                      - generic:
+                        - textbox "model (glb/fbx)": /models/chrome-blob.glb
+                  - generic:
+                    - generic: Layout
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "zIndex"
+                              - generic "Click to copy zIndex value"
+                            - generic:
+                              - generic:
+                                - textbox "zIndex": "10"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "offset X (%)"
+                              - generic "Click to copy offset X (%) value"
+                            - generic:
+                              - generic:
+                                - textbox "offset X (%)": "0.0"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "offset Y (%)"
+                              - generic "Click to copy offset Y (%) value"
+                            - generic:
+                              - generic:
+                                - textbox "offset Y (%)": "0.0"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "size (vmin)"
+                              - generic "Click to copy size (vmin) value"
+                            - generic:
+                              - generic:
+                                - textbox "size (vmin)": "108"
+                  - generic:
+                    - generic: Material
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "color"
+                              - generic "Click to copy color value"
+                            - generic:
+                              - generic:
+                                - textbox "color": "#cbccca"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "roughness"
+                              - generic "Click to copy roughness value"
+                            - generic:
+                              - generic:
+                                - textbox "roughness": "0.12"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "envMapIntensity"
+                              - generic "Click to copy envMapIntensity value"
+                            - generic:
+                              - generic:
+                                - textbox "envMapIntensity": "1.10"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "light intensity"
+                              - generic "Click to copy light intensity value"
+                            - generic:
+                              - generic:
+                                - textbox "light intensity": "1.20"
+                  - generic:
+                    - generic: Shape
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "distort"
+                              - generic "Click to copy distort value"
+                            - generic:
+                              - generic:
+                                - textbox "distort": "0.42"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "freq"
+                              - generic "Click to copy freq value"
+                            - generic:
+                              - generic:
+                                - textbox "freq": "0.50"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "speed"
+                              - generic "Click to copy speed value"
+                            - generic:
+                              - generic:
+                                - textbox "speed": "0.50"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "scale"
+                              - generic "Click to copy scale value"
+                            - generic:
+                              - generic:
+                                - textbox "scale": "2.00"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic "pointerStrength"
+                              - generic "Click to copy pointerStrength value"
+                            - generic:
+                              - generic:
+                                - textbox "pointerStrength": "0.24"
+      - heading "Simon Cardona — Frontend Developer" [level=1] [ref=f52e35]
+      - generic: Simon Cardona //
+      - generic [ref=f52e36]:
+        - generic [ref=f52e37]: "[ PORTFOLIO ] — 20.24 — SCRAPBOOK"
+        - generic [ref=f52e39]: BASED IN FRANCE
+      - generic [ref=f52e45]:
+        - paragraph [ref=f52e47]: Frontend developer based in France.Turning ideas from businesses & startups into high-performing web applications.
+        - link "Scroll to selected work" [ref=f52e50] [cursor=pointer]:
+          - /url: "#work"
+          - generic [ref=f52e51]: Scroll
+        - generic [ref=f52e54]:
+          - generic [ref=f52e55]: Edition
+          - text: N°003
+    - generic [ref=f52e75]:
+      - generic [ref=f52e76]:
+        - generic [ref=f52e77]: About
+        - generic [ref=f52e80]: "01"
+      - separator [ref=f52e81]
+      - generic [ref=f52e82]:
+        - heading "Crafting modern, responsive interfaces." [level=2] [ref=f52e86]: Crafting modern,responsiveinterfaces.
+        - generic [ref=f52e87]:
+          - paragraph [ref=f52e89]: Frontend developer based in France.
+          - paragraph [ref=f52e91]: Passionate about crafting modern and responsive user interfaces, I bring technical expertise and a creative approach to each project.
+          - paragraph [ref=f52e93]: With years of experience, I collaborate with businesses and startups to turn their ideas into high-performing, user-friendly web applications.
+      - generic [ref=f52e94]:
+        - generic [ref=f52e95]:
+          - generic [ref=f52e96]: Languages & Frameworks
+          - list [ref=f52e97]:
+            - listitem [ref=f52e98]:
+              - generic [ref=f52e99]: JavaScript
+              - generic [ref=f52e100]: "01"
+            - listitem [ref=f52e101]:
+              - generic [ref=f52e102]: TypeScript
+              - generic [ref=f52e103]: "02"
+            - listitem [ref=f52e104]:
+              - generic [ref=f52e105]: React.js
+              - generic [ref=f52e106]: "03"
+            - listitem [ref=f52e107]:
+              - generic [ref=f52e108]: Next.js
+              - generic [ref=f52e109]: "04"
+            - listitem [ref=f52e110]:
+              - generic [ref=f52e111]: Vue.js
+              - generic [ref=f52e112]: "05"
+            - listitem [ref=f52e113]:
+              - generic [ref=f52e114]: Nuxt.js
+              - generic [ref=f52e115]: "06"
+        - generic [ref=f52e116]:
+          - generic [ref=f52e117]: Libraries & Tools
+          - generic [ref=f52e118]:
+            - generic [ref=f52e119]: Tailwind
+            - generic [ref=f52e120]: Styled-Components
+            - generic [ref=f52e121]: Zustand
+            - generic [ref=f52e122]: Zod
+            - generic [ref=f52e123]: React-Query
+            - generic [ref=f52e124]: Jest
+            - generic [ref=f52e125]: React Testing Library
+            - generic [ref=f52e126]: Git
+            - generic [ref=f52e127]: Figma
+            - generic [ref=f52e128]: Nvim
+    - generic [ref=f52e130]:
+      - generic [ref=f52e131]:
+        - generic [ref=f52e132]: Selected Work
+        - generic [ref=f52e135]: "02"
+      - heading "Around the work //" [level=2] [ref=f52e138]
+      - list [ref=f52e139]:
+        - listitem [ref=f52e140]:
+          - link "Klay — open live site in a new tab" [ref=f52e141] [cursor=pointer]:
+            - /url: https://klay-craft.netlify.app
+            - generic [ref=f52e142]:
+              - generic [ref=f52e144]:
+                - generic [ref=f52e145]: "01"
+                - generic [ref=f52e146]: Klay
+              - generic [ref=f52e149]:
+                - generic [ref=f52e150]: "2024"
+                - paragraph [ref=f52e151]: Klay merges the craft of pottery with a modern touch — selling ceramics and opening workshop registration through an accessible online platform.
+                - generic [ref=f52e152]:
+                  - generic [ref=f52e153]: Nuxt.js
+                  - generic [ref=f52e154]: TypeScript
+                  - generic [ref=f52e155]: Tailwind
+                  - generic [ref=f52e156]: Pinia
+                  - generic [ref=f52e157]: Figma
+        - listitem [ref=f52e158]:
+          - link "Forma — open live site in a new tab" [ref=f52e159] [cursor=pointer]:
+            - /url: https://forma.legal/
+            - generic [ref=f52e160]:
+              - generic [ref=f52e162]:
+                - generic [ref=f52e163]: "02"
+                - generic [ref=f52e164]: Forma
+              - generic [ref=f52e167]:
+                - generic [ref=f52e168]: May 2023 — Today
+                - paragraph [ref=f52e169]: A SaaS platform for legal and accounting professionals — client messaging, document management and activity scheduling in one workspace.
+                - generic [ref=f52e170]:
+                  - generic [ref=f52e171]: Next.js
+                  - generic [ref=f52e172]: TypeScript
+                  - generic [ref=f52e173]: Tailwind
+                  - generic [ref=f52e174]: Zustand
+                  - generic [ref=f52e175]: React-Query
+                  - generic [ref=f52e176]: Zod
+                  - generic [ref=f52e177]: React-Hook-Form
+                  - generic [ref=f52e178]: Figma
+        - listitem [ref=f52e179]:
+          - link "Crazee.B — open live site in a new tab" [ref=f52e180] [cursor=pointer]:
+            - /url: https://crazee-burger-ki3o6okfp-simoncdn.vercel.app/
+            - generic [ref=f52e181]:
+              - generic [ref=f52e183]:
+                - generic [ref=f52e184]: "03"
+                - generic [ref=f52e185]: Crazee.B
+              - generic [ref=f52e188]:
+                - generic [ref=f52e189]: Jan 2023 — May 2023
+                - paragraph [ref=f52e190]: An online restaurant ordering dashboard designed to provide a smooth and enjoyable ordering experience.
+                - generic [ref=f52e191]:
+                  - generic [ref=f52e192]: React.js
+                  - generic [ref=f52e193]: Styled-Components
+                  - generic [ref=f52e194]: Firebase
+                  - generic [ref=f52e195]: Jest
+                  - generic [ref=f52e196]: Context
+                  - generic [ref=f52e197]: Figma
+        - listitem [ref=f52e198]:
+          - link "Workshopbya — open live site in a new tab" [ref=f52e199] [cursor=pointer]:
+            - /url: https://www.workshopbya.com/
+            - generic [ref=f52e200]:
+              - generic [ref=f52e202]:
+                - generic [ref=f52e203]: "04"
+                - generic [ref=f52e204]: Workshopbya
+              - generic [ref=f52e207]:
+                - generic [ref=f52e208]: Dec 2022 — Jan 2023
+                - paragraph [ref=f52e209]: A showcase website with blog integration, highlighting the community's expertise and creative identity.
+                - generic [ref=f52e210]:
+                  - generic [ref=f52e211]: Next.js
+                  - generic [ref=f52e212]: TypeScript
+                  - generic [ref=f52e213]: Tailwind
+                  - generic [ref=f52e214]: Sanity.io
+                  - generic [ref=f52e215]: Sendgrid
+                  - generic [ref=f52e216]: Framer-Motion
+                  - generic [ref=f52e217]: Figma
+    - generic [ref=f52e219]:
+      - generic [ref=f52e220]:
+        - generic [ref=f52e221]: Contact
+        - generic [ref=f52e224]: "03"
+      - separator [ref=f52e225]
+      - paragraph [ref=f52e227]: Got a new project in mind? An opportunity?
+      - link "Email Simon Cardona" [ref=f52e231] [cursor=pointer]:
+        - /url: mailto:cdna.simon@gmail.com
+        - generic [ref=f52e232]: Let's havea chat.
+      - generic [ref=f52e233]:
+        - generic [ref=f52e234]:
+          - generic [ref=f52e235]: Direct
+          - link "cdna.simon@gmail.com" [ref=f52e236] [cursor=pointer]:
+            - /url: mailto:cdna.simon@gmail.com
+        - generic [ref=f52e238]:
+          - generic [ref=f52e239]: Elsewhere
+          - list [ref=f52e240]:
+            - listitem [ref=f52e241]:
+              - link "Email ↗" [ref=f52e242] [cursor=pointer]:
+                - /url: mailto:cdna.simon@gmail.com
+            - listitem [ref=f52e244]:
+              - link "GitHub ↗" [ref=f52e245] [cursor=pointer]:
+                - /url: https://github.com/simoncdna
+            - listitem [ref=f52e247]:
+              - link "LinkedIn ↗" [ref=f52e248] [cursor=pointer]:
+                - /url: https://www.linkedin.com/in/simon-cardona/
+  - contentinfo [ref=f52e250]:
+    - generic [ref=f52e251]:
+      - generic [ref=f52e252]: Cardona
+      - generic [ref=f52e254]:
+        - generic [ref=f52e255]:
+          - generic [ref=f52e256]: "Details:"
+          - paragraph [ref=f52e257]: Frontend Developer, based in France. Available for freelance and full-time opportunities.
+        - link "Back to top" [ref=f52e264] [cursor=pointer]:
+          - /url: "#top"
+          - text: Back to top ↑
+      - separator [ref=f52e283]
+      - generic [ref=f52e284]:
+        - generic [ref=f52e285]: © 2026 Simon Cardona — All rights reserved
+        - generic [ref=f52e286]: 20.24 — SCRAPBOOK / N°003
+  - button "Open Next.js Dev Tools" [ref=f52e292] [cursor=pointer]
+  - alert [ref=f52e296]

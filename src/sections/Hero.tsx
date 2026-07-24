@@ -1,4 +1,4 @@
-import { ChromeMount } from "@/components/chrome/ChromeMount";
+import { HeroChrome } from "@/components/chrome/HeroChrome";
 import { Reveal } from "@/components/Reveal";
 import { Barcode, Globe } from "@/components/Bits";
 import { site } from "@/data/site";
@@ -9,19 +9,8 @@ export function Hero() {
       id="top"
       className="relative flex min-h-[100svh] flex-col justify-between overflow-hidden pt-28 pb-8"
     >
-      {/* Chrome centerpiece — the foreground hero object */}
-      <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-        <ChromeMount
-          style={{
-            width: "min(108vw, 104vh, 1180px)",
-            height: "min(108vw, 104vh, 1180px)",
-          }}
-          distort={0.3}
-          speed={0.5}
-          scale={1.45}
-          glow={0.3}
-        />
-      </div>
+      {/* Chrome centerpiece — the foreground hero object (+ dev controls) */}
+      <HeroChrome />
 
       {/* SEO / a11y heading (visually the chrome form carries the hero) */}
       <h1 className="sr-only">

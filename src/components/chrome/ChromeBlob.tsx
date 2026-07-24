@@ -1,10 +1,14 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { Component, Suspense, useMemo, useRef } from "react";
+import type { ReactNode } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Vector3, Quaternion } from "three";
+import { useGLTF, useFBX } from "@react-three/drei";
+import { Vector3, Quaternion, Color } from "three";
 import type {
+  BufferGeometry,
   Group,
+  Mesh,
   MeshStandardMaterial,
   WebGLProgramParametersWithUniforms,
 } from "three";
@@ -16,15 +20,25 @@ type ClickRef = React.MutableRefObject<{
   ripple: number;
 }>;
 
+export type BlobShape = {
+  distort: number;
+  speed: number;
+  freq: number;
+  scale: number;
+  roughness: number;
+  envMapIntensity: number;
+  color: string;
+  pointerStrength: number;
+  geometry: "torusKnot" | "glb";
+  glbUrl?: string;
+};
+
 type Props = {
   scroll: React.MutableRefObject<number>;
   pointer: Vec2Ref;
   click: ClickRef;
   reduced: boolean;
-  distort?: number;
-  speed?: number;
-  scale?: number;
-};
+} & Partial<BlobShape>;
 
 /* GLSL injected into MeshStandardMaterial's vertex program. Keeps PBR chrome
    reflections (envMap) while displacing the surface with flowing simplex noise,
@@ -92,11 +106,27 @@ vec3 vDispPos;
 
 float getDisp(vec3 pos, vec3 nrm){
   vec3 sp = pos * uFreq;
-  float n  = snoise(sp + vec3(0.0, uTime*uSpeed, uTime*uSpeed*0.5));
-  float n2 = snoise(sp*1.5 - vec3(uTime*uSpeed*0.8));
-  float d = (n*0.9 + n2*0.1) * uDistort;
+  float ft = uTime * uSpeed;
+
+  // domain warp: displace the sampling space with noise so the folds flow and
+  // curl into each other — the "melted metal" / metaball read (vs. a potato).
+  vec3 w = vec3(
+    snoise(sp + vec3(0.0, ft * 0.6, 0.0)),
+    snoise(sp + vec3(3.1, 1.7, ft * 0.4)),
+    snoise(sp + vec3(9.2, 5.3, ft * 0.5))
+  );
+  vec3 wp = sp + w * 0.9;
+
+  // FBM: big lobes + medium folds (kept smooth — no fine cauliflower)
+  float base   = snoise(wp);
+  float detail = snoise(wp * 2.1 + w * 0.4);
+  float d = (base * 0.82 + detail * 0.18) * uDistort;
+
+  // cursor bulge
   float aim = max(dot(normalize(nrm), uPointerDir), 0.0);
   d += pow(aim, 3.0) * uPointerStrength;
+
+  // travelling click ripple
   if(uClickStrength > 0.001){
     float ang = acos(clamp(dot(normalize(nrm), uClickDir), -1.0, 1.0));
     float band = exp(-pow(ang*3.0 - uRipple, 2.0) * 2.5);
@@ -133,17 +163,26 @@ export function ChromeBlob({
   distort = 0.3,
   speed = 0.5,
   scale = 1.7,
+  freq = 0.4,
+  roughness = 0.12,
+  envMapIntensity = 1.05,
+  color = "#cbccca",
+  pointerStrength = 0.24,
+  geometry = "torusKnot",
+  glbUrl,
 }: Props) {
   const group = useRef<Group>(null);
   const mat = useRef<MeshStandardMaterial>(null);
   const rot = useRef({ x: 0, y: 0 });
   const kick = useRef(0);
+  const lastColor = useRef("");
 
+  // uniforms object is stable; values are mutated live in useFrame
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
       uDistort: { value: distort },
-      uFreq: { value: 0.4 },
+      uFreq: { value: freq },
       uSpeed: { value: speed },
       uPointerDir: { value: new Vector3(0, 0, 1) },
       uPointerStrength: { value: 0 },
@@ -151,7 +190,8 @@ export function ChromeBlob({
       uRipple: { value: 0 },
       uClickStrength: { value: 0 },
     }),
-    [distort, speed]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
   );
 
   // scratch objects (never allocate in the frame loop)
@@ -176,12 +216,25 @@ export function ChromeBlob({
     if (!g) return;
     const t = state.clock.elapsedTime;
     uniforms.uTime.value = t;
+    uniforms.uFreq.value = freq;
+    uniforms.uSpeed.value = speed;
+
+    // live material tuning (from dev controls)
+    if (mat.current) {
+      mat.current.envMapIntensity = envMapIntensity;
+      if (color !== lastColor.current) {
+        mat.current.color = new Color(color);
+        lastColor.current = color;
+      }
+    }
 
     if (reduced) {
       g.rotation.set(0.2, 0.7, -0.15);
-      uniforms.uDistort.value = 0.26;
+      uniforms.uDistort.value = distort;
       uniforms.uPointerStrength.value = 0;
       uniforms.uClickStrength.value = 0;
+      g.scale.setScalar(scale);
+      if (mat.current) mat.current.roughness = roughness;
       return;
     }
 
@@ -202,7 +255,8 @@ export function ChromeBlob({
     scratch.op.copy(scratch.wp).applyQuaternion(scratch.q);
     uniforms.uPointerDir.value.copy(scratch.op);
     uniforms.uPointerStrength.value +=
-      (0.24 - uniforms.uPointerStrength.value) * (1 - Math.pow(0.02, delta));
+      (pointerStrength - uniforms.uPointerStrength.value) *
+      (1 - Math.pow(0.02, delta));
 
     // ---- click ripple + scale kick ----
     const c = click.current;
@@ -227,23 +281,107 @@ export function ChromeBlob({
     const sc = scale * (1 + kick.current * 0.06);
     g.scale.setScalar(sc);
     uniforms.uDistort.value = distort + s * 0.1 + kick.current * 0.15;
-    // brief sharpen (spec flash) on click, resting at 0.06
-    if (mat.current) mat.current.roughness = 0.12 - kick.current * 0.05;
+    // brief sharpen (spec flash) on click
+    if (mat.current)
+      mat.current.roughness = Math.max(0.01, roughness - kick.current * 0.05);
   });
+
+  // one shared material element for whichever geometry is active
+  const material = (
+    <meshStandardMaterial
+      ref={mat}
+      metalness={1}
+      roughness={roughness}
+      envMapIntensity={envMapIntensity}
+      color={color}
+      onBeforeCompile={onBeforeCompile}
+    />
+  );
+
+  const knot = (
+    <mesh frustumCulled={false}>
+      {/* single dense sphere — the liquid folds come from the displacement */}
+      <icosahedronGeometry args={[1, 64]} />
+      {material}
+    </mesh>
+  );
 
   return (
     <group ref={group} scale={scale}>
-      <mesh frustumCulled={false}>
-        <torusKnotGeometry args={[0.78, 0.68, 360, 52, 2, 3]} />
-        <meshStandardMaterial
-          ref={mat}
-          metalness={1}
-          roughness={0.12}
-          envMapIntensity={1.05}
-          color="#cbccca"
-          onBeforeCompile={onBeforeCompile}
-        />
-      </mesh>
+      {geometry === "glb" && glbUrl ? (
+        <GlbErrorBoundary fallback={knot}>
+          <Suspense fallback={knot}>
+            <ModelGeometry url={glbUrl}>{material}</ModelGeometry>
+          </Suspense>
+        </GlbErrorBoundary>
+      ) : (
+        knot
+      )}
     </group>
   );
+}
+
+/** Normalise any object3D's first mesh geometry to unit radius. */
+function normalizeGeometry(root: {
+  traverse: (cb: (o: object) => void) => void;
+}): BufferGeometry | null {
+  let found: BufferGeometry | null = null;
+  root.traverse((o) => {
+    const m = o as Mesh;
+    if (!found && m.isMesh && m.geometry) found = m.geometry as BufferGeometry;
+  });
+  if (!found) return null;
+  const g = (found as BufferGeometry).clone();
+  g.center();
+  g.computeBoundingSphere();
+  const r = g.boundingSphere?.radius || 1;
+  g.scale(1 / r, 1 / r, 1 / r);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Dispatch by extension: .fbx → FBXLoader (like the CodePen), else glTF. */
+function ModelGeometry({ url, children }: { url: string; children: ReactNode }) {
+  const isFbx = /\.fbx(\?|$)/i.test(url);
+  return isFbx ? (
+    <FbxGeometry url={url}>{children}</FbxGeometry>
+  ) : (
+    <GltfGeometry url={url}>{children}</GltfGeometry>
+  );
+}
+
+function GltfGeometry({ url, children }: { url: string; children: ReactNode }) {
+  const { scene } = useGLTF(url);
+  const geo = useMemo(() => normalizeGeometry(scene), [scene]);
+  if (!geo) return null;
+  return (
+    <mesh geometry={geo} frustumCulled={false}>
+      {children}
+    </mesh>
+  );
+}
+
+function FbxGeometry({ url, children }: { url: string; children: ReactNode }) {
+  const fbx = useFBX(url);
+  const geo = useMemo(() => normalizeGeometry(fbx), [fbx]);
+  if (!geo) return null;
+  return (
+    <mesh geometry={geo} frustumCulled={false}>
+      {children}
+    </mesh>
+  );
+}
+
+/** Falls back to the procedural knot if the .glb is missing or fails to load. */
+class GlbErrorBoundary extends Component<
+  { fallback: ReactNode; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
 }

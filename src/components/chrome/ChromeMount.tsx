@@ -10,13 +10,15 @@ const ChromeCanvas = dynamic(
   }
 );
 
-type Props = {
+import type { BlobShape } from "./ChromeBlob";
+import type { LightsConfig } from "./ChromeCanvas";
+
+type Props = Partial<BlobShape> & {
   className?: string;
   style?: React.CSSProperties;
-  distort?: number;
-  speed?: number;
-  scale?: number;
   reactToScroll?: boolean;
+  lights?: LightsConfig;
+  envMode?: "studio" | "lights";
   /** intensity of the CSS silver halo behind the form, 0 to disable */
   glow?: number;
 };

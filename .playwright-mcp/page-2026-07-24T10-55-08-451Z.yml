@@ -1,0 +1,200 @@
+- generic [active] [ref=f54e1]:
+  - link "Skip to work" [ref=f54e2] [cursor=pointer]:
+    - /url: "#work"
+  - banner [ref=f54e3]:
+    - navigation [ref=f54e4]:
+      - link "Back to top" [ref=f54e5] [cursor=pointer]:
+        - /url: "#top"
+        - generic [ref=f54e6]:
+          - generic [ref=f54e7]: Simon Cardona
+          - generic [ref=f54e8]: // Frontend Developer
+      - generic [ref=f54e9]:
+        - list [ref=f54e10]:
+          - listitem [ref=f54e11]:
+            - link "About" [ref=f54e12] [cursor=pointer]:
+              - /url: "#about"
+          - listitem [ref=f54e13]:
+            - link "Work" [ref=f54e14] [cursor=pointer]:
+              - /url: "#work"
+          - listitem [ref=f54e15]:
+            - link "Contact" [ref=f54e16] [cursor=pointer]:
+              - /url: "#contact"
+        - generic [ref=f54e17]: Available
+  - main [ref=f54e22]:
+    - generic [ref=f54e23]:
+      - heading "Simon Cardona — Frontend Developer" [level=1] [ref=f54e24]
+      - generic: Simon Cardona //
+      - generic [ref=f54e25]:
+        - generic [ref=f54e26]: "[ PORTFOLIO ] — 20.24 — SCRAPBOOK"
+        - generic [ref=f54e28]: BASED IN FRANCE
+      - generic [ref=f54e34]:
+        - paragraph [ref=f54e36]: Frontend developer based in France.Turning ideas from businesses & startups into high-performing web applications.
+        - link "Scroll to selected work" [ref=f54e39] [cursor=pointer]:
+          - /url: "#work"
+          - generic [ref=f54e40]: Scroll
+        - generic [ref=f54e43]:
+          - generic [ref=f54e44]: Edition
+          - text: N°003
+    - generic [ref=f54e64]:
+      - generic [ref=f54e65]:
+        - generic [ref=f54e66]: About
+        - generic [ref=f54e69]: "01"
+      - separator [ref=f54e70]
+      - generic [ref=f54e71]:
+        - heading "Crafting modern, responsive interfaces." [level=2] [ref=f54e75]: Crafting modern,responsiveinterfaces.
+        - generic [ref=f54e76]:
+          - paragraph [ref=f54e78]: Frontend developer based in France.
+          - paragraph [ref=f54e80]: Passionate about crafting modern and responsive user interfaces, I bring technical expertise and a creative approach to each project.
+          - paragraph [ref=f54e82]: With years of experience, I collaborate with businesses and startups to turn their ideas into high-performing, user-friendly web applications.
+      - generic [ref=f54e83]:
+        - generic [ref=f54e84]:
+          - generic [ref=f54e85]: Languages & Frameworks
+          - list [ref=f54e86]:
+            - listitem [ref=f54e87]:
+              - generic [ref=f54e88]: JavaScript
+              - generic [ref=f54e89]: "01"
+            - listitem [ref=f54e90]:
+              - generic [ref=f54e91]: TypeScript
+              - generic [ref=f54e92]: "02"
+            - listitem [ref=f54e93]:
+              - generic [ref=f54e94]: React.js
+              - generic [ref=f54e95]: "03"
+            - listitem [ref=f54e96]:
+              - generic [ref=f54e97]: Next.js
+              - generic [ref=f54e98]: "04"
+            - listitem [ref=f54e99]:
+              - generic [ref=f54e100]: Vue.js
+              - generic [ref=f54e101]: "05"
+            - listitem [ref=f54e102]:
+              - generic [ref=f54e103]: Nuxt.js
+              - generic [ref=f54e104]: "06"
+        - generic [ref=f54e105]:
+          - generic [ref=f54e106]: Libraries & Tools
+          - generic [ref=f54e107]:
+            - generic [ref=f54e108]: Tailwind
+            - generic [ref=f54e109]: Styled-Components
+            - generic [ref=f54e110]: Zustand
+            - generic [ref=f54e111]: Zod
+            - generic [ref=f54e112]: React-Query
+            - generic [ref=f54e113]: Jest
+            - generic [ref=f54e114]: React Testing Library
+            - generic [ref=f54e115]: Git
+            - generic [ref=f54e116]: Figma
+            - generic [ref=f54e117]: Nvim
+    - generic [ref=f54e119]:
+      - generic [ref=f54e120]:
+        - generic [ref=f54e121]: Selected Work
+        - generic [ref=f54e124]: "02"
+      - heading "Around the work //" [level=2] [ref=f54e127]
+      - list [ref=f54e128]:
+        - listitem [ref=f54e129]:
+          - link "Klay — open live site in a new tab" [ref=f54e130] [cursor=pointer]:
+            - /url: https://klay-craft.netlify.app
+            - generic [ref=f54e131]:
+              - generic [ref=f54e133]:
+                - generic [ref=f54e134]: "01"
+                - generic [ref=f54e135]: Klay
+              - generic [ref=f54e138]:
+                - generic [ref=f54e139]: "2024"
+                - paragraph [ref=f54e140]: Klay merges the craft of pottery with a modern touch — selling ceramics and opening workshop registration through an accessible online platform.
+                - generic [ref=f54e141]:
+                  - generic [ref=f54e142]: Nuxt.js
+                  - generic [ref=f54e143]: TypeScript
+                  - generic [ref=f54e144]: Tailwind
+                  - generic [ref=f54e145]: Pinia
+                  - generic [ref=f54e146]: Figma
+        - listitem [ref=f54e147]:
+          - link "Forma — open live site in a new tab" [ref=f54e148] [cursor=pointer]:
+            - /url: https://forma.legal/
+            - generic [ref=f54e149]:
+              - generic [ref=f54e151]:
+                - generic [ref=f54e152]: "02"
+                - generic [ref=f54e153]: Forma
+              - generic [ref=f54e156]:
+                - generic [ref=f54e157]: May 2023 — Today
+                - paragraph [ref=f54e158]: A SaaS platform for legal and accounting professionals — client messaging, document management and activity scheduling in one workspace.
+                - generic [ref=f54e159]:
+                  - generic [ref=f54e160]: Next.js
+                  - generic [ref=f54e161]: TypeScript
+                  - generic [ref=f54e162]: Tailwind
+                  - generic [ref=f54e163]: Zustand
+                  - generic [ref=f54e164]: React-Query
+                  - generic [ref=f54e165]: Zod
+                  - generic [ref=f54e166]: React-Hook-Form
+                  - generic [ref=f54e167]: Figma
+        - listitem [ref=f54e168]:
+          - link "Crazee.B — open live site in a new tab" [ref=f54e169] [cursor=pointer]:
+            - /url: https://crazee-burger-ki3o6okfp-simoncdn.vercel.app/
+            - generic [ref=f54e170]:
+              - generic [ref=f54e172]:
+                - generic [ref=f54e173]: "03"
+                - generic [ref=f54e174]: Crazee.B
+              - generic [ref=f54e177]:
+                - generic [ref=f54e178]: Jan 2023 — May 2023
+                - paragraph [ref=f54e179]: An online restaurant ordering dashboard designed to provide a smooth and enjoyable ordering experience.
+                - generic [ref=f54e180]:
+                  - generic [ref=f54e181]: React.js
+                  - generic [ref=f54e182]: Styled-Components
+                  - generic [ref=f54e183]: Firebase
+                  - generic [ref=f54e184]: Jest
+                  - generic [ref=f54e185]: Context
+                  - generic [ref=f54e186]: Figma
+        - listitem [ref=f54e187]:
+          - link "Workshopbya — open live site in a new tab" [ref=f54e188] [cursor=pointer]:
+            - /url: https://www.workshopbya.com/
+            - generic [ref=f54e189]:
+              - generic [ref=f54e191]:
+                - generic [ref=f54e192]: "04"
+                - generic [ref=f54e193]: Workshopbya
+              - generic [ref=f54e196]:
+                - generic [ref=f54e197]: Dec 2022 — Jan 2023
+                - paragraph [ref=f54e198]: A showcase website with blog integration, highlighting the community's expertise and creative identity.
+                - generic [ref=f54e199]:
+                  - generic [ref=f54e200]: Next.js
+                  - generic [ref=f54e201]: TypeScript
+                  - generic [ref=f54e202]: Tailwind
+                  - generic [ref=f54e203]: Sanity.io
+                  - generic [ref=f54e204]: Sendgrid
+                  - generic [ref=f54e205]: Framer-Motion
+                  - generic [ref=f54e206]: Figma
+    - generic [ref=f54e208]:
+      - generic [ref=f54e209]:
+        - generic [ref=f54e210]: Contact
+        - generic [ref=f54e213]: "03"
+      - separator [ref=f54e214]
+      - paragraph [ref=f54e216]: Got a new project in mind? An opportunity?
+      - link "Email Simon Cardona" [ref=f54e220] [cursor=pointer]:
+        - /url: mailto:cdna.simon@gmail.com
+        - generic [ref=f54e221]: Let's havea chat.
+      - generic [ref=f54e222]:
+        - generic [ref=f54e223]:
+          - generic [ref=f54e224]: Direct
+          - link "cdna.simon@gmail.com" [ref=f54e225] [cursor=pointer]:
+            - /url: mailto:cdna.simon@gmail.com
+        - generic [ref=f54e227]:
+          - generic [ref=f54e228]: Elsewhere
+          - list [ref=f54e229]:
+            - listitem [ref=f54e230]:
+              - link "Email ↗" [ref=f54e231] [cursor=pointer]:
+                - /url: mailto:cdna.simon@gmail.com
+            - listitem [ref=f54e233]:
+              - link "GitHub ↗" [ref=f54e234] [cursor=pointer]:
+                - /url: https://github.com/simoncdna
+            - listitem [ref=f54e236]:
+              - link "LinkedIn ↗" [ref=f54e237] [cursor=pointer]:
+                - /url: https://www.linkedin.com/in/simon-cardona/
+  - contentinfo [ref=f54e239]:
+    - generic [ref=f54e240]:
+      - generic [ref=f54e241]: Cardona
+      - generic [ref=f54e243]:
+        - generic [ref=f54e244]:
+          - generic [ref=f54e245]: "Details:"
+          - paragraph [ref=f54e246]: Frontend Developer, based in France. Available for freelance and full-time opportunities.
+        - link "Back to top" [ref=f54e253] [cursor=pointer]:
+          - /url: "#top"
+          - text: Back to top ↑
+      - separator [ref=f54e272]
+      - generic [ref=f54e273]:
+        - generic [ref=f54e274]: © 2026 Simon Cardona — All rights reserved
+        - generic [ref=f54e275]: 20.24 — SCRAPBOOK / N°003
+  - button "Open Next.js Dev Tools" [ref=f54e281] [cursor=pointer]

@@ -1,0 +1,24 @@
+[     183ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[     203ms] [LOG] [HMR] connected @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[    1263ms] [WARNING] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[    1285ms] [WARNING] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  377545ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  377567ms] [LOG] [Fast Refresh] done in 41ms @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  378369ms] [LOG] THREE.WebGLRenderer: Context Lost. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  378369ms] [LOG] THREE.WebGLRenderer: Context Lost. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  378484ms] [WARNING] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  378503ms] [WARNING] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  386041ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  386046ms] [LOG] [Fast Refresh] done in 42ms @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  386525ms] [WARNING] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  386549ms] [WARNING] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  386856ms] [LOG] THREE.WebGLRenderer: Context Lost. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  386856ms] [LOG] THREE.WebGLRenderer: Context Lost. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  392631ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  392658ms] [LOG] [Fast Refresh] done in 25ms @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  393451ms] [LOG] THREE.WebGLRenderer: Context Lost. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  393451ms] [LOG] THREE.WebGLRenderer: Context Lost. @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  399693ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  399755ms] [LOG] [Fast Refresh] done in 28ms @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  404845ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
+[  404898ms] [LOG] [Fast Refresh] done in 27ms @ http://localhost:3001/_next/static/chunks/00r__next_dist_060crp8._.js:2489
