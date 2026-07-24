@@ -4,7 +4,7 @@ import { useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
-import { Barcode } from "@/components/Bits";
+import { BarcodeEAN13 } from "@/components/BarcodeEAN13";
 import { site } from "@/data/site";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -76,17 +76,13 @@ export function Hero() {
         </div>
       </div>
 
-      {/* Bottom row: scroll cue + barcode */}
+      {/* Bottom row: [ PORTFOLIO ] tag (left) + edit no. & barcode (right) */}
       <div className="shell relative z-20 flex items-end justify-between">
-        <a
-          href="#work"
-          className="hidden flex-col items-start gap-3 md:flex"
-          aria-label="Scroll to selected work"
-        >
-          <span className="font-mono-label">Scroll</span>
-          <span className="scroll-cue" aria-hidden />
-        </a>
-        <Barcode className="h-9 w-24 opacity-80" />
+        <span className="font-mono text-[0.72rem] uppercase tracking-[0.2em] text-silver-muted">
+          [ Portfolio ]
+        </span>
+        {/* hidden cipher — A=01..Z=26 → "CHROME" (03 08 18 15 13 05) */}
+        <BarcodeEAN13 code="030818151305" className="w-40 opacity-90" />
       </div>
     </section>
   );

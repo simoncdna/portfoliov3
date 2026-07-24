@@ -41,11 +41,12 @@ export function Index({ children }: { children: ReactNode }) {
 export function Barcode({ className = "" }: { className?: string }) {
   // deterministic-ish widths so SSR and client match
   const bars = [3, 1, 2, 1, 1, 4, 1, 2, 1, 3, 1, 1, 2, 1, 4, 1, 1, 2, 3, 1, 1, 2, 1, 3, 1, 2, 1, 1, 4, 1, 2, 1, 1, 3];
+  const total = bars.reduce((a, b) => a + b, 0);
   let x = 0;
   return (
     <svg
       aria-hidden
-      viewBox="0 0 120 40"
+      viewBox={`0 0 ${total} 40`}
       className={className}
       preserveAspectRatio="none"
       role="presentation"

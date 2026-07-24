@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MagneticLink } from "./MagneticLink";
+import { ScrambleText } from "./ScrambleText";
 
 const NAV = [
   { label: "Index", href: "#top" },
@@ -39,13 +40,16 @@ export function Header() {
           </span>
         </MagneticLink>
 
-        <ul className="hidden items-center gap-6 sm:flex">
+        <ul className="hidden items-center gap-5 sm:flex">
           {NAV.slice(1).map((item) => (
             <li key={item.href}>
               <MagneticLink href={item.href} strength={4}>
-                <span className="magnetic-underline font-mono text-[0.72rem] uppercase tracking-[0.16em] text-silver transition-colors duration-200 hover:text-chrome">
-                  {item.label}
-                </span>
+                <ScrambleText
+                  text={item.label}
+                  prefix="[ "
+                  suffix=" ]"
+                  className="font-mono text-[0.72rem] uppercase tracking-[0.16em] text-silver transition-colors duration-200 hover:text-chrome"
+                />
               </MagneticLink>
             </li>
           ))}

@@ -327,6 +327,39 @@ a {
   }
 }
 
+/* Nav hover: deliberate digital glitch (RGB split + jitter) while scrambling */
+@keyframes text-glitch {
+  0%,
+  100% {
+    transform: translate(0, 0);
+    text-shadow: none;
+  }
+  20% {
+    transform: translate(0.7px, -0.5px);
+    text-shadow: -1px 0 rgba(255, 60, 90, 0.65), 1px 0 rgba(60, 220, 255, 0.65);
+  }
+  40% {
+    transform: translate(-0.8px, 0.5px);
+    text-shadow: 1px 0 rgba(255, 60, 90, 0.6), -1px 0 rgba(60, 220, 255, 0.6);
+  }
+  60% {
+    transform: translate(0.5px, 0.7px);
+    text-shadow: -1.5px 0 rgba(255, 60, 90, 0.55), 1.5px 0 rgba(60, 220, 255, 0.55);
+  }
+  80% {
+    transform: translate(-0.5px, -0.7px);
+    text-shadow: 1px 0 rgba(255, 60, 90, 0.7), -1px 0 rgba(60, 220, 255, 0.7);
+  }
+}
+.text-glitch {
+  animation: text-glitch 110ms steps(2) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .text-glitch {
+    animation: none;
+  }
+}
+
 /* ============================================================
    Scroll reveal (progressive enhancement)
    Elements start hidden only when JS marks <html> as .reveal-ready
