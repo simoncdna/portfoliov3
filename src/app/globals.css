@@ -1,26 +1,377 @@
 @import "tailwindcss";
 
+/* ============================================================
+   MASTER.md tokens  —  Chrome Editorial
+   ============================================================ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* color */
+  --void: #050505;
+  --ink: #0b0b0d;
+  --ink-2: #101013;
+  --steel: #26272c;
+  --steel-2: #3a3b42;
+  --silver-muted: #7c7d86; /* AA ~5:1 on --void for small labels */
+  --silver: #a8abb4;
+  --silver-bright: #d6d8de;
+  --chrome: #eef0f4;
+  --spec: #ffffff;
+
+  --grad-chrome: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    #c9ccd3 22%,
+    #83868f 50%,
+    #e4e6eb 74%,
+    #4a4c52 100%
+  );
+  --glow-silver: 0 0 40px rgba(214, 216, 222, 0.25),
+    0 0 120px rgba(160, 163, 172, 0.12);
+
+  /* motion */
+  --dur-fast: 150ms;
+  --dur-med: 350ms;
+  --dur-slow: 700ms;
+  --dur-reveal: 900ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+
+  /* layout */
+  --gutter: clamp(20px, 5vw, 64px);
+  --section-y: clamp(96px, 14vh, 192px);
 }
 
+/* Expose tokens to Tailwind v4 utilities */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-void: var(--void);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-steel: var(--steel);
+  --color-steel-2: var(--steel-2);
+  --color-silver-muted: var(--silver-muted);
+  --color-silver: var(--silver);
+  --color-silver-bright: var(--silver-bright);
+  --color-chrome: var(--chrome);
+  --color-spec: var(--spec);
+
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --ease-out: var(--ease-out);
+  --ease-inout: var(--ease-inout);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ============================================================
+   Base
+   ============================================================ */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--void);
+  color: var(--silver-bright);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--void);
+  color: var(--silver-bright);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: clamp(1rem, 1.1vw, 1.15rem);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* Hide native cursor when custom cursor is active (pointer devices only) */
+@media (hover: hover) and (pointer: fine) {
+  body {
+    cursor: none;
+  }
+}
+
+::selection {
+  background: var(--silver-bright);
+  color: var(--void);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ============================================================
+   Type helpers
+   ============================================================ */
+.font-display {
+  font-family: var(--font-display), Impact, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+  line-height: 0.9;
+  font-weight: 400;
+}
+
+.font-mono-label {
+  font-family: var(--font-mono), monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.6875rem;
+  color: var(--silver-muted);
+}
+
+.fs-mega {
+  font-size: clamp(4rem, 18vw, 20rem);
+}
+.fs-h1 {
+  font-size: clamp(2.5rem, 8vw, 7rem);
+}
+.fs-h2 {
+  font-size: clamp(1.75rem, 4vw, 3.5rem);
+}
+.fs-h3 {
+  font-size: clamp(1.25rem, 2vw, 1.75rem);
+}
+
+/* Chrome gradient text fill */
+.text-chrome-grad {
+  background: var(--grad-chrome);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ============================================================
+   Layout helpers
+   ============================================================ */
+.shell {
+  width: 100%;
+  padding-inline: var(--gutter);
+  margin-inline: auto;
+  max-width: 1600px;
+}
+
+.hairline {
+  border: 0;
+  border-top: 1px solid var(--steel);
+  width: 100%;
+}
+
+.glow {
+  box-shadow: var(--glow-silver);
+}
+
+/* Animated underline wipe (left -> right) for magnetic links */
+.magnetic-underline {
+  position: relative;
+}
+.magnetic-underline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -4px;
+  height: 1px;
+  width: 100%;
+  background: var(--chrome);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--dur-med) var(--ease-out);
+}
+.magnetic:hover .magnetic-underline::after,
+.magnetic-underline:hover::after {
+  transform: scaleX(1);
+}
+
+/* Vertical rotated label (poster language) */
+.vertical-rl {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+/* Work row: full-width editorial project link */
+.work-row {
+  display: block;
+  border-top: 1px solid var(--steel);
+  transition: background var(--dur-med) var(--ease-out);
+}
+.work-row:last-child {
+  border-bottom: 1px solid var(--steel);
+}
+.work-row-inner {
+  padding-block: clamp(1.5rem, 3vw, 2.75rem);
+  padding-inline: clamp(0px, 1.5vw, 1.5rem);
+  transition: transform var(--dur-slow) var(--ease-out),
+    opacity var(--dur-med) var(--ease-out);
+}
+.work-title {
+  color: var(--silver);
+  transition: color var(--dur-med) var(--ease-out);
+}
+.work-arrow {
+  transition: transform var(--dur-med) var(--ease-out),
+    color var(--dur-med) var(--ease-out);
+}
+@media (hover: hover) {
+  .work-row:hover {
+    background: linear-gradient(
+      90deg,
+      rgba(214, 216, 222, 0.05),
+      rgba(214, 216, 222, 0)
+    );
+  }
+  .work-row:hover .work-row-inner {
+    transform: translateX(clamp(6px, 1.2vw, 18px));
+  }
+  .work-row:hover .work-title {
+    background: var(--grad-chrome);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  .work-row:hover .work-arrow {
+    transform: translateX(8px);
+    color: var(--chrome);
+  }
+}
+.work-row:focus-visible .work-title {
+  color: var(--chrome);
+}
+
+/* Skill row: baseline list item with a hairline that lights on hover */
+.skill-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.6rem;
+  border-bottom: 1px solid var(--steel);
+  transition: border-color var(--dur-med) var(--ease-out);
+}
+.skill-row:hover {
+  border-color: var(--silver);
+}
+.skill-row:hover .font-display {
+  color: var(--chrome);
+}
+
+/* Scroll indicator: a hairline with a silver bead sliding down */
+.scroll-cue {
+  position: relative;
+  display: block;
+  width: 1px;
+  height: 56px;
+  background: var(--steel-2);
+  overflow: hidden;
+}
+.scroll-cue::after {
+  content: "";
+  position: absolute;
+  left: -1.5px;
+  top: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--chrome);
+  box-shadow: 0 0 8px rgba(238, 240, 244, 0.8);
+  animation: scroll-bead 2s var(--ease-inout) infinite;
+}
+@keyframes scroll-bead {
+  0% {
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(56px);
+    opacity: 0;
+  }
+}
+
+/* ============================================================
+   Scroll reveal (progressive enhancement)
+   Elements start hidden only when JS marks <html> as .reveal-ready
+   ============================================================ */
+.reveal-ready [data-reveal] {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity var(--dur-reveal) var(--ease-out),
+    transform var(--dur-reveal) var(--ease-out);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+.reveal-ready [data-reveal].is-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* Masked line reveal for headings.
+   The clip lives on the inner wrapper so the observed node is never
+   self-clipped (IntersectionObserver accounts for the target's clip-path). */
+.reveal-ready [data-reveal-mask] .reveal-mask-inner {
+  display: block;
+  clip-path: inset(0 0 105% 0);
+  transition: clip-path var(--dur-reveal) var(--ease-out);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: clip-path;
+}
+.reveal-ready [data-reveal-mask].is-in .reveal-mask-inner {
+  clip-path: inset(-20% 0 -20% 0);
+}
+
+/* ============================================================
+   Focus + a11y
+   ============================================================ */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--glow-silver), inset 0 0 0 1px var(--chrome);
+  border-radius: 2px;
+}
+
+.skip-link {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 200;
+  background: var(--ink);
+  color: var(--chrome);
+  padding: 10px 16px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  transform: translateY(-200%);
+  transition: transform var(--dur-med) var(--ease-out);
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* ============================================================
+   Reduced motion — kill all motion, show final states
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal-ready [data-reveal],
+  .reveal-ready [data-reveal-mask] .reveal-mask-inner {
+    opacity: 1 !important;
+    transform: none !important;
+    clip-path: none !important;
+  }
+  body {
+    cursor: auto !important;
+  }
 }
