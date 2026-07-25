@@ -25,8 +25,7 @@ export function Header() {
     <header
       className="fixed inset-x-0 top-0 z-50 transition-colors duration-500"
       style={{
-        backgroundColor: scrolled ? "rgba(5,5,5,0.6)" : "transparent",
-        backdropFilter: scrolled ? "blur(10px)" : "none",
+        backgroundColor: scrolled ? "rgba(12,12,14,0.55)" : "transparent",
       }}
     >
       <nav className="shell flex items-center justify-between py-4">

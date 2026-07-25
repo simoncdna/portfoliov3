@@ -2,9 +2,10 @@
 
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { BufferAttribute, BufferGeometry, Color, ShaderMaterial, Vector3 } from "three";
+import { BufferAttribute, BufferGeometry, Color, ShaderMaterial } from "three";
 import type { LineSegments } from "three";
-import { blobTweak, SPIN_RATE, TIME_RATE, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
+// the form's radius arrives through FORM_DISPLACE's FORM_R, on the GLSL side
+import { blobTweak, SPIN_RATE, TIME_RATE, DISTORT_MAX } from "@/lib/blobTweak";
 import { SNOISE, FORM_DISPLACE } from "@/lib/formField";
 
 type Props = {
@@ -13,7 +14,6 @@ type Props = {
   reduced?: boolean;
 };
 
-const SPHERE_R = FORM_RADIUS; // shared with the liquid's BR and the cluster radius
 /**
  * Grid resolution. LONGS is kept at roughly 2x LATS on purpose: a lat/long cell
  * spans half as much arc in longitude as in latitude for a given step count, so
@@ -24,18 +24,6 @@ const LATS = 40; // parallels
 const LONGS = 80; // meridians
 const RING_SEG = 96; // subdivisions per line — smoothness, not cell count
 
-const HELIX_R = 0.8;
-const HELIX_H = 3.8;
-const HELIX_TURNS = 1.0;
-const TUBE_R = 0.14;
-const RUNG_R = 0.09;
-const RUNGS = 5;
-// a strand runs ~6.3 units and its tube ~0.88 around, so these two counts keep
-// the helix cells square too
-const TUBE_SEG = 128; // steps along a strand
-const TUBE_RADIAL = 16; // ring resolution around a tube
-const RUNG_RADIAL = 10; // ring resolution around a rung
-const RUNG_STEPS = 6; // rings along a rung
 const DOCK_X = -3.6;
 
 /**
@@ -50,146 +38,38 @@ const BACK_SIDE = 0.28;
 /* -------------------------------------------------------------------------- */
 
 /**
- * A line-segment builder that carries an explicit outward direction per vertex.
+ * Lat/long wireframe globe, stored as UNIT sphere directions rather than as
+ * points at the form's radius.
  *
- * Both the displacement and the shading need to know which way the surface
- * faces. A sphere could derive that from the position, but a tube cannot — its
- * outward direction follows the tube's own frame, not the distance from the
- * origin. Storing it as an attribute lets one shader serve every piece.
+ * The direction is the datum the morph needs: the DNA mapping takes a point on
+ * the unit sphere and remaps it, so scaling to the form's radius belongs in the
+ * shader, on the sphere side of the blend only.
  */
-class WireBuilder {
-  pos: number[] = [];
-  nrm: number[] = [];
-
-  segment(a: Vector3, an: Vector3, b: Vector3, bn: Vector3) {
-    this.pos.push(a.x, a.y, a.z, b.x, b.y, b.z);
-    this.nrm.push(an.x, an.y, an.z, bn.x, bn.y, bn.z);
-  }
-
-  /** Connects a closed ring of points, and optionally to the previous ring. */
-  ring(points: Vector3[], normals: Vector3[], prev?: { points: Vector3[]; normals: Vector3[] }) {
-    const n = points.length;
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      this.segment(points[i], normals[i], points[j], normals[j]);
-      if (prev) this.segment(prev.points[i], prev.normals[i], points[i], normals[i]);
-    }
-  }
-
-  build(): BufferGeometry {
-    const geo = new BufferGeometry();
-    geo.setAttribute("position", new BufferAttribute(new Float32Array(this.pos), 3));
-    geo.setAttribute("aNormal", new BufferAttribute(new Float32Array(this.nrm), 3));
-    return geo;
-  }
-}
-
-/** Clean lat/long wireframe globe (meridians + parallels), no triangulation. */
-function buildGridSphere(r: number): BufferGeometry {
-  const b = new WireBuilder();
+function buildGridSphere(): BufferGeometry {
+  const pos: number[] = [];
   const TAU = Math.PI * 2;
-  const at = (phi: number, th: number) => {
-    const n = new Vector3(
-      Math.sin(phi) * Math.cos(th),
-      Math.cos(phi),
-      Math.sin(phi) * Math.sin(th)
-    );
-    return { p: n.clone().multiplyScalar(r), n };
+  const push = (phi: number, th: number) => {
+    pos.push(Math.sin(phi) * Math.cos(th), Math.cos(phi), Math.sin(phi) * Math.sin(th));
   };
 
   for (let i = 1; i < LATS; i++) {
     const phi = (Math.PI * i) / LATS;
     for (let s = 0; s < RING_SEG; s++) {
-      const A = at(phi, (TAU * s) / RING_SEG);
-      const B = at(phi, (TAU * (s + 1)) / RING_SEG);
-      b.segment(A.p, A.n, B.p, B.n);
+      push(phi, (TAU * s) / RING_SEG);
+      push(phi, (TAU * (s + 1)) / RING_SEG);
     }
   }
   for (let j = 0; j < LONGS; j++) {
     const th = (TAU * j) / LONGS;
     for (let s = 0; s < RING_SEG; s++) {
-      const A = at((Math.PI * s) / RING_SEG, th);
-      const B = at((Math.PI * (s + 1)) / RING_SEG, th);
-      b.segment(A.p, A.n, B.p, B.n);
-    }
-  }
-  return b.build();
-}
-
-/**
- * The double helix as a quad-grid wireframe: rings around each strand plus
- * longitudinals along it.
- *
- * This replaces a TubeGeometry drawn with `wireframe: true`, which traced the
- * edges of the *triangles* — every quad crossed by a diagonal, which is what
- * made the form read as a debug view rather than a drawing. Generating the lines
- * from the tube's own parameterisation gives clean quads.
- */
-function buildHelixWire(): BufferGeometry {
-  const b = new WireBuilder();
-  const TAU = Math.PI * 2;
-  const twist = HELIX_TURNS * TAU;
-
-  const strand = (phase: number) => {
-    let prev: { points: Vector3[]; normals: Vector3[] } | undefined;
-    for (let i = 0; i <= TUBE_SEG; i++) {
-      const t = i / TUBE_SEG;
-      const a = t * twist + phase;
-      const centre = new Vector3(Math.cos(a) * HELIX_R, (t - 0.5) * HELIX_H, Math.sin(a) * HELIX_R);
-      // A stable frame rather than a Frenet one: the radial direction in XZ is
-      // never degenerate here, and it keeps the rings from twisting along the run.
-      const radial = new Vector3(Math.cos(a), 0, Math.sin(a));
-      const tangent = new Vector3(-Math.sin(a) * HELIX_R * twist, HELIX_H, Math.cos(a) * HELIX_R * twist).normalize();
-      const bi = new Vector3().crossVectors(tangent, radial).normalize();
-
-      const points: Vector3[] = [];
-      const normals: Vector3[] = [];
-      for (let k = 0; k < TUBE_RADIAL; k++) {
-        const th = (TAU * k) / TUBE_RADIAL;
-        const dir = radial
-          .clone()
-          .multiplyScalar(Math.cos(th))
-          .addScaledVector(bi, Math.sin(th))
-          .normalize();
-        normals.push(dir);
-        points.push(centre.clone().addScaledVector(dir, TUBE_R));
-      }
-      b.ring(points, normals, prev);
-      prev = { points, normals };
-    }
-  };
-  strand(0);
-  strand(Math.PI);
-
-  // rungs: short tubes bridging the two strands
-  const up = new Vector3(0, 1, 0);
-  for (let j = 0; j < RUNGS; j++) {
-    const t = (j + 0.5) / RUNGS;
-    const a = t * twist;
-    const y = (t - 0.5) * HELIX_H;
-    const A = new Vector3(Math.cos(a) * HELIX_R, y, Math.sin(a) * HELIX_R);
-    const B = new Vector3(Math.cos(a + Math.PI) * HELIX_R, y, Math.sin(a + Math.PI) * HELIX_R);
-    const axis = B.clone().sub(A).normalize();
-    const u = new Vector3().crossVectors(axis, up).normalize();
-    const v = new Vector3().crossVectors(axis, u).normalize();
-
-    let prev: { points: Vector3[]; normals: Vector3[] } | undefined;
-    for (let i = 0; i <= RUNG_STEPS; i++) {
-      const centre = A.clone().lerp(B, i / RUNG_STEPS);
-      const points: Vector3[] = [];
-      const normals: Vector3[] = [];
-      for (let k = 0; k < RUNG_RADIAL; k++) {
-        const th = (TAU * k) / RUNG_RADIAL;
-        const dir = u.clone().multiplyScalar(Math.cos(th)).addScaledVector(v, Math.sin(th)).normalize();
-        normals.push(dir);
-        points.push(centre.clone().addScaledVector(dir, RUNG_R));
-      }
-      b.ring(points, normals, prev);
-      prev = { points, normals };
+      push((Math.PI * s) / RING_SEG, th);
+      push((Math.PI * (s + 1)) / RING_SEG, th);
     }
   }
 
-  return b.build();
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new BufferAttribute(new Float32Array(pos), 3));
+  return geo;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -201,16 +81,74 @@ uniform float uTime;
 uniform float uDistort;
 uniform float uFreq;
 uniform float uPres;
-attribute vec3 aNormal;
 varying float vNz;
 varying float vGlint;
 varying float vDepth;
 ${SNOISE}
 ${FORM_DISPLACE}
+
+const float PI = 3.14159265359;
+// Matched to the liquid's sdDna so the wireframe docks at the same size: the
+// helix reaches ~1.04 from its axis and stands 3.8 tall.
+const float DNA_XZ = 2.15;
+const float DNA_Y  = 1.9;
+const float TURNS  = 1.0;
+const float RUNGS  = 5.0;
+
+/**
+ * Remaps a point on the unit sphere onto a double-helix silhouette, keeping the
+ * grid's connectivity intact — which is the whole reason this form can morph at
+ * all. A mesh has edges, so unlike the liquid's implicit surface or the free
+ * particles it cannot change topology; the DNA has to be reachable by moving
+ * vertices only.
+ *
+ * The cross-section radius is modulated by angle so it bulges into two lobes
+ * 180 degrees apart (the strands) with a thin waist between them, and the lobe
+ * angle winds with height so the bulges spiral. Periodic pulses fill the waist
+ * into the rungs. Ported from the original vertex-displaced blob.
+ *
+ * The strands stay joined by that thin waist rather than being separate tubes —
+ * the price of preserving topology, and visible as a faint web between them.
+ */
+vec3 dnaShape(vec3 bp){
+  float y = clamp(bp.y, -1.0, 1.0);
+  float theta = atan(bp.z, bp.x);
+  float tw = theta - TURNS * y * PI + uTime * 0.2;
+  float lobe = pow(abs(cos(tw)), 1.3);
+  float R = 0.14 + 0.34 * lobe;
+  float rung = pow(0.5 + 0.5 * cos(y * PI * RUNGS), 22.0);
+  R += rung * 0.16;
+  R *= 1.0 - smoothstep(0.72, 1.0, abs(y));   // taper both ends to a point
+  vec2 dir = normalize(vec2(bp.x, bp.z) + vec2(1e-4));
+  return vec3(dir.x * R * DNA_XZ, y * DNA_Y, dir.y * R * DNA_XZ);
+}
+
+/** The base surface, before the shared noise displacement. */
+vec3 morph(vec3 bp){
+  return mix(bp * FORM_R, dnaShape(bp), uPres);
+}
+
 void main(){
-  // the outward direction doubles as the displacement axis and the shading normal
-  vec3 pos = position + aNormal * formOffset(position);
-  vec3 nView = normalize(normalMatrix * aNormal);
+  vec3 bp = normalize(position);
+
+  // The stored sphere direction stops being the surface normal the moment the
+  // DNA mapping kicks in, and the normal is what drives the front/back occlusion
+  // that carries this whole form — so it is rebuilt from the mapping itself, by
+  // differencing two tangential samples. dnaShape is analytic, so this is cheap.
+  vec3 axis = abs(bp.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+  vec3 t1 = normalize(cross(bp, axis));
+  vec3 t2 = cross(bp, t1);
+  float e = 0.02;
+  vec3 p0 = morph(bp);
+  vec3 p1 = morph(normalize(bp + t1 * e));
+  vec3 p2 = morph(normalize(bp + t2 * e));
+  vec3 nrm = cross(p1 - p0, p2 - p0);
+  nrm = length(nrm) > 1e-9 ? normalize(nrm) : bp;
+  if (dot(nrm, bp) < 0.0) nrm = -nrm;         // keep it pointing outward
+
+  vec3 pos = p0 + nrm * formOffset(p0);
+
+  vec3 nView = normalize(normalMatrix * nrm);
   vNz = nView.z;
   // edge-on lines catch the light, lines facing the camera stay dim — the same
   // fresnel the liquid uses, expressed in a stroke
@@ -223,7 +161,6 @@ void main(){
 
 const FRAG = /* glsl */ `
 uniform float uFade;
-uniform float uGate;     // crossfade weight for this piece (sphere vs helix)
 uniform float uRough;
 uniform float uBack;
 uniform float uCamDist;
@@ -243,7 +180,7 @@ void main(){
   float near = clamp((uCamDist + 2.6 - vDepth) / 5.2, 0.0, 1.0);
   float mirror = 1.0 - uRough;
   vec3 col = mix(uLo, uHi, mix(0.65, vGlint, mirror)) * (0.45 + 0.55 * near);
-  float a = uFade * uGate * occl
+  float a = uFade * occl
           * (0.32 + 0.68 * near)
           * mix(0.9, 0.45 + 0.55 * vGlint, mirror);
   if (a < 0.004) discard;
@@ -252,32 +189,29 @@ void main(){
 `;
 
 /**
- * Wireframe form: a lat/long globe at the hero, cross-dissolving into a
- * wireframe double helix toward About — same shared displacement field, dock and
- * spin as the liquid and the particles.
- *
- * The two pieces share one shader and one set of field uniforms; only `uGate`
- * differs, which is what drives the crossfade.
+ * Wireframe form: a lat/long globe that winds itself into a double helix as
+ * About arrives — one geometry throughout, morphed rather than cross-faded, so
+ * it behaves like the liquid and the particles instead of dissolving between two
+ * separate objects. Shares the displacement field, dock and spin with them.
  */
 export function MeshDna({ about, scroll, reduced }: Props) {
-  const sphereRef = useRef<LineSegments>(null);
-  const helixRef = useRef<LineSegments>(null);
+  const lines = useRef<LineSegments>(null);
   const pres = useRef(0);
   const spin = useRef(0);
   const appear = useRef(0);
   const modeVis = useRef(0);
   const colScratch = useMemo(() => new Color(), []);
 
-  const built = useMemo(() => {
-    const makeMat = () =>
-      new ShaderMaterial({
+  const { geometry, material } = useMemo(
+    () => ({
+      geometry: buildGridSphere(),
+      material: new ShaderMaterial({
         uniforms: {
           uTime: { value: 0 },
           uDistort: { value: 0 },
           uFreq: { value: 0.5 },
           uPres: { value: 0 },
           uFade: { value: 0 },
-          uGate: { value: 0 },
           uRough: { value: 0.1 },
           uBack: { value: BACK_SIDE },
           uCamDist: { value: 10 },
@@ -289,82 +223,52 @@ export function MeshDna({ about, scroll, reduced }: Props) {
         transparent: true,
         depthWrite: false,
         depthTest: false,
-      });
-
-    return {
-      sphereGeo: buildGridSphere(SPHERE_R),
-      helixGeo: buildHelixWire(),
-      sphereMat: makeMat(),
-      helixMat: makeMat(),
-    };
-  }, []);
+      }),
+    }),
+    []
+  );
 
   useFrame(({ camera }, delta) => {
+    const l = lines.current;
+    if (!l) return;
     const tw = blobTweak.get();
+    const u = material.uniforms;
+
     appear.current += (1 - appear.current) * (1 - Math.pow(0.04, delta));
     const modeTarget = tw.mode === "wire" ? 1 : 0;
     modeVis.current += (modeTarget - modeVis.current) * (1 - Math.pow(0.06, delta));
     const fade = (reduced ? 1 : appear.current) * modeVis.current;
-
-    const on = fade > 0.004;
-    if (sphereRef.current) sphereRef.current.visible = on;
-    if (helixRef.current) helixRef.current.visible = on;
-    if (!on) return;
+    u.uFade.value = fade;
+    l.visible = fade > 0.004;
+    if (fade <= 0.004) return;
 
     const target = reduced ? 0 : Math.max(0, Math.min(1, about?.current ?? 0));
     pres.current += (target - pres.current) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
     const v = pres.current;
 
-    spin.current += delta * tw.speed * SPIN_RATE;
-    const rot = spin.current + (scroll?.current ?? 0) * Math.PI * 3.0;
-    const dock = DOCK_X * v;
-    const camDist = camera.position.length();
+    u.uTime.value += delta * tw.speed * TIME_RATE;
+    u.uDistort.value = tw.distort * DISTORT_MAX;
+    u.uFreq.value = tw.freq;
+    u.uPres.value = v;
+    u.uRough.value = tw.roughness;
+    u.uCamDist.value = camera.position.length();
 
     colScratch.set(tw.color);
-    for (const [mat, gate] of [
-      [built.sphereMat, 1 - v],
-      [built.helixMat, v],
-    ] as const) {
-      const u = mat.uniforms;
-      u.uTime.value += delta * tw.speed * TIME_RATE;
-      u.uDistort.value = tw.distort * DISTORT_MAX;
-      u.uFreq.value = tw.freq;
-      u.uPres.value = v;
-      u.uFade.value = fade;
-      u.uGate.value = gate;
-      u.uRough.value = tw.roughness;
-      u.uCamDist.value = camDist;
-      (u.uHi.value as Color).setRGB(colScratch.r, colScratch.g, colScratch.b);
-      (u.uLo.value as Color).setRGB(colScratch.r * 0.45, colScratch.g * 0.45, colScratch.b * 0.5);
-    }
+    (u.uHi.value as Color).setRGB(colScratch.r, colScratch.g, colScratch.b);
+    (u.uLo.value as Color).setRGB(colScratch.r * 0.45, colScratch.g * 0.45, colScratch.b * 0.5);
 
-    for (const ref of [sphereRef, helixRef]) {
-      const o = ref.current;
-      if (!o) continue;
-      o.position.setX(dock);
-      o.rotation.set(0, rot, 0);
-    }
-    // nothing to draw once a piece has fully handed over
-    if (sphereRef.current) sphereRef.current.visible = 1 - v > 0.004;
-    if (helixRef.current) helixRef.current.visible = v > 0.004;
+    l.position.setX(DOCK_X * v);
+    spin.current += delta * tw.speed * SPIN_RATE;
+    l.rotation.set(0, spin.current + (scroll?.current ?? 0) * Math.PI * 3.0, 0);
   });
 
   return (
-    <>
-      <lineSegments
-        ref={sphereRef}
-        geometry={built.sphereGeo}
-        material={built.sphereMat}
-        frustumCulled={false}
-        visible={false}
-      />
-      <lineSegments
-        ref={helixRef}
-        geometry={built.helixGeo}
-        material={built.helixMat}
-        frustumCulled={false}
-        visible={false}
-      />
-    </>
+    <lineSegments
+      ref={lines}
+      geometry={geometry}
+      material={material}
+      frustumCulled={false}
+      visible={false}
+    />
   );
 }

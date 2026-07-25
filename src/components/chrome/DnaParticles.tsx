@@ -1,10 +1,20 @@
 "use client";
 
 import { useMemo, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
-import { BufferGeometry, BufferAttribute, Color, ShaderMaterial } from "three";
-import type { Points } from "three";
-import { blobTweak, useBlobTweak } from "@/lib/blobTweak";
+import { useFrame, useThree } from "@react-three/fiber";
+import { useGLTF } from "@react-three/drei";
+import { Box3, BufferGeometry, BufferAttribute, Color, Euler, Matrix3, Matrix4, Quaternion, ShaderMaterial, Vector3 } from "three";
+import type { Mesh, Points } from "three";
+import { MeshSurfaceSampler } from "three/examples/jsm/math/MeshSurfaceSampler.js";
+import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
+import {
+  blobTweak,
+  useBlobTweak,
+  DISTORT_MAX,
+  TIME_RATE,
+  SPIN_RATE,
+  FORM_RADIUS,
+} from "@/lib/blobTweak";
 
 type Props = {
   /** 0..1 presence of the About section (drives assembly / dock / spin) */
@@ -14,7 +24,7 @@ type Props = {
   reduced?: boolean;
 };
 
-const HOME_R = 2.1; // rest cluster radius (matches the liquid blob BR)
+const HOME_R = FORM_RADIUS; // rest cluster radius — shared with the liquid's BR
 const R = 0.8; // helix radius (matches the liquid HR)
 const H = 3.8; // helix height (matches the liquid 2*HH)
 const TURNS = 1.0; // a single loop, like the liquid DNA
@@ -24,6 +34,14 @@ const TUBE_RADIUS = 0.17; // strands fill a tube of this radius (not a thin line
 const RUNG_RADIUS = 0.1; // rungs are tubes too
 const DOCK_X = -3.6;
 const GROUP_SCALE = 1.0;
+const SPIN_SPEED = 0.5; // continuous turntable rate (rad/s), around Y
+const SPIN_AXIS = new Vector3(0, 1, 0); // Y = turntable; (1,0,0) = X tumble
+// baked skull base orientation (found via the dev menu): X=30° Y=10° Z=−5°
+const ROT_X = 0.524;
+const ROT_Y = 0.175;
+const ROT_Z = -0.087;
+const BASE_Q = new Quaternion().setFromEuler(new Euler(ROT_X, ROT_Y, ROT_Z));
+const _qSpin = new Quaternion();
 
 const SNOISE = /* glsl */ `
 vec4 mod289(vec4 x){return x - floor(x*(1.0/289.0))*289.0;}
@@ -82,7 +100,10 @@ uniform float uFreq;      // panel: noise scale
 attribute vec3 aTarget;
 attribute float aSeed;
 varying float vSeed;
+const float FORM_R = ${FORM_RADIUS.toFixed(2)};  // shared, see blobTweak
 ${SNOISE}
+// same 2-octave mix as the liquid's fbm
+float fbm(vec3 p){ return snoise(p) * 0.7 + snoise(p * 2.1) * 0.3; }
 void main(){
   // staggered per-particle assembly → they don't all arrive at once
   float p = clamp((uAbout - aSeed * 0.22) / 0.78, 0.0, 1.0);
@@ -96,14 +117,16 @@ void main(){
     snoise(pos * 1.3 + vec3(9.1, uTime * 0.2, aSeed * 12.0))
   );
   pos += nz * fly * 0.2;
-  // panel distort: persistent living deformation of the whole cloud
-  float fscale = 0.8 + uFreq * 1.4;
-  vec3 dz = vec3(
-    snoise(pos * fscale + vec3(uTime * 0.3, 0.0, 0.0)),
-    snoise(pos * fscale + vec3(0.0, uTime * 0.25, 4.0)),
-    snoise(pos * fscale + vec3(8.0, 0.0, uTime * 0.2))
-  );
-  pos += dz * uDistort;
+  // Panel distort — the SAME field as the liquid's sdBlob, so both forms wear
+  // the same lumps: domain-warped fbm, domain normalised by the shared radius so
+  // uFreq means one feature size everywhere, amplitude a fraction of that radius,
+  // pushed along the radial direction (the liquid displaces its sphere radially).
+  vec3 sp = (pos / FORM_R) * uFreq;
+  vec3 wrp = sp + vec3(snoise(sp + vec3(0.0, uTime * 0.30, 0.0)),
+                       snoise(sp + vec3(3.1, 1.7, uTime * 0.18)),
+                       snoise(sp + vec3(9.2, 5.3, uTime * 0.12))) * 0.9;
+  vec3 rdir = normalize(pos + vec3(1e-4));
+  pos += rdir * (fbm(wrp) * uDistort * FORM_R);
   vSeed = aSeed;
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
   gl_PointSize = (1.6 + uAbout * 0.7) * (15.0 / -mv.z);
@@ -113,6 +136,7 @@ void main(){
 
 const FRAG = /* glsl */ `
 uniform float uFade;
+uniform float uRough;     // panel: 0 = mirror bead, 1 = fully matte
 uniform vec3 uLo;
 uniform vec3 uHi;
 varying float vSeed;
@@ -123,13 +147,17 @@ void main(){
   if (d2 > 0.25) discard; // round mask
   vec3 nrm = normalize(vec3(uv * 2.0, sqrt(max(0.0, 1.0 - 4.0 * d2))));
   // fake chrome: vertical env gradient (bright top / dark bottom) + key diffuse
-  // + a hot specular glint → each particle reads as a polished metal bead
+  // + a hot specular glint → each particle reads as a polished metal bead.
+  // Roughness mirrors the liquid's semantics rather than its formula (different
+  // lighting model): the glint broadens then dies, and the env gradient
+  // flattens to a single mid tone, so 1.0 is a matte bead with no metal left.
+  float mirror = 1.0 - uRough;
   vec3 L = normalize(vec3(0.5, 0.85, 0.65));
   float diff = clamp(dot(nrm, L), 0.0, 1.0);
-  float spec = pow(clamp(reflect(-L, nrm).z, 0.0, 1.0), 32.0);
+  float spec = pow(clamp(reflect(-L, nrm).z, 0.0, 1.0), mix(4.0, 32.0, mirror));
   float env = 0.5 + 0.5 * nrm.y;
-  vec3 base = mix(uLo, uHi, env);
-  vec3 col = base * (0.3 + 0.8 * diff) + vec3(1.0) * spec * (0.9 + 0.5 * vSeed);
+  vec3 base = mix(uLo, uHi, mix(0.5, env, mirror));
+  vec3 col = base * (0.3 + 0.8 * diff) + vec3(1.0) * spec * (0.9 + 0.5 * vSeed) * mirror;
   float a = smoothstep(0.25, 0.14, d2) * uFade;
   if (a < 0.02) discard;
   gl_FragColor = vec4(col, a);
@@ -152,7 +180,24 @@ export function DnaParticles({ about, scroll, reduced }: Props) {
 
   // panel "Particles" slider (8..72) → particle count (density)
   const { particleDetail } = useBlobTweak();
-  const N = Math.max(2000, Math.round(particleDetail * 260));
+  const N = Math.max(8000, Math.round(particleDetail * 900));
+
+  // head model → the particles form a face (sampled on its surface).
+  // facecap.glb ships KTX2-compressed textures → wire up a KTX2 transcoder so
+  // the loader doesn't choke (we only need the geometry, but it parses the file).
+  const gl = useThree((s) => s.gl);
+  const { scene: headScene } = useGLTF("/models/skull.glb", true, true, (loader) => {
+    const ktx2 = new KTX2Loader().setTranscoderPath("/basis/").detectSupport(gl);
+    (loader as unknown as { setKTX2Loader: (k: unknown) => void }).setKTX2Loader(ktx2);
+  });
+  const headMesh = useMemo<Mesh | null>(() => {
+    const meshes: Mesh[] = [];
+    headScene.traverse((o) => {
+      const m = o as Mesh;
+      if (m.isMesh) meshes.push(m);
+    });
+    return meshes[0] ?? null;
+  }, [headScene]);
 
   const material = useMemo(
     () =>
@@ -161,6 +206,7 @@ export function DnaParticles({ about, scroll, reduced }: Props) {
           uTime: { value: 0 },
           uAbout: { value: 0 },
           uFade: { value: 0 },
+          uRough: { value: 0.1 },
           uDistort: { value: 0.25 },
           uFreq: { value: 0.5 },
           uLo: { value: new Color(0.45, 0.48, 0.54) },
@@ -180,23 +226,34 @@ export function DnaParticles({ about, scroll, reduced }: Props) {
     const seed = new Float32Array(N);
     const golden = Math.PI * (3 - Math.sqrt(5));
     const rnd = () => Math.random();
-    const strandPoint = (t: number, s: number) => {
-      const a = t * TURNS * Math.PI * 2 + s * Math.PI;
-      return [Math.cos(a) * R, (t - 0.5) * H, Math.sin(a) * R] as const;
-    };
-    // uniform random point inside a ball of radius r → fills a tube (not a line)
-    const ball = (r: number): [number, number, number] => {
-      let x = 0, y = 0, z = 0, d = 2;
-      while (d > 1 || d === 0) {
-        x = rnd() * 2 - 1;
-        y = rnd() * 2 - 1;
-        z = rnd() * 2 - 1;
-        d = x * x + y * y + z * z;
-      }
-      return [x * r, y * r, z * r];
-    };
 
-    const nStrand = Math.floor(N * STRAND_FRAC);
+    // sample the head surface → particle target positions (the face)
+    const center = new Vector3();
+    let scale = 1;
+    let sampler: MeshSurfaceSampler | null = null;
+    const worldMat = new Matrix4();
+    const normalMat = new Matrix3();
+    if (headMesh) {
+      // respect the glTF node transform (the model is stored lying down; its node
+      // rotation stands it up) → sample local, then push to world space
+      headMesh.updateWorldMatrix(true, false);
+      worldMat.copy(headMesh.matrixWorld);
+      normalMat.getNormalMatrix(worldMat);
+      sampler = new MeshSurfaceSampler(headMesh).build();
+      headMesh.geometry.computeBoundingBox();
+      const lb = headMesh.geometry.boundingBox;
+      if (lb) {
+        const wb = new Box3().copy(lb).applyMatrix4(worldMat);
+        wb.getCenter(center);
+        const size = new Vector3();
+        wb.getSize(size);
+        scale = 3.6 / Math.max(size.x, size.y, size.z);
+      }
+    }
+    const tp = new Vector3();
+    const tn = new Vector3();
+    const headRot = new Euler(ROT_X, ROT_Y, ROT_Z);
+
     for (let i = 0; i < N; i++) {
       const y = 1 - (i / (N - 1)) * 2;
       const rad = Math.sqrt(Math.max(0, 1 - y * y));
@@ -205,26 +262,23 @@ export function DnaParticles({ about, scroll, reduced }: Props) {
       home[i * 3 + 1] = y * HOME_R;
       home[i * 3 + 2] = Math.sin(th) * rad * HOME_R;
 
-      let tx: number, ty: number, tz: number;
-      if (i < nStrand) {
-        const [px, py, pz] = strandPoint(rnd(), i % 2);
-        const [ox, oy, oz] = ball(TUBE_RADIUS);
-        tx = px + ox;
-        ty = py + oy;
-        tz = pz + oz;
-      } else {
-        const t = (Math.floor(rnd() * RUNGS) + 0.5) / RUNGS;
-        const u = rnd();
-        const [ax, ay, az] = strandPoint(t, 0);
-        const [bx, by, bz] = strandPoint(t, 1);
-        const [ox, oy, oz] = ball(RUNG_RADIUS);
-        tx = ax + (bx - ax) * u + ox;
-        ty = ay + (by - ay) * u + oy;
-        tz = az + (bz - az) * u + oz;
+      if (sampler) {
+        // sample the whole surface → the complete skull (no front-facing filter)
+        sampler.sample(tp, tn);
+        tp.applyMatrix4(worldMat).sub(center).multiplyScalar(scale); // → world, centred
+        tn.applyMatrix3(normalMat).normalize();
+        // dust: push a fraction of particles out along the normal (soft cloud edge)
+        if (rnd() < 0.05) tp.addScaledVector(tn, rnd() * 0.2);
+        // fine jitter so it isn't a perfectly tight shell
+        tp.x += (rnd() - 0.5) * 0.03;
+        tp.y += (rnd() - 0.5) * 0.03;
+        tp.z += (rnd() - 0.5) * 0.03;
+        // orientation is now applied live from the dev menu (skullDev) on the
+        // points object, so we leave the baked target in raw (world) orientation
+        target[i * 3] = tp.x;
+        target[i * 3 + 1] = tp.y;
+        target[i * 3 + 2] = tp.z;
       }
-      target[i * 3] = tx;
-      target[i * 3 + 1] = ty;
-      target[i * 3 + 2] = tz;
       seed[i] = rnd();
     }
 
@@ -233,7 +287,7 @@ export function DnaParticles({ about, scroll, reduced }: Props) {
     geometry.setAttribute("aTarget", new BufferAttribute(target, 3));
     geometry.setAttribute("aSeed", new BufferAttribute(seed, 1));
     return geometry;
-  }, [N]);
+  }, [N, headMesh]);
 
   useFrame((_, delta) => {
     const pts = points.current;
@@ -256,20 +310,24 @@ export function DnaParticles({ about, scroll, reduced }: Props) {
     const target = reduced ? 0 : Math.max(0, Math.min(1, about?.current ?? 0));
     pres.current += (target - pres.current) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
     const v = pres.current;
-    u.uTime.value += delta * (0.5 + tw.speed);
+    // no baseline term: Speed 0 must freeze this form exactly like the liquid
+    u.uTime.value += delta * tw.speed * TIME_RATE;
     u.uAbout.value = v;
 
     // colour from the panel
     colScratch.set(tw.color);
     (u.uHi.value as Color).setRGB(colScratch.r, colScratch.g, colScratch.b);
     (u.uLo.value as Color).setRGB(colScratch.r * 0.5, colScratch.g * 0.5, colScratch.b * 0.5);
-    u.uDistort.value = tw.distort * 0.55; // same as the liquid (0 = clean)
+    u.uRough.value = tw.roughness;
+    u.uDistort.value = tw.distort * DISTORT_MAX; // fraction of FORM_R, as the liquid
     u.uFreq.value = tw.freq;
 
     pts.position.setX(DOCK_X * v);
     pts.scale.setScalar(GROUP_SCALE);
-    spin.current += delta * (0.5 + tw.speed) * 0.5;
-    pts.rotation.set(0, spin.current + (scroll?.current ?? 0) * Math.PI * 3.0, 0);
+    // baked base orientation + continuous turntable (around SPIN_AXIS)
+    spin.current += delta * SPIN_SPEED;
+    _qSpin.setFromAxisAngle(SPIN_AXIS, spin.current);
+    pts.quaternion.copy(_qSpin).multiply(BASE_Q);
   });
 
   return <points ref={points} geometry={geometry} material={material} frustumCulled={false} visible={false} />;
