@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { blobTweak, useBlobTweak } from "@/lib/blobTweak";
 import type { BlobMode } from "@/lib/blobTweak";
 
@@ -127,6 +127,7 @@ function Dial({
   step,
   fmt,
   onChange,
+  boot = 1,
 }: {
   label: string;
   value: number;
@@ -135,9 +136,12 @@ function Dial({
   step: number;
   fmt?: (v: number) => string;
   onChange: (v: number) => void;
+  boot?: number;
 }) {
   const drag = useRef({ on: false, y: 0, v: 0 });
-  const f = (value - min) / (max - min);
+  // boot: the level winds up from 0 to its value when the panel powers on
+  const f = ((value - min) / (max - min)) * boot;
+  const dispVal = min + (value - min) * boot;
   const TICKS = 40;
   const START = -150;
   const SWEEP = 300;
@@ -212,7 +216,7 @@ function Dial({
           {label}
         </span>
         <span className="mt-1 font-mono text-[0.55rem] tabular-nums text-silver-muted">
-          {fmt ? fmt(value) : value.toFixed(2)}
+          {fmt ? fmt(dispVal) : dispVal.toFixed(2)}
         </span>
       </div>
     </div>
@@ -224,14 +228,18 @@ function Oscilloscope({
   min,
   max,
   step,
+  boot = 1,
 }: {
   min: number;
   max: number;
   step: number;
+  boot?: number;
 }) {
   const t = useBlobTweak();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef({ on: false, y: 0, v: 0 });
+  const bootRef = useRef(1);
+  bootRef.current = boot;
 
   useEffect(() => {
     const cv = canvasRef.current;
@@ -311,7 +319,7 @@ function Oscilloscope({
       // signal — cycles scale with frequency, with a phosphor glow
       const f = blobTweak.get().freq;
       const cycles = 1 + ((f - min) / (max - min)) * 7;
-      const amp = h * 0.32;
+      const amp = h * 0.32 * bootRef.current; // winds up from a flat line on power-on
       ctx.strokeStyle = "rgba(236,240,255,0.98)";
       ctx.lineWidth = 1.5;
       ctx.shadowColor = "rgba(200,214,255,0.6)";
@@ -356,7 +364,7 @@ function Oscilloscope({
           Frequency
         </span>
         <span className="font-mono text-[0.58rem] tabular-nums text-silver-muted">
-          {t.freq.toFixed(2)}
+          {(min + (t.freq - min) * boot).toFixed(2)}
         </span>
       </div>
       <canvas
@@ -381,6 +389,7 @@ function SegBar({
   step,
   fmt,
   onChange,
+  boot = 1,
 }: {
   label: string;
   value: number;
@@ -389,10 +398,12 @@ function SegBar({
   step: number;
   fmt?: (v: number) => string;
   onChange: (v: number) => void;
+  boot?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
-  const f = (value - min) / (max - min);
+  const f = ((value - min) / (max - min)) * boot;
+  const dispVal = min + (value - min) * boot;
   const SEGS = 24;
   const setFromX = (clientX: number) => {
     const el = ref.current;
@@ -411,7 +422,7 @@ function SegBar({
           {label}
         </span>
         <span className="font-mono text-[0.58rem] tabular-nums text-silver-muted">
-          {fmt ? fmt(value) : value.toFixed(2)}
+          {fmt ? fmt(dispVal) : dispVal.toFixed(2)}
         </span>
       </div>
       <div
@@ -452,6 +463,9 @@ function SegBar({
  */
 export function ControlPanel() {
   const t = useBlobTweak();
+  // "power-on": after the piano cascade, gauges wind up from 0 to their value
+  // and the panel brightens from grey to full — like a dashboard lighting up.
+  const [boot, setBoot] = useState(0);
 
   const rows = [
     <div key="head" className="flex items-center justify-between">
@@ -469,16 +483,16 @@ export function ControlPanel() {
     </div>,
     <ModeSwitch key="mode" value={t.mode} />,
     <div key="dials" className="flex gap-5">
-      <Dial label="Distort" value={t.distort} min={0} max={1} step={0.01}
+      <Dial label="Distort" value={t.distort} min={0} max={1} step={0.01} boot={boot}
         onChange={(v) => blobTweak.set({ distort: v })} />
-      <Dial label="Rough" value={t.roughness} min={0} max={0.6} step={0.01}
+      <Dial label="Rough" value={t.roughness} min={0} max={0.6} step={0.01} boot={boot}
         onChange={(v) => blobTweak.set({ roughness: v })} />
     </div>,
-    <Oscilloscope key="freq" min={0.1} max={2} step={0.01} />,
-    <SegBar key="speed" label="Speed" value={t.speed} min={0} max={3} step={0.05}
+    <Oscilloscope key="freq" min={0.1} max={2} step={0.01} boot={boot} />,
+    <SegBar key="speed" label="Speed" value={t.speed} min={0} max={3} step={0.05} boot={boot}
       onChange={(v) => blobTweak.set({ speed: v })} />,
-    <SegBar key="particles" label="Particles" value={t.particleDetail} min={8} max={72} step={1}
-      fmt={(v) => String(v)} onChange={(v) => blobTweak.set({ particleDetail: v })} />,
+    <SegBar key="particles" label="Particles" value={t.particleDetail} min={8} max={72} step={1} boot={boot}
+      fmt={(v) => String(Math.round(v))} onChange={(v) => blobTweak.set({ particleDetail: v })} />,
     <label key="tint" className="flex items-center justify-between">
       <span className="font-mono text-[0.58rem] uppercase tracking-[0.2em] text-silver">Tint</span>
       <input
@@ -499,6 +513,39 @@ export function ControlPanel() {
   ];
   const n = rows.length;
 
+  useEffect(() => {
+    if (!t.open) {
+      setBoot(0);
+      return;
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setBoot(1);
+      return;
+    }
+    setBoot(0);
+    const startDelay = 240; // just after the piano starts (overlaps it)
+    const DUR = 1150;
+    const ease = (x: number) => 1 - Math.pow(1 - x, 3);
+    let raf = 0;
+    let s0 = 0;
+    const tid = window.setTimeout(() => {
+      s0 = performance.now();
+      const tick = (now: number) => {
+        const p = Math.min(1, (now - s0) / DUR);
+        setBoot(ease(p));
+        if (p < 1) raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    }, startDelay);
+    return () => {
+      clearTimeout(tid);
+      cancelAnimationFrame(raf);
+    };
+  }, [t.open, n]);
+
+  // grey → full brightness with a mid flash → the "lights coming on" breath
+  const glow = 0.5 + 0.5 * boot + Math.sin(boot * Math.PI) * 0.35;
+
   return (
     <div
       className="pointer-events-none fixed right-8 top-1/2 z-[120] w-[min(86vw,240px)] -translate-y-1/2"
@@ -508,7 +555,10 @@ export function ControlPanel() {
         role="dialog"
         aria-label="Blob controls"
         className="pointer-events-auto flex flex-col gap-6"
-        style={{ visibility: t.open ? "visible" : "hidden" }}
+        style={{
+          visibility: t.open ? "visible" : "hidden",
+          filter: `brightness(${glow.toFixed(3)})`,
+        }}
       >
         {rows.map((row, i) => (
           <div
@@ -516,8 +566,8 @@ export function ControlPanel() {
             style={{
               opacity: t.open ? 1 : 0,
               transform: t.open ? "translateY(0)" : "translateY(14px)",
-              transition: "opacity 340ms var(--ease-out), transform 340ms var(--ease-out)",
-              transitionDelay: t.open ? `${(n - 1 - i) * 60}ms` : "0ms",
+              transition: "opacity 460ms var(--ease-out), transform 460ms var(--ease-out)",
+              transitionDelay: t.open ? `${(n - 1 - i) * 100}ms` : "0ms",
             }}
           >
             {row}
