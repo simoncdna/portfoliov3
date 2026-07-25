@@ -158,11 +158,10 @@ export function ParticleBlob({
   useFrame((state, delta) => {
     const pts = points.current;
     if (!pts) return;
-    // display mode from the control panel overrides the hover dissolve; ease the
+    // particles show only in "particles" mode now (no hover dissolve); ease the
     // target so switching modes fades the particles in/out rather than snapping
     const mode = blobTweak.get().mode;
-    const target =
-      mode === "particles" ? 1 : mode === "wire" ? 0 : reduced ? 0 : hover.current;
+    const target = mode === "particles" ? 1 : 0;
     hvEased.current +=
       (target - hvEased.current) * (reduced ? 1 : 1 - Math.pow(0.02, delta));
     const hv = hvEased.current;

@@ -308,9 +308,8 @@ export function ChromeBlob({
     // The surface is shared between blob & wire; `wireMix` cross-dissolves its
     // render style in TWO PHASES so it never ghosts: the wireframe emerges over
     // the filled surface first, then the fill melts away (and the reverse).
-    const hv = hover ? hover.current : 0;
-    const surfaceTarget =
-      tw.mode === "particles" ? 0 : tw.mode === "blob" ? 1 - hv : 1;
+    // form is driven only by the control panel now (no hover dissolve)
+    const surfaceTarget = tw.mode === "particles" ? 0 : 1;
     const wireTarget = tw.mode === "wire" ? 1 : 0;
     const er = reduced ? 1 : 1 - Math.pow(0.02, delta); // smoother settle
     surfaceP.current += (surfaceTarget - surfaceP.current) * er;

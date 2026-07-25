@@ -87,7 +87,7 @@ function ModeSwitch({ value }: { value: BlobMode }) {
   ];
   return (
     <div>
-      <span className="mb-2 block font-mono text-[0.5rem] uppercase tracking-[0.26em] text-steel-2">
+      <span className="mb-2 block font-mono text-[0.58rem] uppercase tracking-[0.2em] text-silver">
         Form
       </span>
       <div className="flex w-full items-end justify-between">
