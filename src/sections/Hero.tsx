@@ -81,8 +81,13 @@ export function Hero() {
         <span className="font-mono text-[0.72rem] uppercase tracking-[0.2em] text-silver-muted">
           [ Portfolio ]
         </span>
-        {/* hidden cipher — A=01..Z=26 → "CHROME" (03 08 18 15 13 05) */}
-        <BarcodeEAN13 code="030818151305" className="w-40 opacity-90" />
+        {/* hidden cipher — A=01..Z=26 → "CHROME" (03 08 18 15 13 05);
+            hover reveals TWEAK (5 letters → centred with no translate) */}
+        <BarcodeEAN13
+          code="030818151305"
+          hoverWord="TWEAK"
+          className="w-40 opacity-90"
+        />
       </div>
     </section>
   );
