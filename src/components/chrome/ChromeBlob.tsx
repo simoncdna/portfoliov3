@@ -323,7 +323,7 @@ export function ChromeBlob({
     const wp = surfaceP.current * ss(0, 0.65, wireMix.current);
     if (mat.current) {
       mat.current.opacity = fp;
-      mat.current.depthWrite = fp > 0.5;
+      mat.current.depthWrite = true; // stable (no mid-fade flip → no flash)
     }
     if (wireMat.current) {
       wireMat.current.opacity = wp;
@@ -444,7 +444,8 @@ export function ChromeBlob({
         <icosahedronGeometry args={[1, 64]} />
         {material}
       </mesh>
-      <mesh ref={wireMesh} frustumCulled={false} visible={false}>
+      {/* slightly larger so it sits just outside the fill → no z-fighting */}
+      <mesh ref={wireMesh} scale={1.004} frustumCulled={false} visible={false}>
         <icosahedronGeometry args={[1, 64]} />
         <meshStandardMaterial
           ref={wireMat}
@@ -453,7 +454,7 @@ export function ChromeBlob({
           envMapIntensity={envMapIntensity}
           color={color}
           emissive="#565a63"
-          emissiveIntensity={0.3}
+          emissiveIntensity={0.14}
           side={DoubleSide}
           transparent
           wireframe
