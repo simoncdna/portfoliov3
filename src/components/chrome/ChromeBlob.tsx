@@ -285,7 +285,7 @@ export function ChromeBlob({
     const ms = reduced ? 1 : 1 - Math.pow(0.1, delta);
     morphV.current += (morphTarget - morphV.current) * ms;
     uniforms.uMorph.value = morphV.current;
-    uniforms.uFreq.value = freq;
+    uniforms.uFreq.value = tw.freq;
     uniforms.uDistort.value = tw.distort;
 
     // live material tuning (dev controls + custom panel)
@@ -297,13 +297,27 @@ export function ChromeBlob({
       }
     }
 
-    // hover fade: solid melts away as the particle blob takes over
+    // display mode (from the control panel) + hover fade:
+    //  blob      → solid, dissolves to particles on hover
+    //  particles → solid hidden (particles take over)
+    //  wire      → solid shown as a wireframe mesh
     const hv = hover ? hover.current : 0;
-    if (mat.current) {
-      mat.current.opacity = 1 - hv;
-      mat.current.depthWrite = hv < 0.5;
+    let solidOpacity = 1;
+    let solidVisible = true;
+    const wire = tw.mode === "wire";
+    if (tw.mode === "particles") {
+      solidVisible = false;
+      solidOpacity = 0;
+    } else if (tw.mode === "blob") {
+      solidOpacity = 1 - hv;
+      solidVisible = hv < 0.996;
     }
-    g.visible = hv < 0.996;
+    if (mat.current) {
+      mat.current.opacity = solidOpacity;
+      mat.current.wireframe = wire;
+      mat.current.depthWrite = wire || solidOpacity > 0.5;
+    }
+    g.visible = solidVisible;
 
     if (reduced) {
       g.rotation.set(0.2, 0.7, -0.15);
@@ -344,8 +358,8 @@ export function ChromeBlob({
     uniforms.uWobble.value = sl * 0.3 + kick.current * 0.2;
     if (shapeOut) {
       shapeOut.current.flow = flowV.current;
-      shapeOut.current.distort = distort;
-      shapeOut.current.freq = freq;
+      shapeOut.current.distort = tw.distort;
+      shapeOut.current.freq = tw.freq;
     }
 
     // ---- rotation: idle drift + pointer steer + strong scroll-scrub spin ----

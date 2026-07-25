@@ -1,7 +1,44 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { blobTweak, useBlobTweak } from "@/lib/blobTweak";
+import type { BlobMode } from "@/lib/blobTweak";
+
+/** 3-way form selector: particles / blob / wireframe mesh. */
+function ModeSwitch({ value }: { value: BlobMode }) {
+  const opts: [BlobMode, string][] = [
+    ["particles", "Dots"],
+    ["blob", "Blob"],
+    ["wire", "Mesh"],
+  ];
+  return (
+    <div>
+      <span className="mb-2 block font-mono text-[0.5rem] uppercase tracking-[0.26em] text-steel-2">
+        Form
+      </span>
+      <div className="flex gap-4">
+        {opts.map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => blobTweak.set({ mode: k })}
+            className={`cursor-none pb-1 font-mono text-[0.6rem] uppercase tracking-[0.18em] transition-colors ${
+              value === k ? "text-chrome" : "text-silver-muted hover:text-silver"
+            }`}
+            style={{
+              borderBottom:
+                value === k
+                  ? "1px solid var(--silver-bright)"
+                  : "1px solid transparent",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /** Rotary molette with a ring of graduations (drag up/down to turn). */
 function Dial({
@@ -39,7 +76,9 @@ function Dial({
 
   const down = (e: React.PointerEvent) => {
     drag.current = { on: true, y: e.clientY, v: value };
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
   };
   const move = (e: React.PointerEvent) => {
     if (!drag.current.on) return;
@@ -102,6 +141,159 @@ function Dial({
   );
 }
 
+/** Frequency shown as a live oscilloscope (drag up/down to change). */
+function Oscilloscope({
+  min,
+  max,
+  step,
+}: {
+  min: number;
+  max: number;
+  step: number;
+}) {
+  const t = useBlobTweak();
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drag = useRef({ on: false, y: 0, v: 0 });
+
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = cv.clientWidth || 200;
+    const h = cv.clientHeight || 40;
+    cv.width = w * dpr;
+    cv.height = h * dpr;
+    ctx.scale(dpr, dpr);
+    let raf = 0;
+    let phase = 0;
+    let last = performance.now();
+    const draw = (now: number) => {
+      raf = requestAnimationFrame(draw);
+      const dt = (now - last) / 1000;
+      last = now;
+      ctx.clearRect(0, 0, w, h);
+      if (!blobTweak.get().open) return;
+      phase += dt * 2.4;
+      // graticule — minor grid
+      const minor = 7;
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(150,160,184,0.2)";
+      ctx.beginPath();
+      for (let x = w / 2 - minor; x > 0; x -= minor) {
+        const px = Math.round(x) + 0.5;
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, h);
+      }
+      for (let x = w / 2 + minor; x < w; x += minor) {
+        const px = Math.round(x) + 0.5;
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, h);
+      }
+      for (let y = h / 2 - minor; y > 0; y -= minor) {
+        ctx.moveTo(0, Math.round(y) + 0.5);
+        ctx.lineTo(w, Math.round(y) + 0.5);
+      }
+      for (let y = h / 2 + minor; y < h; y += minor) {
+        ctx.moveTo(0, Math.round(y) + 0.5);
+        ctx.lineTo(w, Math.round(y) + 0.5);
+      }
+      ctx.stroke();
+      // major grid — every 4 cells
+      ctx.strokeStyle = "rgba(160,172,196,0.42)";
+      ctx.beginPath();
+      for (let x = w / 2 + minor * 4; x <= w; x += minor * 4) {
+        const px = Math.round(x) + 0.5;
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, h);
+      }
+      for (let x = w / 2 - minor * 4; x >= 0; x -= minor * 4) {
+        const px = Math.round(x) + 0.5;
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, h);
+      }
+      for (let y = h / 2; y > 0; y -= minor * 4) {
+        ctx.moveTo(0, Math.round(y) + 0.5);
+        ctx.lineTo(w, Math.round(y) + 0.5);
+      }
+      for (let y = h / 2; y < h; y += minor * 4) {
+        ctx.moveTo(0, Math.round(y) + 0.5);
+        ctx.lineTo(w, Math.round(y) + 0.5);
+      }
+      ctx.stroke();
+      // centre axes (brightest)
+      ctx.strokeStyle = "rgba(175,186,210,0.55)";
+      ctx.beginPath();
+      ctx.moveTo(0, Math.round(h / 2) + 0.5);
+      ctx.lineTo(w, Math.round(h / 2) + 0.5);
+      ctx.moveTo(Math.round(w / 2) + 0.5, 0);
+      ctx.lineTo(Math.round(w / 2) + 0.5, h);
+      ctx.stroke();
+      // signal — cycles scale with frequency, with a phosphor glow
+      const f = blobTweak.get().freq;
+      const cycles = 1 + ((f - min) / (max - min)) * 7;
+      const amp = h * 0.32;
+      ctx.strokeStyle = "rgba(236,240,255,0.98)";
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = "rgba(200,214,255,0.6)";
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      for (let x = 0; x <= w; x++) {
+        const y = h / 2 + amp * Math.sin((x / w) * cycles * Math.PI * 2 + phase);
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [min, max]);
+
+  const down = (e: React.PointerEvent) => {
+    drag.current = { on: true, y: e.clientY, v: blobTweak.get().freq };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+  };
+  const move = (e: React.PointerEvent) => {
+    if (!drag.current.on) return;
+    const dy = drag.current.y - e.clientY;
+    let v = drag.current.v + (dy / 140) * (max - min);
+    v = Math.round(v / step) * step;
+    blobTweak.set({ freq: Math.max(min, Math.min(max, v)) });
+  };
+  const up = (e: React.PointerEvent) => {
+    drag.current.on = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  return (
+    <div>
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="font-mono text-[0.58rem] uppercase tracking-[0.2em] text-silver">
+          Frequency
+        </span>
+        <span className="font-mono text-[0.58rem] tabular-nums text-silver-muted">
+          {t.freq.toFixed(2)}
+        </span>
+      </div>
+      <canvas
+        ref={canvasRef}
+        onPointerDown={down}
+        onPointerMove={move}
+        onPointerUp={up}
+        onPointerCancel={up}
+        className="block h-10 w-full border border-steel"
+        style={{ cursor: "none", touchAction: "none" }}
+      />
+    </div>
+  );
+}
+
 /** Segmented level bar (drag/click along it). */
 function SegBar({
   label,
@@ -148,7 +340,9 @@ function SegBar({
         ref={ref}
         onPointerDown={(e) => {
           dragging.current = true;
-          e.currentTarget.setPointerCapture(e.pointerId);
+          try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
           setFromX(e.clientX);
         }}
         onPointerMove={(e) => dragging.current && setFromX(e.clientX)}
@@ -195,12 +389,14 @@ export function ControlPanel() {
         ✕
       </button>
     </div>,
+    <ModeSwitch key="mode" value={t.mode} />,
     <div key="dials" className="flex gap-5">
       <Dial label="Distort" value={t.distort} min={0} max={1} step={0.01}
         onChange={(v) => blobTweak.set({ distort: v })} />
       <Dial label="Rough" value={t.roughness} min={0} max={0.6} step={0.01}
         onChange={(v) => blobTweak.set({ roughness: v })} />
     </div>,
+    <Oscilloscope key="freq" min={0.1} max={2} step={0.01} />,
     <SegBar key="speed" label="Speed" value={t.speed} min={0} max={3} step={0.05}
       onChange={(v) => blobTweak.set({ speed: v })} />,
     <SegBar key="particles" label="Particles" value={t.particleDetail} min={8} max={72} step={1}

@@ -11,9 +11,14 @@ import { useSyncExternalStore } from "react";
  * re-render); React components use `useBlobTweak()` (e.g. for `open` and for the
  * particle density, which changes geometry and must re-render).
  */
+export type BlobMode = "blob" | "particles" | "wire";
+
 export type BlobTweak = {
   open: boolean;
+  /** blob = solid (hover→particles), particles = always dots, wire = wireframe */
+  mode: BlobMode;
   distort: number;
+  freq: number;
   speed: number;
   roughness: number;
   particleDetail: number;
@@ -22,7 +27,9 @@ export type BlobTweak = {
 
 const DEFAULTS: BlobTweak = {
   open: false,
+  mode: "blob",
   distort: 0.42,
+  freq: 0.5,
   speed: 0.5,
   roughness: 0.12,
   particleDetail: 56,

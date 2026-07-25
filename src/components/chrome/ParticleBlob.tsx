@@ -4,7 +4,7 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Color, ShaderMaterial } from "three";
 import type { Group, Points } from "three";
-import { useBlobTweak } from "@/lib/blobTweak";
+import { blobTweak, useBlobTweak } from "@/lib/blobTweak";
 
 /**
  * Point-cloud "real particle blob" — faithful to Eli Fitch's CodePen (opNeMW):
@@ -157,7 +157,10 @@ export function ParticleBlob({
   useFrame((state, delta) => {
     const pts = points.current;
     if (!pts) return;
-    const hv = reduced ? 0 : hover.current;
+    // display mode from the control panel overrides the hover dissolve
+    const mode = blobTweak.get().mode;
+    const hv =
+      mode === "particles" ? 1 : mode === "wire" ? 0 : reduced ? 0 : hover.current;
     const u = material.uniforms;
     u.uHover.value = hv;
     u.uTime.value += delta;
