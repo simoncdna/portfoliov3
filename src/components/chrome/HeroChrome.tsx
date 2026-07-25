@@ -40,7 +40,7 @@ export function HeroChrome() {
 				freq={0.5}
 				speed={0.5}
 				scale={2.0}
-				pointerStrength={0.24}
+				pointerStrength={0.45}
 				slosh={0.4}
 				clickHoles={0.7}
 			/>
