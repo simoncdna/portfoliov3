@@ -218,6 +218,11 @@ export function ChromeBlob({
   const internalGroup = useRef<Group>(null);
   const group = groupRef ?? internalGroup;
   const mat = useRef<MeshStandardMaterial>(null);
+  const wireMat = useRef<MeshStandardMaterial>(null);
+  const fillMesh = useRef<Mesh>(null);
+  const wireMesh = useRef<Mesh>(null);
+  const fillP = useRef(1); // eased presence of the solid fill
+  const wireP = useRef(0); // eased presence of the wireframe overlay
   const rot = useRef({ x: 0, y: 0 });
   const kick = useRef(0);
   const lastColor = useRef("");
@@ -293,31 +298,31 @@ export function ChromeBlob({
       mat.current.envMapIntensity = envMapIntensity;
       if (tw.color !== lastColor.current) {
         mat.current.color = new Color(tw.color);
+        if (wireMat.current) wireMat.current.color = new Color(tw.color);
         lastColor.current = tw.color;
       }
     }
+    if (wireMat.current) wireMat.current.envMapIntensity = envMapIntensity;
 
-    // display mode (from the control panel) + hover fade:
-    //  blob      → solid, dissolves to particles on hover
-    //  particles → solid hidden (particles take over)
-    //  wire      → solid shown as a wireframe mesh
+    // ---- smooth crossfade between fill / wireframe (particles are handled in
+    //      ParticleBlob). Each representation has an eased presence 0..1, so
+    //      switching modes fades rather than snaps. ----
     const hv = hover ? hover.current : 0;
-    let solidOpacity = 1;
-    let solidVisible = true;
-    const wire = tw.mode === "wire";
-    if (tw.mode === "particles") {
-      solidVisible = false;
-      solidOpacity = 0;
-    } else if (tw.mode === "blob") {
-      solidOpacity = 1 - hv;
-      solidVisible = hv < 0.996;
-    }
+    const fillTarget = tw.mode === "blob" ? 1 - hv : 0;
+    const wireTarget = tw.mode === "wire" ? 1 : 0;
+    const er = reduced ? 1 : 1 - Math.pow(0.006, delta);
+    fillP.current += (fillTarget - fillP.current) * er;
+    wireP.current += (wireTarget - wireP.current) * er;
     if (mat.current) {
-      mat.current.opacity = solidOpacity;
-      mat.current.wireframe = wire;
-      mat.current.depthWrite = wire || solidOpacity > 0.5;
+      mat.current.opacity = fillP.current;
+      mat.current.depthWrite = fillP.current > 0.5;
     }
-    g.visible = solidVisible;
+    if (wireMat.current) {
+      wireMat.current.opacity = wireP.current;
+      wireMat.current.depthWrite = false;
+    }
+    if (fillMesh.current) fillMesh.current.visible = fillP.current > 0.003;
+    if (wireMesh.current) wireMesh.current.visible = wireP.current > 0.003;
 
     if (reduced) {
       g.rotation.set(0.2, 0.7, -0.15);
@@ -327,6 +332,7 @@ export function ChromeBlob({
       uniforms.uClickStrength.value = 0;
       g.scale.setScalar(scale);
       if (mat.current) mat.current.roughness = tw.roughness;
+      if (wireMat.current) wireMat.current.roughness = tw.roughness;
       if (shapeOut) {
         shapeOut.current.flow = flowV.current;
         shapeOut.current.distort = distort;
@@ -402,11 +408,12 @@ export function ChromeBlob({
     const sc = scale * (1 + kick.current * 0.06);
     g.scale.setScalar(sc);
     // brief sharpen (spec flash) on click
-    if (mat.current)
-      mat.current.roughness = Math.max(0.01, tw.roughness - kick.current * 0.05);
+    const rgh = Math.max(0.01, tw.roughness - kick.current * 0.05);
+    if (mat.current) mat.current.roughness = rgh;
+    if (wireMat.current) wireMat.current.roughness = rgh;
   });
 
-  // one shared material element for whichever geometry is active
+  // solid fill material (used for the mesh + any GLB geometry)
   const material = (
     <meshStandardMaterial
       ref={mat}
@@ -420,12 +427,31 @@ export function ChromeBlob({
     />
   );
 
+  // Two overlaid meshes sharing the same displacement (same onBeforeCompile →
+  // same uniforms): a solid fill and a wireframe. Crossfading their opacities
+  // gives a fluid fill ↔ wireframe transition (a boolean can't be tweened).
   const knot = (
-    <mesh frustumCulled={false}>
-      {/* single dense sphere — the liquid folds come from the displacement */}
-      <icosahedronGeometry args={[1, 64]} />
-      {material}
-    </mesh>
+    <>
+      <mesh ref={fillMesh} frustumCulled={false}>
+        <icosahedronGeometry args={[1, 64]} />
+        {material}
+      </mesh>
+      <mesh ref={wireMesh} frustumCulled={false} visible={false}>
+        <icosahedronGeometry args={[1, 64]} />
+        <meshStandardMaterial
+          ref={wireMat}
+          metalness={1}
+          roughness={roughness}
+          envMapIntensity={envMapIntensity}
+          color={color}
+          side={DoubleSide}
+          transparent
+          wireframe
+          opacity={0}
+          onBeforeCompile={onBeforeCompile}
+        />
+      </mesh>
+    </>
   );
 
   return (

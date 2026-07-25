@@ -132,6 +132,7 @@ export function ParticleBlob({
   shape: React.MutableRefObject<{ flow: number; distort: number; freq: number }>;
 }) {
   const points = useRef<Points>(null);
+  const hvEased = useRef(0); // eased visibility so mode changes fade smoothly
   const { particleDetail: detail } = useBlobTweak();
 
   const material = useMemo(
@@ -157,10 +158,14 @@ export function ParticleBlob({
   useFrame((state, delta) => {
     const pts = points.current;
     if (!pts) return;
-    // display mode from the control panel overrides the hover dissolve
+    // display mode from the control panel overrides the hover dissolve; ease the
+    // target so switching modes fades the particles in/out rather than snapping
     const mode = blobTweak.get().mode;
-    const hv =
+    const target =
       mode === "particles" ? 1 : mode === "wire" ? 0 : reduced ? 0 : hover.current;
+    hvEased.current +=
+      (target - hvEased.current) * (reduced ? 1 : 1 - Math.pow(0.006, delta));
+    const hv = hvEased.current;
     const u = material.uniforms;
     u.uHover.value = hv;
     u.uTime.value += delta;
