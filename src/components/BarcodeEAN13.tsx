@@ -1,23 +1,32 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PANEL_CLOSE_MS, useBlobOpen } from "@/lib/blobTweak";
 
 /**
- * Real EAN-13 barcode (13 digits, the last a computed check digit). Renders
- * genuine bar modules plus the digits below.
+ * Real EAN-13 barcode (13 digits, the last a computed check digit): genuine bar
+ * modules + the digits below.
  *
- * On hover, ONE scramble runs over the whole row (same decode/glitch as the
- * nav): every slot flickers through random glyphs and locks left-to-right onto
- * its target — either a letter of `hoverWord` (default "OPEN", centred) or
- * nothing, so non-letter digits simply vanish. Single animation, no phases.
- * Vanished/hole slots keep a non-breaking space so their width stays fixed and
- * the revealed word never shifts.
+ * Interaction tied to the TWEAK control panel:
+ *  - hover (panel closed): the digits scramble into `hoverWord` (TWEAK), the
+ *    barcode lights up white and breathes (invites a click);
+ *  - click → panel opens: the white freezes (breathing stops), TWEAK stays;
+ *  - panel closes: it stays lit through the reverse "piano" retract, then — if
+ *    the cursor has left the barcode — it turns off and TWEAK scrambles back to
+ *    the digits, in sync.
  *
  * Pass 12 meaningful digits via `code`; the 13th (check) digit is computed.
  */
 
 const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&/*+<>";
-const NB = "\u00a0"; // non-breaking space: invisible but keeps the slot width
+const NB = " "; // non-breaking space: invisible but keeps the slot width
+
+// off-delays. On panel close we hold TWEAK lit long enough to overlap the
+// reverse-"piano" retract, then scramble back \u2014 starting the casino slightly
+// before the retract fully ends keeps the gap between the two tight. A plain
+// hover-out settles quickly.
+const CLOSE_GRACE_MS = PANEL_CLOSE_MS - 250;
+const HOVER_OFF_MS = 100;
 
 // 7-module encodings
 const L = ["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"];
@@ -48,6 +57,8 @@ function modules(d: number[]): string {
   return s;
 }
 
+type Dir = "tweak" | "digits" | null;
+
 export function BarcodeEAN13({
   code,
   className = "",
@@ -58,7 +69,7 @@ export function BarcodeEAN13({
   className?: string;
   /** 0-based digit positions to blank out (leaves a hole in the number row) */
   gaps?: number[];
-  /** word revealed by the hover scramble, centred on the digit row */
+  /** word revealed by the scramble, centred on the digit row */
   hoverWord?: string;
 }) {
   const d = normalize(code);
@@ -67,7 +78,6 @@ export function BarcodeEAN13({
   const N = digits.length; // 13
   const hidden = useMemo(() => new Set(gaps), [gaps]);
 
-  // centre the word across the 13 slots → which slot holds which letter
   const letters = useMemo(() => {
     const w = hoverWord.toUpperCase();
     const start = Math.floor((N - w.length) / 2);
@@ -76,8 +86,7 @@ export function BarcodeEAN13({
     return m;
   }, [hoverWord, N]);
 
-  // per-slot lock thresholds, scattered (NOT positional) so slots settle
-  // together in the back half rather than sweeping left-to-right
+  // scattered lock thresholds → slots settle together (not left-to-right)
   const thresholds = useMemo(
     () =>
       Array.from(
@@ -87,98 +96,149 @@ export function BarcodeEAN13({
     [N]
   );
 
+  const open = useBlobOpen();
   const [hovering, setHovering] = useState(false);
-  const [prog, setProg] = useState(0);
+  const [on, setOn] = useState(false); // showing TWEAK (hover / panel open / close-grace)
+  const [revealed, setRevealed] = useState(false); // steady TWEAK state
+  const [anim, setAnim] = useState(0); // 0..1 current scramble
+  const [animTo, setAnimTo] = useState<Dir>(null);
   const raf = useRef(0);
-
-  // measure the slot pitch → exact px offset to centre the (even-length) word,
-  // which otherwise lands half a slot off on the 13-slot grid
   const rowRef = useRef<HTMLSpanElement>(null);
   const [centerOffset, setCenterOffset] = useState(0);
-  useEffect(() => {
-    const measure = () => {
-      const el = rowRef.current;
-      if (!el || el.children.length < N) return;
-      const cx = (i: number) => {
-        const r = el.children[i].getBoundingClientRect();
-        return r.left + r.width / 2;
-      };
-      const pitch = (cx(N - 1) - cx(0)) / (N - 1);
-      const start = Math.floor((N - hoverWord.length) / 2);
-      const groupCenterIdx = start + (hoverWord.length - 1) / 2;
-      setCenterOffset(((N - 1) / 2 - groupCenterIdx) * pitch);
+
+  // bright = white + full opacity. It stays bright through EITHER scramble and
+  // only dims once fully settled back on the digits — so the opacity reduction
+  // happens at the END of the reverse casino, never at its start.
+  const bright = on || animTo !== null;
+
+  const measure = useCallback(() => {
+    const el = rowRef.current;
+    if (!el || el.children.length < N) return;
+    const cx = (i: number) => {
+      const r = el.children[i].getBoundingClientRect();
+      return r.left + r.width / 2;
     };
+    const pitch = (cx(N - 1) - cx(0)) / (N - 1);
+    const start = Math.floor((N - hoverWord.length) / 2);
+    const groupCenterIdx = start + (hoverWord.length - 1) / 2;
+    setCenterOffset(((N - 1) / 2 - groupCenterIdx) * pitch);
+  }, [N, hoverWord]);
+
+  useEffect(() => {
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [N, hoverWord]);
+  }, [measure]);
 
-  const run = useCallback(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setProg(1);
+  const runTransition = useCallback(
+    (dir: "tweak" | "digits") => {
+      measure();
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        setRevealed(dir === "tweak");
+        setAnimTo(null);
+        setAnim(1);
+        return;
+      }
+      cancelAnimationFrame(raf.current);
+      setAnimTo(dir);
+      const start = performance.now();
+      const DUR = 620;
+      const tick = (now: number) => {
+        const p = Math.min(1, (now - start) / DUR);
+        setAnim(p);
+        if (p < 1) raf.current = requestAnimationFrame(tick);
+        else {
+          setRevealed(dir === "tweak");
+          setAnimTo(null);
+        }
+      };
+      raf.current = requestAnimationFrame(tick);
+    },
+    [measure]
+  );
+
+  // Single edge-driven state machine. `want` (hover or panel open) turning true
+  // reveals TWEAK immediately; turning false schedules the scramble-back after a
+  // grace delay — long enough to overlap the panel's reverse-"piano" retract when
+  // the panel was open, quick otherwise. Deriving it from ONE effect (not a
+  // recomputed `active` const) avoids the transient false→true flicker that
+  // fired a spurious digit scramble the instant the panel closed.
+  const want = hovering || open;
+  const prevWant = useRef(false);
+  const prevOpen = useRef(false);
+  const offTimer = useRef(0);
+  useEffect(() => {
+    const wasWant = prevWant.current;
+    const wasOpen = prevOpen.current;
+    prevWant.current = want;
+    prevOpen.current = open;
+
+    if (want) {
+      clearTimeout(offTimer.current);
+      if (!wasWant) {
+        setOn(true);
+        runTransition("tweak");
+      }
       return;
     }
-    cancelAnimationFrame(raf.current);
-    const start = performance.now();
-    const DUR = 620;
-    const tick = (now: number) => {
-      const p = Math.min(1, (now - start) / DUR);
-      setProg(p);
-      if (p < 1) raf.current = requestAnimationFrame(tick);
-    };
-    raf.current = requestAnimationFrame(tick);
-  }, []);
-
-  const onEnter = () => {
-    // measure fresh (layout is settled by hover time) → exact centering offset
-    const el = rowRef.current;
-    if (el && el.children.length >= N) {
-      const cx = (i: number) => {
-        const r = el.children[i].getBoundingClientRect();
-        return r.left + r.width / 2;
-      };
-      const pitch = (cx(N - 1) - cx(0)) / (N - 1);
-      const start = Math.floor((N - hoverWord.length) / 2);
-      const groupCenterIdx = start + (hoverWord.length - 1) / 2;
-      setCenterOffset(((N - 1) / 2 - groupCenterIdx) * pitch);
+    if (wasWant) {
+      const delay = wasOpen ? CLOSE_GRACE_MS : HOVER_OFF_MS;
+      clearTimeout(offTimer.current);
+      offTimer.current = window.setTimeout(() => {
+        setOn(false);
+        runTransition("digits");
+      }, delay);
     }
-    setHovering(true);
-    run();
-  };
-  const onLeave = () => {
-    cancelAnimationFrame(raf.current);
-    setHovering(false);
-    setProg(0);
-  };
+  }, [want, open, runTransition]);
 
+  const barFill = bright ? "#ffffff" : "var(--silver-bright)";
   let x = 0;
   const rects = mods.split("").map((m, i) => {
     const rect =
       m === "1" ? (
-        <rect key={i} x={x} y={0} width={1} height={40} fill="var(--silver-bright)" />
+        <rect key={i} x={x} y={0} width={1} height={40} fill={barFill} />
       ) : null;
     x += 1;
     return rect;
   });
 
-  // ONE "casino reel" scramble: all slots spin glyphs at once and stop together
-  // (each on its scattered threshold) onto its target — a letter, or NB (the
-  // non-letter digits disappear). NB keeps slot width fixed so nothing shifts.
+  const tweakCh = (i: number) => letters.get(i) ?? NB;
+  const digitCh = (i: number) => (hidden.has(i) ? NB : digits[i]);
   const slots = digits.split("").map((c, i) => {
-    const isLetter = letters.has(i);
-    if (hidden.has(i) && !isLetter) return { ch: NB, gl: false, on: false };
-    if (!hovering) return { ch: hidden.has(i) ? NB : c, gl: false, on: false };
-    const locked = prog >= thresholds[i];
-    if (!locked)
-      return { ch: GLYPHS[(Math.random() * GLYPHS.length) | 0], gl: true, on: false };
-    return { ch: letters.get(i) ?? NB, gl: false, on: isLetter };
+    if (hidden.has(i) && !letters.has(i)) return { ch: NB, gl: false, on: false };
+    if (animTo) {
+      if (anim < thresholds[i])
+        return { ch: GLYPHS[(Math.random() * GLYPHS.length) | 0], gl: true, on: false };
+      return animTo === "tweak"
+        ? { ch: tweakCh(i), gl: false, on: letters.has(i) }
+        : { ch: digitCh(i), gl: false, on: false };
+    }
+    if (revealed) return { ch: tweakCh(i), gl: false, on: letters.has(i) };
+    return { ch: digitCh(i), gl: false, on: false };
   });
+
+  // how much TWEAK is formed (drives the ½-slot centring nudge)
+  const shown =
+    animTo === "tweak" ? anim : animTo === "digits" ? 1 - anim : revealed ? 1 : 0;
+  const onColor = bright ? "#ffffff" : "var(--silver-bright)";
+
+  // breathe only once the casino reveal has fully settled on TWEAK, while hovered
+  // and the panel is closed (starts AFTER the scramble, never during it)
+  const breathing = hovering && !open && revealed && !animTo;
 
   return (
     <span
-      className={`inline-flex flex-col gap-1 ${className}`}
-      onPointerEnter={onEnter}
-      onPointerLeave={onLeave}
+      className={`inline-flex flex-col gap-1 ${breathing ? "barcode-breath" : ""} ${className}`}
+      style={{
+        // dim at rest so the white "lit" state reads as a clear brightening.
+        // `bright` stays true through the reverse scramble, so this only drops to
+        // 0.5 once the casino has fully settled back on the digits. The breathing
+        // animation (which starts at opacity 1) overrides this while it runs.
+        opacity: bright ? 1 : 0.5,
+        transition: "opacity 480ms ease",
+      }}
+      onPointerEnter={() => setHovering(true)}
+      onPointerLeave={() => setHovering(false)}
     >
       <svg
         aria-hidden
@@ -189,26 +249,20 @@ export function BarcodeEAN13({
       >
         {rects}
       </svg>
-      {/* 13 fixed-width slots, edge-to-edge; one scramble resolves to OPEN.
-          On hover the row nudges half a slot so the word sits dead-centre. */}
       <span
         ref={rowRef}
         aria-label={`Barcode ${digits}`}
-        className="flex w-full justify-between font-mono text-[0.58rem] uppercase leading-none text-silver-muted"
+        className="flex w-full justify-between font-mono text-[0.58rem] uppercase leading-none"
         style={{
-          // tie the centring nudge to the animation: 0 at the start (digits stay
-          // in place), +½ slot only as OPEN forms → no jump before the scramble
-          transform: `translateX(${centerOffset * prog}px)`,
+          transform: `translateX(${centerOffset * shown}px)`,
+          color: bright ? "#f3f5fa" : "var(--silver-muted)",
         }}
       >
         {slots.map((s, i) => (
           <span
             key={i}
             className={s.gl ? "text-glitch" : ""}
-            style={{
-              display: "inline-block",
-              color: s.on ? "var(--silver-bright)" : undefined,
-            }}
+            style={{ display: "inline-block", color: s.on ? onColor : undefined }}
           >
             {s.ch}
           </span>

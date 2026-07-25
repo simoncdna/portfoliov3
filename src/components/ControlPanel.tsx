@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { blobTweak, useBlobTweak } from "@/lib/blobTweak";
+import { blobTweak, PANEL_CLOSE_MS, useBlobTweak } from "@/lib/blobTweak";
 import type { BlobMode } from "@/lib/blobTweak";
 
 const ICON = { box: 40, c: 20, r: 16 } as const;
@@ -551,11 +551,11 @@ export function ControlPanel() {
       };
     }
     // closing: let the reverse "piano" retract play out, THEN hide + reset
-    const total = (n - 1) * STAGGER + REVEAL + 40;
+    // (PANEL_CLOSE_MS is shared with the barcode's turn-off timing)
     const tid = window.setTimeout(() => {
       setShow(false);
       setBoot(0);
-    }, total);
+    }, PANEL_CLOSE_MS);
     return () => clearTimeout(tid);
   }, [t.open, n]);
 

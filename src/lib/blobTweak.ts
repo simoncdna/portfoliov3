@@ -63,3 +63,16 @@ export const blobTweak = {
 export function useBlobTweak(): BlobTweak {
   return useSyncExternalStore(blobTweak.subscribe, blobTweak.get, () => DEFAULTS);
 }
+
+/** Subscribe to just `open` (a primitive) → no re-render on other tweaks. */
+export function useBlobOpen(): boolean {
+  return useSyncExternalStore(
+    blobTweak.subscribe,
+    () => blobTweak.get().open,
+    () => false
+  );
+}
+
+/** Duration of the panel's reverse "piano" close — kept in sync with the
+ *  ControlPanel and the barcode's turn-off timing. */
+export const PANEL_CLOSE_MS = 1200;

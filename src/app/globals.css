@@ -329,6 +329,25 @@ a {
   }
 }
 
+/* Barcode "breathing" while TWEAK is revealed (before opening) — invites a click */
+@keyframes barcode-breath {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.62;
+  }
+}
+.barcode-breath {
+  animation: barcode-breath 2.9s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .barcode-breath {
+    animation: none;
+  }
+}
+
 /* HUD slider: hairline track + thin line thumb (instrument-readout look) */
 .hud-range {
   -webkit-appearance: none;
