@@ -4,35 +4,113 @@ import { useEffect, useRef } from "react";
 import { blobTweak, useBlobTweak } from "@/lib/blobTweak";
 import type { BlobMode } from "@/lib/blobTweak";
 
-/** 3-way form selector: particles / blob / wireframe mesh. */
+const ICON = { box: 40, c: 20, r: 16 } as const;
+
+/** Line-art icon: a sphere built from ~80 dots, sized by depth (particles). */
+function IconDots() {
+  const { c, r } = ICON;
+  const N = 80;
+  const g = Math.PI * (3 - Math.sqrt(5));
+  const pts: [string, string, string, string][] = [];
+  for (let i = 0; i < N; i++) {
+    const y = 1 - (i / (N - 1)) * 2;
+    const rad = Math.sqrt(Math.max(0, 1 - y * y));
+    const th = g * i;
+    const z = Math.sin(th) * rad;
+    const px = c + Math.cos(th) * rad * r;
+    const py = c - y * r;
+    const d = z * 0.5 + 0.5; // 0 (back) .. 1 (front)
+    pts.push([px.toFixed(2), py.toFixed(2), (0.4 + d * 0.85).toFixed(2), (0.45 + d * 0.55).toFixed(2)]);
+  }
+  return (
+    <svg viewBox="0 0 40 40" width="100%" height="100%" aria-hidden preserveAspectRatio="xMidYMid meet">
+      {pts.map(([x, y, rr, o], i) => (
+        <circle key={i} cx={x} cy={y} r={rr} fill="currentColor" opacity={o} />
+      ))}
+    </svg>
+  );
+}
+
+/** Line-art icon: a smooth sphere with dense latitude stripes (blob). */
+function IconBlob() {
+  const { c, r } = ICON;
+  const lats = [-0.84, -0.64, -0.44, -0.22, 0, 0.22, 0.44, 0.64, 0.84];
+  return (
+    <svg viewBox="0 0 40 40" width="100%" height="100%" aria-hidden fill="none" stroke="currentColor" preserveAspectRatio="xMidYMid meet">
+      <circle cx={c} cy={c} r={r} strokeWidth="1" />
+      {lats.map((v, i) => {
+        const rx = r * Math.sqrt(1 - v * v);
+        return (
+          <ellipse
+            key={i}
+            cx={c}
+            cy={(c - r * v).toFixed(2)}
+            rx={rx.toFixed(2)}
+            ry={(rx * 0.22).toFixed(2)}
+            strokeWidth="0.7"
+            opacity="0.9"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+/** Line-art icon: a lat/long wireframe globe (mesh). */
+function IconMesh() {
+  const { c, r } = ICON;
+  const lats = [-0.72, -0.44, -0.16, 0.16, 0.44, 0.72];
+  const lons = [0.3, 0.58, 0.82];
+  return (
+    <svg viewBox="0 0 40 40" width="100%" height="100%" aria-hidden fill="none" stroke="currentColor" strokeWidth="0.7" preserveAspectRatio="xMidYMid meet">
+      <circle cx={c} cy={c} r={r} strokeWidth="1" />
+      {lats.map((v, i) => {
+        const rx = r * Math.sqrt(1 - v * v);
+        return (
+          <ellipse key={"la" + i} cx={c} cy={(c - r * v).toFixed(2)} rx={rx.toFixed(2)} ry={(rx * 0.26).toFixed(2)} />
+        );
+      })}
+      <line x1={c} y1={c - r} x2={c} y2={c + r} />
+      {lons.map((f, i) => (
+        <ellipse key={"lo" + i} cx={c} cy={c} rx={(r * f).toFixed(2)} ry={r} />
+      ))}
+    </svg>
+  );
+}
+
+/** 3-way form selector spread across the full panel width, as line-art icons. */
 function ModeSwitch({ value }: { value: BlobMode }) {
-  const opts: [BlobMode, string][] = [
-    ["particles", "Dots"],
-    ["blob", "Blob"],
-    ["wire", "Mesh"],
+  const opts: [BlobMode, string, () => React.ReactElement][] = [
+    ["particles", "Particles", IconDots],
+    ["blob", "Blob", IconBlob],
+    ["wire", "Mesh", IconMesh],
   ];
   return (
     <div>
       <span className="mb-2 block font-mono text-[0.5rem] uppercase tracking-[0.26em] text-steel-2">
         Form
       </span>
-      <div className="flex gap-4">
-        {opts.map(([k, label]) => (
+      <div className="flex w-full items-end justify-between">
+        {opts.map(([k, label, Icon]) => (
           <button
             key={k}
             type="button"
             onClick={() => blobTweak.set({ mode: k })}
-            className={`cursor-none pb-1 font-mono text-[0.6rem] uppercase tracking-[0.18em] transition-colors ${
+            aria-label={label}
+            title={label}
+            className={`flex flex-1 cursor-none flex-col items-center transition-colors ${
               value === k ? "text-chrome" : "text-silver-muted hover:text-silver"
             }`}
-            style={{
-              borderBottom:
-                value === k
-                  ? "1px solid var(--silver-bright)"
-                  : "1px solid transparent",
-            }}
           >
-            {label}
+            <span className="h-11 w-11">
+              <Icon />
+            </span>
+            <span
+              className="mt-1.5 h-px w-6"
+              style={{
+                background: value === k ? "var(--silver-bright)" : "transparent",
+              }}
+            />
           </button>
         ))}
       </div>
