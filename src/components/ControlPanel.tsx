@@ -83,7 +83,7 @@ function ModeSwitch({ value }: { value: BlobMode }) {
   const opts: [BlobMode, string, () => React.ReactElement][] = [
     ["particles", "Particles", IconDots],
     ["blob", "Blob", IconBlob],
-    // "wire" (Mesh) set aside for now — focusing on particles + blob
+    ["wire", "Mesh", IconMesh],
   ];
   return (
     <div>
@@ -495,13 +495,13 @@ export function ControlPanel() {
     <div key="dials" className="flex gap-5">
       <Dial label="Distort" value={t.distort} min={0} max={1} step={0.01} boot={boot}
         onChange={(v) => blobTweak.set({ distort: v })} />
-      <Dial label="Rough" value={t.roughness} min={0} max={0.6} step={0.01} boot={boot}
+      <Dial label="Rough" value={t.roughness} min={0} max={1} step={0.01} boot={boot}
         onChange={(v) => blobTweak.set({ roughness: v })} />
     </div>,
-    <Oscilloscope key="freq" min={0.1} max={2} step={0.01} boot={boot} active={show} />,
-    <SegBar key="speed" label="Speed" value={t.speed} min={0} max={3} step={0.05} boot={boot}
+    <Oscilloscope key="freq" min={0} max={1} step={0.01} boot={boot} active={show} />,
+    <SegBar key="speed" label="Speed" value={t.speed} min={0} max={1} step={0.05} boot={boot}
       onChange={(v) => blobTweak.set({ speed: v })} />,
-    <SegBar key="particles" label="Particles" value={t.particleDetail} min={8} max={72} step={1} boot={boot}
+    <SegBar key="particles" label="Particles" value={t.particleDetail} min={8} max={100} step={1} boot={boot}
       fmt={(v) => String(Math.round(v))} onChange={(v) => blobTweak.set({ particleDetail: v })} />,
     <label key="tint" className="flex items-center justify-between">
       <span className="font-mono text-[0.58rem] uppercase tracking-[0.2em] text-silver">Tint</span>

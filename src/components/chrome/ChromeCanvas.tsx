@@ -7,6 +7,7 @@ import type { Group } from "three";
 import type { BlobShape } from "./ChromeBlob";
 import { LiquidDna } from "./LiquidDna";
 import { DnaParticles } from "./DnaParticles";
+import { MeshDna } from "./MeshDna";
 
 const smoothstep = (e0: number, e1: number, x: number) => {
   const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
@@ -141,8 +142,10 @@ export function ChromeCanvas({
   ...shape
 }: Props) {
   const scroll = useRef(0);
-  // 0..1 presence of the About section (bell-shaped) → drives the DNA morph
+  // 0..1 presence of the About section → drives the blob→DNA morph + dock
   const about = useRef(0);
+  // 0..1 progress of the About→Work transition → drives the grow/exit/re-form
+  const work = useRef(0);
   // start off-screen so the blob loads SOLID (cursor not over it yet)
   const pointer = useRef({ x: 2, y: 2 });
   const hover = useRef(0);
@@ -173,14 +176,12 @@ export function ChromeCanvas({
         // from the bottom — then PERSISTS at 1 once formed. For now the helix
         // stays docked (it does NOT morph into the next section); continued
         // scroll just keeps spinning it.
+        const vh = window.innerHeight;
         const ab = document.getElementById("about");
-        if (ab) {
-          const top = ab.getBoundingClientRect().top;
-          const vh = window.innerHeight;
-          about.current = smoothstep(vh * 1.0, vh * 0.35, top);
-        } else {
-          about.current = 0;
-        }
+        about.current = ab ? smoothstep(vh * 1.0, vh * 0.35, ab.getBoundingClientRect().top) : 0;
+        // About→Work: rises as Work approaches → grow/exit/re-form choreography
+        const wk = document.getElementById("work");
+        work.current = wk ? smoothstep(vh * 0.9, vh * 0.2, wk.getBoundingClientRect().top) : 0;
         ticking = false;
       });
     };
@@ -254,8 +255,9 @@ export function ChromeCanvas({
           {/* The central form is the blob→DNA morph, in 3 panel-selectable
               representations (Form switch): liquid / particles / wireframe mesh.
               All follow the same about-driven morph + dock. */}
-          <LiquidDna about={about} scroll={scroll} pointer={pointer} reduced={reduced} />
+          <LiquidDna about={about} work={work} scroll={scroll} reduced={reduced} />
           <DnaParticles about={about} scroll={scroll} reduced={reduced} />
+          <MeshDna about={about} scroll={scroll} reduced={reduced} />
         </Suspense>
       </Canvas>
     </div>

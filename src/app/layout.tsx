@@ -3,7 +3,6 @@ import { Anton, Archivo, Space_Mono } from "next/font/google";
 import "./globals.css";
 import { SmoothScroll } from "@/components/SmoothScroll";
 import { Cursor } from "@/components/Cursor";
-import { Grain } from "@/components/Grain";
 import { Preloader } from "@/components/Preloader";
 
 const display = Anton({
@@ -52,7 +51,6 @@ export default function RootLayout({
     >
       <body>
 				{/*<Preloader />*/}
-        <Grain />
         <Cursor />
         <SmoothScroll>{children}</SmoothScroll>
       </body>

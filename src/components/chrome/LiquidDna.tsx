@@ -5,12 +5,12 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEnvironment } from "@react-three/drei";
 import { BufferAttribute, BufferGeometry, Color, Matrix3, ShaderMaterial, Vector2, Vector3 } from "three";
 import type { Mesh } from "three";
-import { blobTweak } from "@/lib/blobTweak";
+import { blobTweak, DISTORT_MAX, TIME_RATE, SPIN_RATE, FORM_RADIUS } from "@/lib/blobTweak";
 
 type Props = {
   about?: React.MutableRefObject<number>;
+  work?: React.MutableRefObject<number>;
   scroll?: React.MutableRefObject<number>;
-  pointer?: React.MutableRefObject<{ x: number; y: number }>;
   reduced?: boolean;
 };
 
@@ -33,12 +33,11 @@ uniform float uTime;
 uniform float uPres;      // 0..1 blob → DNA
 uniform float uSpin;      // helix rotation (rad)
 uniform float uDock;      // world x offset
+uniform float uScale;     // global grow/shrink (section exit choreography)
 uniform float uFade;
 uniform float uRough;     // 0 = mirror, higher = duller (panel)
 uniform float uDistort;   // living-noise amplitude (panel)
 uniform float uFreq;      // living-noise frequency (panel)
-uniform vec3  uCursorDir; // magnetic pull direction (local space)
-uniform float uHover;     // 0..1 cursor-over-form strength
 uniform sampler2D uEnv;
 uniform float uEnvInt;
 uniform float uEnvRot;
@@ -93,6 +92,10 @@ float snoise(vec3 v){
   return 42.0 * dot(m*m, vec4(dot(pp0,x0), dot(pp1,x1), dot(pp2,x2), dot(pp3,x3)));
 }
 
+// 2 octaves — same mix as the old vertex-displaced blob, so the surface reads
+// with detail at two scales instead of one smooth simplex lobe.
+float fbm(vec3 p){ return snoise(p) * 0.7 + snoise(p * 2.1) * 0.3; }
+
 float smin(float a, float b, float k){
   float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);
   return mix(b, a, h) - k*h*(1.0-h);
@@ -104,7 +107,7 @@ float sdCapsule(vec3 p, vec3 a, vec3 b, float r){
 }
 
 // ---------- shape constants ----------
-const float BR    = 2.1;   // blob radius
+const float BR    = ${FORM_RADIUS.toFixed(2)};  // blob radius (shared, see blobTweak)
 const float HR    = 0.8;   // helix radius
 const float TUBE  = 0.24;  // strand tube radius (chunky)
 const float HH    = 1.9;   // helix half-height
@@ -142,10 +145,18 @@ float sdDna(vec3 p){
   d = smin(d, sdRungs(p), 0.16);
   return d;
 }
+// Domain-warped fbm, ported from the old vertex-displaced blob: the noise field
+// is itself displaced by noise (offsets larger than the domain), which is what
+// produced the stringy asymmetric "liquid" lobes rather than regular bumps.
+// Dividing p by BR renormalises to the old unit-sphere noise space so uFreq maps
+// to the same feature size, and the amplitude scales with BR so uDistort stays a
+// fraction of the radius (it used to be an absolute world offset → 4x weaker).
 float sdBlob(vec3 p){
-  float fscale = 0.8 + uFreq * 1.4;
-  float n = snoise(p * fscale + vec3(0.0, uTime * 0.3, 0.0)) * uDistort;
-  return length(p) - (BR + n);
+  vec3 sp = (p / BR) * uFreq;
+  vec3 wrp = sp + vec3(snoise(sp + vec3(0.0, uTime * 0.30, 0.0)),
+                       snoise(sp + vec3(3.1, 1.7, uTime * 0.18)),
+                       snoise(sp + vec3(9.2, 5.3, uTime * 0.12))) * 0.9;
+  return length(p) - (BR + fbm(wrp) * uDistort * BR);
 }
 
 // full scene SDF (blob → DNA morph + living flow)
@@ -154,26 +165,30 @@ float map(vec3 wp){
   vec3 p = wp - vec3(uDock, 0.0, 0.0);
   float c = cos(uSpin), s = sin(uSpin);
   p = vec3(c*p.x - s*p.z, p.y, s*p.x + c*p.z);
-  // magnetic lean: the whole piece drifts toward the cursor
-  p -= uCursorDir * (uHover * 0.07);
-  float dB = sdBlob(p);
-  float dD = sdDna(p);
-  float d = mix(dB, dD, uPres);
-  // living surface flow (ripples), stronger once assembled
-  float flow = snoise(p * 1.6 + vec3(uTime * 0.5, uTime * 0.35, 0.0)) * uDistort * (0.25 + 0.35 * uPres);
+  p /= uScale;                 // global grow/shrink for the section exit
+  // uPres is a uniform, so both branches are coherent across every pixel of the
+  // draw — effectively free, and they skip 5 noise fetches whenever one of the
+  // two forms is fully absent (i.e. everywhere except during the morph itself).
+  float d;
+  if (uPres < 0.001)      d = sdBlob(p);
+  else if (uPres > 0.999) d = sdDna(p);
+  else                    d = mix(sdBlob(p), sdDna(p), uPres);
+  // living surface flow (ripples), stronger once assembled. The 0.55 keeps this
+  // term at its previous absolute amplitude now that uDistort is no longer
+  // pre-scaled on the JS side — the DNA's only noise source, so it stays put.
+  float flow = snoise(p * 1.6 + vec3(uTime * 0.5, uTime * 0.35, 0.0)) * uDistort * 0.55 * (0.25 + 0.35 * uPres);
   d -= flow;
-  // magnetic stretch: the cursor-facing side reaches out toward it
-  float aim = max(dot(normalize(p + vec3(1e-4)), uCursorDir), 0.0);
-  d -= pow(aim, 2.5) * uHover * 0.2;
-  return d;
+  return d * uScale;
 }
+// 4-tap tetrahedron gradient instead of 6-tap central differences: same normal
+// quality, two fewer map() evaluations (i.e. 12 fewer noise fetches per pixel).
 vec3 calcNormal(vec3 p){
-  vec2 e = vec2(0.0015, 0.0);
-  return normalize(vec3(
-    map(p+e.xyy) - map(p-e.xyy),
-    map(p+e.yxy) - map(p-e.yxy),
-    map(p+e.yyx) - map(p-e.yyx)
-  ));
+  vec2 k = vec2(1.0, -1.0);
+  float e = 0.0015;
+  return normalize(k.xyy * map(p + k.xyy*e) +
+                   k.yyx * map(p + k.yyx*e) +
+                   k.yxy * map(p + k.yxy*e) +
+                   k.xxx * map(p + k.xxx*e));
 }
 vec3 sampleEnv(vec3 dir){
   float ca = cos(uEnvRot), sa = sin(uEnvRot);
@@ -188,16 +203,41 @@ void main(){
   vec3 rd = normalize(uCamRot * vec3(ndc * uTanHalf, -1.0));
   vec3 ro = uCamPos;
 
-  // raymarch
-  float t = 0.0;
+  // Analytic bounding sphere first. The quad is fullscreen but the form covers a
+  // fraction of it, so without this the majority of pixels marched through empty
+  // space — paying full noise cost — only to miss. Rays that cannot reach the
+  // form now discard before a single noise fetch, and rays that can start at the
+  // sphere instead of creeping there from the camera. The margin covers the flow
+  // ripple on top of the noise-displaced radius.
+  float bRad = uScale * (BR * (1.0 + uDistort) + 0.6);
+  vec3  bc  = vec3(uDock, 0.0, 0.0) - ro;
+  float tca = dot(bc, rd);
+  float dc2 = dot(bc, bc) - tca * tca;
+  float r2  = bRad * bRad;
+  if (dc2 > r2) discard;
+  float thc  = sqrt(r2 - dc2);
+  float t    = max(tca - thc, 0.0);
+  float tMax = tca + thc;
+
+  // The warped-fbm displacement makes map() overestimate the true distance (a
+  // subtracted noise is not a distance field), so the step needs a safety factor
+  // or rays punch through the surface and speckle it. Rather than guess one,
+  // derive it from a bound on the field's gradient: the radial term contributes
+  // 1.0, and the noise term contributes amplitude (uDistort*BR) x fbm slope
+  // (≈2.7) x warp slope (≈2.8) x domain scale (uFreq/BR) — the BR cancels, so
+  // it collapses to uDistort * 7.5 * uFreq. Both are uniforms, so this costs
+  // nothing and adapts: gentle settings march in big strides while a maxed-out
+  // dial automatically creeps (~0.2) instead of speckling. The +1.1 is the flow
+  // ripple, whose frequency is fixed rather than tied to uFreq — without it,
+  // uFreq at 0 would wrongly look like a clean sphere and step straight through.
+  float stepK = 1.0 / (1.0 + uDistort * (7.5 * uFreq + 1.1));
   float d = 0.0;
   bool hit = false;
   for (int i = 0; i < 96; i++){
-    vec3 p = ro + rd * t;
-    d = map(p);
+    d = map(ro + rd * t);
     if (d < 0.0015) { hit = true; break; }
-    t += d * 0.9;
-    if (t > 18.0) break;
+    t += d * stepK;
+    if (t > tMax) break;
   }
   if (!hit) discard;
 
@@ -207,8 +247,14 @@ void main(){
   vec3 env = sampleEnv(refl);
   float fres = pow(1.0 - clamp(dot(n, -rd), 0.0, 1.0), 3.0);
   vec3 tint = mix(uLo, uHi, 0.75);
-  // roughness (panel): 0 = punchy mirror, higher = duller with more matte fill
-  vec3 col = env * tint * (1.2 - uRough * 1.1) + fres * vec3(1.0, 0.97, 0.92) * 0.4 + tint * (0.05 + uRough * 0.6);
+  // roughness (panel 0..1): 0 = punchy mirror, 1 = fully matte. Both the mirror
+  // and its fresnel rim reach exactly zero at 1.0 — a rim highlight surviving on
+  // a "fully rough" surface is what would still read as chrome — leaving only
+  // the flat tinted fill.
+  float mirror = 1.0 - uRough;
+  vec3 col = env * tint * (1.2 * mirror)
+           + fres * vec3(1.0, 0.97, 0.92) * 0.4 * mirror
+           + tint * (0.05 + uRough * 0.6);
   gl_FragColor = vec4(col, uFade);
 }
 `;
@@ -221,7 +267,7 @@ void main(){
 }
 `;
 
-export function LiquidDna({ about, scroll, pointer, reduced }: Props) {
+export function LiquidDna({ about, work, scroll, reduced }: Props) {
   const { camera, size } = useThree();
   const envMap = useEnvironment({ preset: "studio" });
   const meshRef = useRef<Mesh>(null);
@@ -229,10 +275,7 @@ export function LiquidDna({ about, scroll, pointer, reduced }: Props) {
   const spin = useRef(0);
   const appear = useRef(0); // load-in fade (the liquid is the permanent hero form)
   const modeVis = useRef(1); // eased visibility for the "blob" (liquid) form mode
-  const hover = useRef(0); // eased cursor-over-form strength
   const colScratch = useMemo(() => new Color(), []);
-  const ndcScratch = useMemo(() => new Vector3(), []);
-  const dirScratch = useMemo(() => new Vector3(), []);
 
   const { geometry, material } = useMemo(() => {
     const geometry = new BufferGeometry();
@@ -251,12 +294,11 @@ export function LiquidDna({ about, scroll, pointer, reduced }: Props) {
         uPres: { value: 0 },
         uSpin: { value: 0 },
         uDock: { value: 0 },
+        uScale: { value: 1 },
         uFade: { value: 0 },
         uRough: { value: 0.12 },
         uDistort: { value: 0.25 },
         uFreq: { value: 0.5 },
-        uCursorDir: { value: new Vector3(0, 0, 1) },
-        uHover: { value: 0 },
         uEnv: { value: null },
         uEnvInt: { value: ENV_INTENSITY },
         uEnvRot: { value: ENV_ROT_Y },
@@ -287,48 +329,37 @@ export function LiquidDna({ about, scroll, pointer, reduced }: Props) {
     if (fade <= 0.004) return;
 
     // living motion + speed from the panel (speed 0 → fully frozen)
-    u.uTime.value += delta * tw.speed * 1.3;
+    u.uTime.value += delta * tw.speed * TIME_RATE;
 
-    // scroll morphs the liquid: blob (sphere) at hero → DNA docked left at About
-    const target = reduced ? 0 : Math.max(0, Math.min(1, about?.current ?? 0));
-    pres.current += (target - pres.current) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
-    const v = pres.current;
-    u.uPres.value = v;
-    u.uDock.value = DOCK_X * v;
-    spin.current += delta * tw.speed * 0.7; // idle spin only when speed > 0
+    // eased About presence (blob→DNA + dock)
+    const aboutTarget = reduced ? 0 : Math.max(0, Math.min(1, about?.current ?? 0));
+    pres.current += (aboutTarget - pres.current) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
+    const a = pres.current;
+
+    // ---- About→Work exit choreography (placeholder: grow → exit → re-sphere) ----
+    const w = reduced ? 0 : Math.max(0, Math.min(1, work?.current ?? 0));
+    const dip = smoothstep(0.5, 0.72, w); // DNA → sphere (placeholder next form)
+    const grow = smoothstep(0, 0.5, w) - smoothstep(0.5, 1.0, w); // 0 → ~1 → 0
+    u.uPres.value = a * (1 - dip);
+    u.uDock.value = DOCK_X * a * (1 - smoothstep(0.4, 0.85, w));
+    u.uScale.value = 1 + grow * 0.9; // grows as it exits, back to 1 for the sphere
+    spin.current += delta * (tw.speed * SPIN_RATE + w * 2.0); // faster on exit
     u.uSpin.value = spin.current + (scroll?.current ?? 0) * Math.PI * 3.0;
+
+    // visibility dips at the exit midpoint (the "transform" moment) then re-enters
+    const visMul = w < 0.5 ? 1 - smoothstep(0.2, 0.5, w) : smoothstep(0.5, 0.85, w);
+    u.uFade.value = fade * visMul;
 
     // panel-driven material: colour → tint, roughness, distort/freq → living noise
     colScratch.set(tw.color);
     (u.uHi.value as Vector3).set(colScratch.r, colScratch.g, colScratch.b);
     (u.uLo.value as Vector3).set(colScratch.r * 0.5, colScratch.g * 0.5, colScratch.b * 0.5);
     u.uRough.value = tw.roughness;
-    u.uDistort.value = tw.distort * 0.55; // 0 in the panel → perfectly smooth
+    // panel 0..1 → 0..DISTORT_MAX, a fraction of the radius (sdBlob scales it by
+    // BR itself) like the old blob did. 0 in the panel → perfectly smooth.
+    u.uDistort.value = tw.distort * DISTORT_MAX;
     u.uFreq.value = tw.freq;
     u.uEnv.value = envMap;
-
-    // ---- magnetic hover: pull/stretch the piece toward the cursor ----
-    let hoverTarget = 0;
-    const ptr = pointer?.current;
-    if (ptr && !reduced) {
-      // where the form is on screen (its docked centre → NDC)
-      ndcScratch.set(u.uDock.value, 0, 0).project(camera);
-      const cx = ptr.x;
-      const cy = -ptr.y; // pointer.y is top-down; NDC y is bottom-up
-      const dx = cx - ndcScratch.x;
-      const dy = cy - ndcScratch.y;
-      hoverTarget = 1 - smoothstep(0.2, 0.65, Math.hypot(dx, dy));
-      // cursor direction in the SDF's (spun) local frame
-      const aspect = size.width / size.height;
-      const ox = dx * aspect;
-      const cs = Math.cos(u.uSpin.value);
-      const sn = Math.sin(u.uSpin.value);
-      dirScratch.set(cs * ox, dy, sn * ox);
-      if (dirScratch.lengthSq() > 1e-6) dirScratch.normalize();
-      (u.uCursorDir.value as Vector3).copy(dirScratch);
-    }
-    hover.current += (hoverTarget - hover.current) * (1 - Math.pow(0.02, delta));
-    u.uHover.value = hover.current;
 
     const fov = (camera as { fov?: number }).fov ?? 42;
     const tanHalf = Math.tan((fov * Math.PI) / 180 / 2);
