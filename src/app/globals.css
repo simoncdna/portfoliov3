@@ -329,6 +329,35 @@ a {
   }
 }
 
+/* HUD slider: hairline track + thin line thumb (instrument-readout look) */
+.hud-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  background: var(--steel-2);
+  outline: none;
+  cursor: none;
+}
+.hud-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 2px;
+  height: 12px;
+  border: none;
+  border-radius: 0;
+  background: var(--silver-bright);
+  cursor: none;
+}
+.hud-range::-moz-range-thumb {
+  width: 2px;
+  height: 12px;
+  border: none;
+  border-radius: 0;
+  background: var(--silver-bright);
+  cursor: none;
+}
+
 /* Nav hover: deliberate digital glitch (RGB split + jitter) while scrambling */
 @keyframes text-glitch {
   0%,

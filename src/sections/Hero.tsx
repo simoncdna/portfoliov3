@@ -5,6 +5,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import { BarcodeEAN13 } from "@/components/BarcodeEAN13";
+import { blobTweak } from "@/lib/blobTweak";
 import { site } from "@/data/site";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -82,12 +83,19 @@ export function Hero() {
           [ Portfolio ]
         </span>
         {/* hidden cipher — A=01..Z=26 → "CHROME" (03 08 18 15 13 05);
-            hover reveals TWEAK (5 letters → centred with no translate) */}
-        <BarcodeEAN13
-          code="030818151305"
-          hoverWord="TWEAK"
-          className="w-40 opacity-90"
-        />
+            hover reveals TWEAK; click opens the blob control panel */}
+        <button
+          type="button"
+          onClick={() => blobTweak.toggle()}
+          aria-label="Open blob controls"
+          className="cursor-none"
+        >
+          <BarcodeEAN13
+            code="030818151305"
+            hoverWord="TWEAK"
+            className="w-40 opacity-90"
+          />
+        </button>
       </div>
     </section>
   );

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF, useFBX } from "@react-three/drei";
 import { Vector3, Quaternion, Color, DoubleSide } from "three";
+import { blobTweak } from "@/lib/blobTweak";
 import type {
   BufferGeometry,
   Group,
@@ -275,6 +276,8 @@ export function ChromeBlob({
     const t = state.clock.elapsedTime;
     uniforms.uTime.value = t;
     uniforms.uHoleAmount.value = reduced ? 0 : clickHoles;
+    // live overrides from the custom control panel (see ControlPanel / blobTweak)
+    const tw = blobTweak.get();
 
     // ---- scroll-scrubbed shape MODE (0..3): smooth → twist → spikes → melt ----
     const sp = Math.max(0, Math.min(1, scroll.current));
@@ -283,14 +286,14 @@ export function ChromeBlob({
     morphV.current += (morphTarget - morphV.current) * ms;
     uniforms.uMorph.value = morphV.current;
     uniforms.uFreq.value = freq;
-    uniforms.uDistort.value = distort;
+    uniforms.uDistort.value = tw.distort;
 
-    // live material tuning (from dev controls)
+    // live material tuning (dev controls + custom panel)
     if (mat.current) {
       mat.current.envMapIntensity = envMapIntensity;
-      if (color !== lastColor.current) {
-        mat.current.color = new Color(color);
-        lastColor.current = color;
+      if (tw.color !== lastColor.current) {
+        mat.current.color = new Color(tw.color);
+        lastColor.current = tw.color;
       }
     }
 
@@ -309,7 +312,7 @@ export function ChromeBlob({
       uniforms.uPointerStrength.value = 0;
       uniforms.uClickStrength.value = 0;
       g.scale.setScalar(scale);
-      if (mat.current) mat.current.roughness = roughness;
+      if (mat.current) mat.current.roughness = tw.roughness;
       if (shapeOut) {
         shapeOut.current.flow = flowV.current;
         shapeOut.current.distort = distort;
@@ -336,7 +339,7 @@ export function ChromeBlob({
     sloshV.current += (sloshTarget - sloshV.current) * sRate;
     const sl = sloshV.current * slosh;
     // advance a CONTINUOUS flow phase — never modulate time*speed (phase jumps)
-    flowV.current += delta * (speed + sl * 2.0);
+    flowV.current += delta * (tw.speed + sl * 2.0);
     uniforms.uFlow.value = flowV.current;
     uniforms.uWobble.value = sl * 0.3 + kick.current * 0.2;
     if (shapeOut) {
@@ -386,7 +389,7 @@ export function ChromeBlob({
     g.scale.setScalar(sc);
     // brief sharpen (spec flash) on click
     if (mat.current)
-      mat.current.roughness = Math.max(0.01, roughness - kick.current * 0.05);
+      mat.current.roughness = Math.max(0.01, tw.roughness - kick.current * 0.05);
   });
 
   // one shared material element for whichever geometry is active

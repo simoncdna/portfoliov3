@@ -4,6 +4,7 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Color, ShaderMaterial } from "three";
 import type { Group, Points } from "three";
+import { useBlobTweak } from "@/lib/blobTweak";
 
 /**
  * Point-cloud "real particle blob" — faithful to Eli Fitch's CodePen (opNeMW):
@@ -131,6 +132,7 @@ export function ParticleBlob({
   shape: React.MutableRefObject<{ flow: number; distort: number; freq: number }>;
 }) {
   const points = useRef<Points>(null);
+  const { particleDetail: detail } = useBlobTweak();
 
   const material = useMemo(
     () =>
@@ -174,7 +176,7 @@ export function ParticleBlob({
 
   return (
     <points ref={points} frustumCulled={false}>
-      <icosahedronGeometry args={[1, 56]} />
+      <icosahedronGeometry args={[1, detail]} />
       <primitive object={material} attach="material" />
     </points>
   );
