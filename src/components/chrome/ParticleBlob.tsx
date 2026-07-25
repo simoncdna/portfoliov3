@@ -164,7 +164,7 @@ export function ParticleBlob({
     const target =
       mode === "particles" ? 1 : mode === "wire" ? 0 : reduced ? 0 : hover.current;
     hvEased.current +=
-      (target - hvEased.current) * (reduced ? 1 : 1 - Math.pow(0.006, delta));
+      (target - hvEased.current) * (reduced ? 1 : 1 - Math.pow(0.02, delta));
     const hv = hvEased.current;
     const u = material.uniforms;
     u.uHover.value = hv;

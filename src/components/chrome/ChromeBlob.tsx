@@ -221,8 +221,8 @@ export function ChromeBlob({
   const wireMat = useRef<MeshStandardMaterial>(null);
   const fillMesh = useRef<Mesh>(null);
   const wireMesh = useRef<Mesh>(null);
-  const fillP = useRef(1); // eased presence of the solid fill
-  const wireP = useRef(0); // eased presence of the wireframe overlay
+  const surfaceP = useRef(1); // eased presence of the surface (blob + wire share it)
+  const wireMix = useRef(0); // eased 0 = filled, 1 = wireframe
   const rot = useRef({ x: 0, y: 0 });
   const kick = useRef(0);
   const lastColor = useRef("");
@@ -304,25 +304,33 @@ export function ChromeBlob({
     }
     if (wireMat.current) wireMat.current.envMapIntensity = envMapIntensity;
 
-    // ---- smooth crossfade between fill / wireframe (particles are handled in
-    //      ParticleBlob). Each representation has an eased presence 0..1, so
-    //      switching modes fades rather than snaps. ----
+    // ---- fluid blob ↔ wireframe (+ particles handled in ParticleBlob) ----
+    // The surface is shared between blob & wire; `wireMix` cross-dissolves its
+    // render style in TWO PHASES so it never ghosts: the wireframe emerges over
+    // the filled surface first, then the fill melts away (and the reverse).
     const hv = hover ? hover.current : 0;
-    const fillTarget = tw.mode === "blob" ? 1 - hv : 0;
+    const surfaceTarget =
+      tw.mode === "particles" ? 0 : tw.mode === "blob" ? 1 - hv : 1;
     const wireTarget = tw.mode === "wire" ? 1 : 0;
-    const er = reduced ? 1 : 1 - Math.pow(0.006, delta);
-    fillP.current += (fillTarget - fillP.current) * er;
-    wireP.current += (wireTarget - wireP.current) * er;
+    const er = reduced ? 1 : 1 - Math.pow(0.02, delta); // smoother settle
+    surfaceP.current += (surfaceTarget - surfaceP.current) * er;
+    wireMix.current += (wireTarget - wireMix.current) * er;
+    const ss = (e0: number, e1: number, x: number) => {
+      const u = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+      return u * u * (3 - 2 * u);
+    };
+    const fp = surfaceP.current * (1 - ss(0.35, 1, wireMix.current));
+    const wp = surfaceP.current * ss(0, 0.65, wireMix.current);
     if (mat.current) {
-      mat.current.opacity = fillP.current;
-      mat.current.depthWrite = fillP.current > 0.5;
+      mat.current.opacity = fp;
+      mat.current.depthWrite = fp > 0.5;
     }
     if (wireMat.current) {
-      wireMat.current.opacity = wireP.current;
+      wireMat.current.opacity = wp;
       wireMat.current.depthWrite = false;
     }
-    if (fillMesh.current) fillMesh.current.visible = fillP.current > 0.003;
-    if (wireMesh.current) wireMesh.current.visible = wireP.current > 0.003;
+    if (fillMesh.current) fillMesh.current.visible = fp > 0.003;
+    if (wireMesh.current) wireMesh.current.visible = wp > 0.003;
 
     if (reduced) {
       g.rotation.set(0.2, 0.7, -0.15);
@@ -440,10 +448,12 @@ export function ChromeBlob({
         <icosahedronGeometry args={[1, 64]} />
         <meshStandardMaterial
           ref={wireMat}
-          metalness={1}
-          roughness={roughness}
+          metalness={0.6}
+          roughness={0.35}
           envMapIntensity={envMapIntensity}
           color={color}
+          emissive="#565a63"
+          emissiveIntensity={0.3}
           side={DoubleSide}
           transparent
           wireframe
