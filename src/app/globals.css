@@ -5,7 +5,7 @@
    ============================================================ */
 :root {
   /* color */
-  --void: #050505;
+  --void: #0c0c0e; /* lifted to a flat, matte black (was near-pure #050505) */
   --ink: #0b0b0d;
   --ink-2: #101013;
   --steel: #26272c;
@@ -13,12 +13,12 @@
   --silver-muted: #7c7d86; /* AA ~5:1 on --void for small labels */
   --silver: #a8abb4;
   --silver-bright: #d6d8de;
-  --chrome: #eef0f4;
-  --spec: #ffffff;
+  --chrome: #faf6f1; /* cream (was white #eef0f4) */
+  --spec: #faf6f1;
 
   --grad-chrome: linear-gradient(
     180deg,
-    #ffffff 0%,
+    #faf6f1 0%,
     #c9ccd3 22%,
     #83868f 50%,
     #e4e6eb 74%,
@@ -74,6 +74,12 @@ html {
   color: var(--silver-bright);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* hide the native scrollbar (Lenis handles smooth scrolling) */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge/IE */
+}
+html::-webkit-scrollbar {
+  display: none; /* Chrome / Safari */
 }
 
 body {
@@ -152,14 +158,14 @@ a {
 .chrome-text {
   background: linear-gradient(
     180deg,
-    #ffffff 0%,
+    #faf6f1 0%,
     #eaedf3 16%,
     #9a9ea8 40%,
     #45484f 49%,
     #202228 51%,
     #838893 60%,
     #e6e9ef 82%,
-    #ffffff 100%
+    #faf6f1 100%
   );
   background-size: 100% 260%;
   -webkit-background-clip: text;

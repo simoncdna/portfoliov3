@@ -1,55 +1,38 @@
 "use client";
 
-import { useRef } from "react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { useGSAP } from "@gsap/react";
+import { useEffect, useRef } from "react";
 import { BarcodeEAN13 } from "@/components/BarcodeEAN13";
 import { blobTweak } from "@/lib/blobTweak";
 import { site } from "@/data/site";
 
-gsap.registerPlugin(ScrollTrigger, useGSAP);
-
 export function Hero() {
-  const ref = useRef<HTMLElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
 
-  useGSAP(
-    () => {
-      const el = ref.current;
+  // On scroll, the bottom row ([ Portfolio ] + barcode) rises and fades out over
+  // the first ~45% of a viewport of scroll (and fades back in on the way up).
+  useEffect(() => {
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      const el = rowRef.current;
       if (!el) return;
-      const lines = el.querySelectorAll<HTMLElement>("[data-hero-line]");
-
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        gsap.set(lines, { yPercent: 0, opacity: 1, clipPath: "none" });
-        return;
+      const p = Math.min(1, window.scrollY / (window.innerHeight * 0.3));
+      el.style.opacity = String(1 - p);
+      el.style.transform = `translateY(${(-p * 44).toFixed(1)}px)`;
+    };
+    const onScroll = () => {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(update);
       }
-
-      // pin the hero; the headline composes as you scroll through the pin
-      gsap
-        .timeline({
-          scrollTrigger: {
-            trigger: el,
-            start: "top top",
-            end: "+=110%",
-            pin: true,
-            scrub: 1,
-          },
-        })
-        .from(lines, {
-          yPercent: 120,
-          opacity: 0,
-          clipPath: "inset(0 0 100% 0)",
-          stagger: 0.25,
-          ease: "none",
-        })
-        .to({}, { duration: 0.35 }); // brief hold before release
-    },
-    { scope: ref }
-  );
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    update();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   return (
     <section
-      ref={ref}
       id="top"
       className="relative flex min-h-[100svh] flex-col justify-between overflow-hidden pt-28 pb-8"
     >
@@ -57,28 +40,13 @@ export function Hero() {
         {site.name} — {site.role}
       </h1>
 
-      {/* Pinned headline — composes over the morphing blob */}
-      <div aria-hidden className="shell relative z-20 mix-blend-difference">
-        <div className="flex flex-col">
-          <span
-            data-hero-line
-            className="font-display fs-mega block text-chrome"
-            style={{ willChange: "transform, clip-path" }}
-          >
-            Frontend
-          </span>
-          <span
-            data-hero-line
-            className="font-display fs-mega block self-end text-right text-chrome"
-            style={{ willChange: "transform, clip-path" }}
-          >
-            Developer
-          </span>
-        </div>
-      </div>
-
-      {/* Bottom row: [ PORTFOLIO ] tag (left) + edit no. & barcode (right) */}
-      <div className="shell relative z-20 flex items-end justify-between">
+      {/* Bottom row: [ Portfolio ] tag (left) + edit no. & barcode (right).
+          mt-auto pins it to the bottom now that the headline above is gone. */}
+      <div
+        ref={rowRef}
+        className="shell relative z-20 mt-auto flex items-end justify-between"
+        style={{ willChange: "opacity, transform" }}
+      >
         <span className="font-mono text-[0.72rem] uppercase tracking-[0.2em] text-silver-muted">
           [ Portfolio ]
         </span>

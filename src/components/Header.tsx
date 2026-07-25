@@ -27,7 +27,6 @@ export function Header() {
       style={{
         backgroundColor: scrolled ? "rgba(5,5,5,0.6)" : "transparent",
         backdropFilter: scrolled ? "blur(10px)" : "none",
-        borderBottom: `1px solid ${scrolled ? "var(--steel)" : "transparent"}`,
       }}
     >
       <nav className="shell flex items-center justify-between py-4">

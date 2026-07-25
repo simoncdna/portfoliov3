@@ -83,7 +83,7 @@ function ModeSwitch({ value }: { value: BlobMode }) {
   const opts: [BlobMode, string, () => React.ReactElement][] = [
     ["particles", "Particles", IconDots],
     ["blob", "Blob", IconBlob],
-    ["wire", "Mesh", IconMesh],
+    // "wire" (Mesh) set aside for now — focusing on particles + blob
   ];
   return (
     <div>

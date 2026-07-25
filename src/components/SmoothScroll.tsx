@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import Lenis from "lenis";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { blobTweak } from "@/lib/blobTweak";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -19,15 +20,24 @@ export function SmoothScroll({ children }: { children: React.ReactNode }) {
     if (prefersReduced) return;
 
     const lenis = new Lenis({
-      duration: 1.15,
+      // a touch more inertia/resistance than before (heavier, slower settle)
+      duration: 1.35,
       easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
       smoothWheel: true,
+      wheelMultiplier: 0.9,
       touchMultiplier: 1.6,
     });
 
     // Single clock: drive Lenis from GSAP's ticker so Lenis, ScrollTrigger and
     // every scrubbed animation share the exact same frame → no desync.
-    lenis.on("scroll", ScrollTrigger.update);
+    // Also: any real scroll dismisses the blob control panel if it's open.
+    const onLenisScroll = () => {
+      ScrollTrigger.update();
+      if (blobTweak.get().open && Math.abs(lenis.velocity) > 1) {
+        blobTweak.set({ open: false });
+      }
+    };
+    lenis.on("scroll", onLenisScroll);
     const tick = (time: number) => lenis.raf(time * 1000);
     gsap.ticker.add(tick);
     gsap.ticker.lagSmoothing(0);
@@ -51,7 +61,7 @@ export function SmoothScroll({ children }: { children: React.ReactNode }) {
     return () => {
       gsap.ticker.remove(tick);
       document.removeEventListener("click", onAnchor);
-      lenis.off("scroll", ScrollTrigger.update);
+      lenis.off("scroll", onLenisScroll);
       lenis.destroy();
     };
   }, []);

@@ -4,9 +4,9 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Environment, Lightformer } from "@react-three/drei";
 import type { Group } from "three";
-import { ChromeBlob } from "./ChromeBlob";
 import type { BlobShape } from "./ChromeBlob";
-import { ParticleBlob } from "./ParticleBlob";
+import { LiquidDna } from "./LiquidDna";
+import { DnaParticles } from "./DnaParticles";
 
 const smoothstep = (e0: number, e1: number, x: number) => {
   const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
@@ -141,6 +141,8 @@ export function ChromeCanvas({
   ...shape
 }: Props) {
   const scroll = useRef(0);
+  // 0..1 presence of the About section (bell-shaped) → drives the DNA morph
+  const about = useRef(0);
   // start off-screen so the blob loads SOLID (cursor not over it yet)
   const pointer = useRef({ x: 2, y: 2 });
   const hover = useRef(0);
@@ -167,6 +169,18 @@ export function ChromeCanvas({
       requestAnimationFrame(() => {
         const max = document.documentElement.scrollHeight - window.innerHeight;
         scroll.current = max > 0 ? window.scrollY / max : 0;
+        // About presence: rises early — as soon as the section's top peeks in
+        // from the bottom — then PERSISTS at 1 once formed. For now the helix
+        // stays docked (it does NOT morph into the next section); continued
+        // scroll just keeps spinning it.
+        const ab = document.getElementById("about");
+        if (ab) {
+          const top = ab.getBoundingClientRect().top;
+          const vh = window.innerHeight;
+          about.current = smoothstep(vh * 1.0, vh * 0.35, top);
+        } else {
+          about.current = 0;
+        }
         ticking = false;
       });
     };
@@ -237,23 +251,11 @@ export function ChromeCanvas({
           ) : (
             <ChromeClean intensity={lights.streaks} />
           )}
-          <HoverDriver pointer={pointer} hover={hover} />
-          <ChromeBlob
-            scroll={scroll}
-            pointer={pointer}
-            click={click}
-            reduced={reduced}
-            hover={hover}
-            groupRef={blobGroup}
-            shapeOut={shapeRef}
-            {...shape}
-          />
-          <ParticleBlob
-            hover={hover}
-            reduced={reduced}
-            blobGroup={blobGroup}
-            shape={shapeRef}
-          />
+          {/* The central form is the blob→DNA morph, in 3 panel-selectable
+              representations (Form switch): liquid / particles / wireframe mesh.
+              All follow the same about-driven morph + dock. */}
+          <LiquidDna about={about} scroll={scroll} pointer={pointer} reduced={reduced} />
+          <DnaParticles about={about} scroll={scroll} reduced={reduced} />
         </Suspense>
       </Canvas>
     </div>

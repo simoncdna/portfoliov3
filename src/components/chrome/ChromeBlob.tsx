@@ -49,6 +49,9 @@ type Props = {
   groupRef?: React.MutableRefObject<Group | null>;
   /** publish the live shape params so the particle blob matches the surface */
   shapeOut?: React.MutableRefObject<{ flow: number; distort: number; freq: number }>;
+  /** 0..1 presence of the "About" section — morphs the blob into the DNA helix
+   *  and slides it left while it's near 1 (bell-shaped over the About band). */
+  about?: React.MutableRefObject<number>;
 } & Partial<BlobShape>;
 
 /* GLSL injected into MeshStandardMaterial's vertex program. Keeps PBR chrome
@@ -61,6 +64,7 @@ uniform float uFlow;
 uniform float uDistort;
 uniform float uFreq;
 uniform float uMorph;   // 0..3 : blend across radically different shape modes
+uniform float uDna;     // 0..1 : blend the current shape toward the DNA helix
 uniform float uWobble;  // slosh/kick extra
 uniform vec3  uPointerDir;
 uniform float uPointerStrength;
@@ -69,6 +73,9 @@ uniform float uRipple;
 uniform float uClickStrength;
 uniform float uHoleAmount;
 varying float vBand;
+
+// NB: PI is already provided by three's <common> chunk (#define PI 3.14159…),
+// which is included just above this prelude — do not redeclare it.
 
 vec4 mod289(vec4 x){return x - floor(x*(1.0/289.0))*289.0;}
 vec3 mod289(vec3 x){return x - floor(x*(1.0/289.0))*289.0;}
@@ -125,6 +132,29 @@ float fbm(vec3 p){ return snoise(p) * 0.7 + snoise(p * 2.1) * 0.3; }
 float holeMask(vec3 nrm){
   float ang = acos(clamp(dot(normalize(nrm), uClickDir), -1.0, 1.0));
   return exp(-pow(ang * 3.0 - uRipple, 2.0) * 3.0);
+}
+
+// DNA double helix from a single sphere skin: elongate vertically, then shape
+// the cross-section radius by angle so it bulges into TWO fat lobes 180° apart
+// (the strands) with a thin waist between them. The lobe angle winds with height
+// → the two bulges spiral up = a double helix silhouette. Periodic "rungs" fill
+// the waist into a connecting bar. Ends taper to rounded points. uFlow → a slow
+// living twist.
+vec3 dnaShape(vec3 bp){
+  float y = clamp(bp.y, -1.0, 1.0);
+  float theta = atan(bp.z, bp.x);
+  float turns = 2.4;                              // spiral pitch over the height
+  float tw = theta - turns * y * PI + uFlow * 0.2;
+  // two lobes (strands) at tw≈0 and tw≈π, thin between
+  float lobe = pow(abs(cos(tw)), 1.3);
+  float R = 0.14 + 0.34 * lobe;                   // waist + strand thickness
+  // ladder rungs: sharp pulses at regular heights fill the whole ring
+  float rung = pow(0.5 + 0.5 * cos(turns * y * PI * 2.0), 22.0);
+  R += rung * 0.16;
+  // taper the last ~25% at each end to a point
+  R *= 1.0 - smoothstep(0.72, 1.0, abs(y));
+  vec2 dir = normalize(vec2(bp.x, bp.z) + vec2(1e-4));
+  return vec3(dir.x * R, y * 1.7, dir.y * R);
 }
 
 // Radically different shape MODES on a unit-sphere vertex bp, blended by uMorph.
@@ -202,6 +232,7 @@ export function ChromeBlob({
   hover,
   groupRef,
   shapeOut,
+  about,
   distort = 0.3,
   speed = 0.5,
   scale = 1.7,
@@ -230,6 +261,7 @@ export function ChromeBlob({
   const sloshV = useRef(0);
   const flowV = useRef(0); // continuous flow phase (never modulate time*speed)
   const morphV = useRef(0); // eased 0..3 shape-mode position (scroll-scrubbed)
+  const dnaV = useRef(0); // eased 0..1 blob→DNA handover (fades the blob out)
 
   // uniforms object is stable; values are mutated live in useFrame
   const uniforms = useMemo(
@@ -239,6 +271,7 @@ export function ChromeBlob({
       uFreq: { value: freq },
       uFlow: { value: 0 },
       uMorph: { value: 0 },
+      uDna: { value: 0 },
       uWobble: { value: 0 },
       uPointerDir: { value: new Vector3(0, 0, 1) },
       uPointerStrength: { value: 0 },
@@ -293,6 +326,16 @@ export function ChromeBlob({
     uniforms.uFreq.value = tw.freq;
     uniforms.uDistort.value = tw.distort;
 
+    // ---- blob → DNA handover: dnaV is how much the blob has faded out in favour
+    // of the real DNA helix mesh (see DnaHelix). The blob no longer changes shape
+    // (uDna stays 0); it just dissolves in place while the helix appears/docks.
+    const dnaTarget = reduced
+      ? 0
+      : Math.max(0, Math.min(1, about?.current ?? 0));
+    const dr = reduced ? 1 : 1 - Math.pow(0.05, delta);
+    dnaV.current += (dnaTarget - dnaV.current) * dr;
+    uniforms.uDna.value = 0;
+
     // live material tuning (dev controls + custom panel)
     if (mat.current) {
       mat.current.envMapIntensity = envMapIntensity;
@@ -318,16 +361,18 @@ export function ChromeBlob({
       const u = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
       return u * u * (3 - 2 * u);
     };
-    const fp = surfaceP.current * (1 - ss(0.35, 1, wireMix.current));
-    const wp = surfaceP.current * ss(0, 0.65, wireMix.current);
+    // blob dissolves out as the DNA helix takes over
+    const fade = 1 - dnaV.current;
+    const fp = surfaceP.current * (1 - ss(0.35, 1, wireMix.current)) * fade;
+    const wp = surfaceP.current * ss(0, 0.65, wireMix.current) * fade;
     if (mat.current) {
       mat.current.opacity = fp;
       // only occlude (write depth) while the surface is essentially full (blob
-      // mode). While it dissolves toward particles it must NOT write depth, or
+      // mode). While it dissolves toward particles/DNA it must NOT write depth, or
       // it leaves a blob-shaped "hole" punched in the particle cloud. This stays
       // true across the whole blob↔mesh fade (surfaceP ≈ 1 there), so that
       // transition is unaffected.
-      mat.current.depthWrite = surfaceP.current > 0.95;
+      mat.current.depthWrite = surfaceP.current > 0.95 && dnaV.current < 0.05;
     }
     if (wireMat.current) {
       wireMat.current.opacity = wp;

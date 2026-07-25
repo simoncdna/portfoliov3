@@ -25,8 +25,10 @@ export function HeroChrome() {
 			style={{ zIndex: 10 }}
 		>
 			<ChromeMount
-				style={{ width: DIM, height: DIM }}
-				glow={0.3}
+				// full-width canvas (height keeps the blob's size) so the helix can
+				// slide left without being clipped by the canvas's DOM box
+				style={{ width: "100%", height: DIM }}
+				glow={0}
 				envMode="studio"
 				hdriPreset="studio"
 				envRotationY={2.4}
