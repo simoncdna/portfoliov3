@@ -1,0 +1,124 @@
+/**
+ * The central form's scroll choreography.
+ *
+ * Every representation reads the same two scroll signals (About presence, then
+ * the About exit) and has to dock, grow, spin and fade *identically* — the
+ * blob→skull transition is a handover between two renderers, so any drift
+ * between their copies of this arithmetic shows up as the form jumping at the
+ * moment it changes hands. So it lives here once.
+ */
+
+/**
+ * Where the form parks per section (world x). About keeps its text on the right
+ * and the form on the left; Work mirrors it, so the form crosses the stage
+ * between the two — which is exactly what the About exit is for.
+ */
+export const DOCK_X = -3.6;
+export const DOCK_X_WORK = 3.6;
+
+/**
+ * How much the form grows once it is back in the middle, as a fraction of its
+ * resting size. It fills the space the About text just vacated — but barely: past
+ * about a fifth it stops reading as a mass taking the stage and starts reading as
+ * the camera pushing in, which is a different (and unintended) statement.
+ */
+const EXIT_SCALE = 0.2;
+
+/**
+ * The size it settles at in Work's right dock — an absolute scale, not a bonus on
+ * top of the resting one, and deliberately BELOW it: the form is a companion to the
+ * list there, not the subject of the screen the way it was in the Hero and in
+ * About. It swells for the crossing and then comes back down past its own size.
+ */
+const WORK_SCALE = 0.72;
+
+/**
+ * The blob→skull handover window, in units of About presence.
+ *
+ * The liquid is a raymarched SDF and the skull is a real mesh, so they cannot be
+ * morphed into one another — they are cross-faded instead. It is invisible only
+ * because it happens at the very start of the morph, where the skull mesh is
+ * still the same noise-displaced sphere the liquid is drawing. Widening this
+ * window is what would make the swap visible.
+ */
+export const HANDOVER_IN = 0.02;
+export const HANDOVER_OUT = 0.16;
+
+export const smoothstep = (e0: number, e1: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+
+export type FormChoreo = {
+  /** 0 = resting sphere, 1 = assembled form */
+  pres: number;
+  /** world x offset */
+  dock: number;
+  /** global grow/shrink */
+  scale: number;
+  /** extra spin rate (rad/s) while exiting */
+  spinBoost: number;
+  /** 0 = the liquid owns the frame, 1 = the skull mesh does */
+  handover: number;
+  /**
+   * The skull mesh's own presence. It goes opaque almost immediately rather than
+   * fading in over the window, because it is drawn *under* the liquid (which draws
+   * last, depth-test off): two half-transparent copies of the same sphere would
+   * let the page bleed through the middle of the swap. So the layer underneath
+   * turns solid first and the one on top dissolves off it.
+   */
+  skullOn: number;
+};
+
+/**
+ * @param about eased 0..1 presence of the About section
+ * @param exit  0..1 progress of the About exit, scrubbed by the pinned timeline
+ *              (aboutReveal.exit) — NOT read off the Work section's position, so
+ *              it cannot drift from the text fade it follows
+ * @param work  eased 0..1 presence of the Work section, which is a genuine
+ *              function of where that section is (unlike the exit): it carries the
+ *              form across to the right dock and settles it down to furniture size
+ */
+export function formChoreo(about: number, exit: number, work: number): FormChoreo {
+  const a = clamp01(about);
+  const x = clamp01(exit);
+  const w = clamp01(work);
+
+  // The exit, in three overlapping beats. They overlap on purpose: the form should
+  // read as one continuous movement — walking back into the middle while swelling,
+  // and already softening into the sphere before it has finished swelling — rather
+  // than as three cues played in turn.
+  const home = smoothstep(0, 0.5, x); // leaves the left dock, back to centre
+  const grow = smoothstep(0.15, 0.8, x); // takes the space the text vacated
+
+  // The skull unmakes itself into the resting sphere — and hands the frame back to
+  // the liquid on the way, since the handover reverses as pres falls.
+  //
+  // That handover lives in a NARROW range of pres (0.16 → 0.02) for a reason: it
+  // is the only stretch where the mesh is still close enough to a sphere for the
+  // cross-fade to hide. Widening it would show the swap. What it needed instead was
+  // more SCROLL inside the same range — so pres falls quickly to the top of the
+  // window and then crawls through it, giving the cross-fade about a fifth of the
+  // exit beat rather than the sliver it got when pres ran linearly to zero.
+  const fall = smoothstep(0.35, 0.8, x); // 1 → the top of the handover window
+  const cross = smoothstep(0.8, 1.0, x); // …then through it, slowly
+  const pres = a * ((1 - fall) * (1 - HANDOVER_OUT) + HANDOVER_OUT * (1 - cross));
+  return {
+    pres,
+    // Two docks, summed rather than switched: About's left one is released by the
+    // exit (`home` → 1) exactly as Work's right one is claimed, so the form makes
+    // one continuous crossing of the stage instead of teleporting between sides.
+    dock: DOCK_X * a * (1 - home) + DOCK_X_WORK * w,
+    // Swells for the crossing, then settles down to companion size beside the list.
+    scale: (1 + grow * EXIT_SCALE) * (1 - w) + WORK_SCALE * w,
+    // A pulse, not a level: this is a rate that gets integrated, and `exit` stays
+    // at 1 for the whole rest of the page — so anything monotonic in x would leave
+    // the blob spinning four times too fast forever. Peaks mid-crossing, zero at
+    // both ends, where the form is supposed to be settled.
+    spinBoost: x * (1 - x) * 4.8,
+    handover: smoothstep(HANDOVER_IN, HANDOVER_OUT, pres),
+    skullOn: smoothstep(0, HANDOVER_IN * 1.5, pres),
+  };
+}

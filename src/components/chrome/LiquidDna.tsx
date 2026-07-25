@@ -5,22 +5,12 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEnvironment } from "@react-three/drei";
 import { BufferAttribute, BufferGeometry, Color, Matrix3, ShaderMaterial, Vector2, Vector3 } from "three";
 import type { Mesh } from "three";
-import { blobTweak, DISTORT_MAX, TIME_RATE, SPIN_RATE, FORM_RADIUS } from "@/lib/blobTweak";
+import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
+import { CHROME_SHADE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
+import { formState } from "@/lib/formClock";
 
 type Props = {
-  about?: React.MutableRefObject<number>;
-  work?: React.MutableRefObject<number>;
-  scroll?: React.MutableRefObject<number>;
   reduced?: boolean;
-};
-
-const DOCK_X = -3.6;
-const ENV_INTENSITY = 3.2;
-const ENV_ROT_Y = 2.4;
-
-const smoothstep = (e0: number, e1: number, x: number) => {
-  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
 };
 
 const FRAG = /* glsl */ `
@@ -38,6 +28,10 @@ uniform float uFade;
 uniform float uRough;     // 0 = mirror, higher = duller (panel)
 uniform float uDistort;   // living-noise amplitude (panel)
 uniform float uFreq;      // living-noise frequency (panel)
+uniform vec3  uStretch;   // hovered project: silhouette proportions
+uniform float uMoodD;     // hovered project: x amplitude
+uniform float uMoodF;     // hovered project: x lump size
+uniform float uSpike;     // hovered project: radial thorns
 uniform sampler2D uEnv;
 uniform float uEnvInt;
 uniform float uEnvRot;
@@ -96,86 +90,56 @@ float snoise(vec3 v){
 // with detail at two scales instead of one smooth simplex lobe.
 float fbm(vec3 p){ return snoise(p) * 0.7 + snoise(p * 2.1) * 0.3; }
 
-float smin(float a, float b, float k){
-  float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);
-  return mix(b, a, h) - k*h*(1.0-h);
-}
-float sdCapsule(vec3 p, vec3 a, vec3 b, float r){
-  vec3 pa = p - a, ba = b - a;
-  float h = clamp(dot(pa, ba)/dot(ba, ba), 0.0, 1.0);
-  return length(pa - ba*h) - r;
-}
-
 // ---------- shape constants ----------
-const float BR    = ${FORM_RADIUS.toFixed(2)};  // blob radius (shared, see blobTweak)
-const float HR    = 0.8;   // helix radius
-const float TUBE  = 0.24;  // strand tube radius (chunky)
-const float HH    = 1.9;   // helix half-height
-const float TURNS = 1.0;   // a single intertwining loop
-const float RUNG_R = 0.12;
-const float RUNGS  = 5.0;
-const float PI = 3.14159265359;
+const float BR = ${FORM_RADIUS.toFixed(2)};  // blob radius (shared, see blobTweak)
 
-// one helical strand tube (approx: unwrap the helix in cylindrical coords)
-float sdStrand(vec3 p, float phase){
-  float twist = TURNS * 2.0 * PI / (2.0 * HH);
-  float r = length(p.xz);
-  float ang = atan(p.z, p.x);
-  float a = p.y * twist + phase;
-  float dif = ang - a;
-  dif = atan(sin(dif), cos(dif));         // wrap to [-pi, pi]
-  float d = length(vec2(r - HR, dif * HR)) - TUBE;
-  d = max(d, abs(p.y) - HH);              // cap the ends
-  return d;
-}
-float sdRungs(vec3 p){
-  float twist = TURNS * 2.0 * PI / (2.0 * HH);
-  float step = 2.0 * HH / RUNGS;
-  float yy = mod(p.y + step*0.5, step) - step*0.5;
-  float a = p.y * twist;
-  vec3 dir = vec3(cos(a), 0.0, sin(a));
-  float d = sdCapsule(vec3(p.x, yy, p.z), -HR*dir, HR*dir, RUNG_R);
-  d = max(d, abs(p.y) - HH);
-  return d;
-}
-float sdDna(vec3 p){
-  float s0 = sdStrand(p, 0.0);
-  float s1 = sdStrand(p, PI);
-  float d = smin(s0, s1, 0.18);
-  d = smin(d, sdRungs(p), 0.16);
-  return d;
-}
 // Domain-warped fbm, ported from the old vertex-displaced blob: the noise field
 // is itself displaced by noise (offsets larger than the domain), which is what
 // produced the stringy asymmetric "liquid" lobes rather than regular bumps.
 // Dividing p by BR renormalises to the old unit-sphere noise space so uFreq maps
 // to the same feature size, and the amplitude scales with BR so uDistort stays a
 // fraction of the radius (it used to be an absolute world offset → 4x weaker).
+//
+// uStretch / uMoodD / uMoodF / uSpike are the hovered project's silhouette (see
+// workHover): the field is scaled anisotropically, its lumps are scaled in
+// amplitude and in size, and it can grow thorns. Every project is therefore the
+// SAME blob with its parameters moved, which is what lets one melt into the next
+// instead of cutting to it — and the multipliers multiply the panel's values
+// rather than replacing them, so the panel still governs the base look.
 float sdBlob(vec3 p){
-  vec3 sp = (p / BR) * uFreq;
+  // Anisotropic scaling is not an isometry, so the field it returns is no longer a
+  // true distance — it overestimates by at most the largest scale factor. Dividing
+  // the result by that factor (i.e. multiplying by the smallest reciprocal) keeps
+  // it conservative, which is all the raymarcher needs.
+  vec3 q = p / uStretch;
+  float lip = min(1.0, min(uStretch.x, min(uStretch.y, uStretch.z)));
+  float amp = uDistort * uMoodD;
+  vec3 sp = (q / BR) * uFreq * uMoodF;
   vec3 wrp = sp + vec3(snoise(sp + vec3(0.0, uTime * 0.30, 0.0)),
                        snoise(sp + vec3(3.1, 1.7, uTime * 0.18)),
                        snoise(sp + vec3(9.2, 5.3, uTime * 0.12))) * 0.9;
-  return length(p) - (BR + fbm(wrp) * uDistort * BR);
+  float d = length(q) - (BR + fbm(wrp) * amp * BR);
+  // Thorns: thresholded noise, so it is smooth almost everywhere and spikes only
+  // where the noise crests. Skipped entirely when the dial is down — it is a
+  // uniform, so the branch is coherent across the whole draw.
+  if (uSpike > 0.001) {
+    float th = pow(max(snoise(q * (2.6 / BR) + vec3(uTime * 0.22)), 0.0), 3.0);
+    d -= th * uSpike * BR;
+  }
+  return d * lip;
 }
 
-// full scene SDF (blob → DNA morph + living flow)
+// full scene SDF (the resting blob + living flow)
 float map(vec3 wp){
   // into local space: undock + unspin
   vec3 p = wp - vec3(uDock, 0.0, 0.0);
   float c = cos(uSpin), s = sin(uSpin);
   p = vec3(c*p.x - s*p.z, p.y, s*p.x + c*p.z);
   p /= uScale;                 // global grow/shrink for the section exit
-  // uPres is a uniform, so both branches are coherent across every pixel of the
-  // draw — effectively free, and they skip 5 noise fetches whenever one of the
-  // two forms is fully absent (i.e. everywhere except during the morph itself).
-  float d;
-  if (uPres < 0.001)      d = sdBlob(p);
-  else if (uPres > 0.999) d = sdDna(p);
-  else                    d = mix(sdBlob(p), sdDna(p), uPres);
+  float d = sdBlob(p);
   // living surface flow (ripples), stronger once assembled. The 0.55 keeps this
   // term at its previous absolute amplitude now that uDistort is no longer
-  // pre-scaled on the JS side — the DNA's only noise source, so it stays put.
+  // pre-scaled on the JS side.
   float flow = snoise(p * 1.6 + vec3(uTime * 0.5, uTime * 0.35, 0.0)) * uDistort * 0.55 * (0.25 + 0.35 * uPres);
   d -= flow;
   return d * uScale;
@@ -190,13 +154,7 @@ vec3 calcNormal(vec3 p){
                    k.yxy * map(p + k.yxy*e) +
                    k.xxx * map(p + k.xxx*e));
 }
-vec3 sampleEnv(vec3 dir){
-  float ca = cos(uEnvRot), sa = sin(uEnvRot);
-  vec3 d = normalize(vec3(dir.x*ca - dir.z*sa, dir.y, dir.x*sa + dir.z*ca));
-  vec2 uv = vec2(atan(d.z, d.x) * 0.15915494 + 0.5, asin(clamp(d.y,-1.0,1.0)) * 0.31830989 + 0.5);
-  vec3 e = texture2D(uEnv, uv).rgb * uEnvInt;
-  return vec3(1.0) - exp(-e * 1.3);       // exposure tone map
-}
+${CHROME_SHADE}
 
 void main(){
   vec2 ndc = vUv * 2.0 - 1.0;
@@ -209,7 +167,11 @@ void main(){
   // form now discard before a single noise fetch, and rays that can start at the
   // sphere instead of creeping there from the camera. The margin covers the flow
   // ripple on top of the noise-displaced radius.
-  float bRad = uScale * (BR * (1.0 + uDistort) + 0.6);
+  // The margin now also has to cover the silhouette: the widest stretch axis, the
+  // hovered project's lump amplitude and its thorns. Under-covering it would clip
+  // the form's outline against an invisible sphere.
+  float wide = max(uStretch.x, max(uStretch.y, uStretch.z));
+  float bRad = uScale * (BR * wide * (1.0 + uDistort * uMoodD + uSpike) + 0.6);
   vec3  bc  = vec3(uDock, 0.0, 0.0) - ro;
   float tca = dot(bc, rd);
   float dc2 = dot(bc, bc) - tca * tca;
@@ -230,7 +192,11 @@ void main(){
   // dial automatically creeps (~0.2) instead of speckling. The +1.1 is the flow
   // ripple, whose frequency is fixed rather than tied to uFreq — without it,
   // uFreq at 0 would wrongly look like a clean sphere and step straight through.
-  float stepK = 1.0 / (1.0 + uDistort * (7.5 * uFreq + 1.1));
+  // The hovered silhouette enters the same bound: its multipliers scale both the
+  // amplitude and the domain, and thorns are steep by construction (a cubed
+  // threshold), so they get a term of their own — a spiky project marches in
+  // smaller strides rather than speckling.
+  float stepK = 1.0 / (1.0 + uDistort * uMoodD * (7.5 * uFreq * uMoodF + 1.1) + uSpike * 9.0);
   float d = 0.0;
   bool hit = false;
   for (int i = 0; i < 96; i++){
@@ -243,19 +209,7 @@ void main(){
 
   vec3 p = ro + rd * t;
   vec3 n = calcNormal(p);
-  vec3 refl = reflect(rd, n);
-  vec3 env = sampleEnv(refl);
-  float fres = pow(1.0 - clamp(dot(n, -rd), 0.0, 1.0), 3.0);
-  vec3 tint = mix(uLo, uHi, 0.75);
-  // roughness (panel 0..1): 0 = punchy mirror, 1 = fully matte. Both the mirror
-  // and its fresnel rim reach exactly zero at 1.0 — a rim highlight surviving on
-  // a "fully rough" surface is what would still read as chrome — leaving only
-  // the flat tinted fill.
-  float mirror = 1.0 - uRough;
-  vec3 col = env * tint * (1.2 * mirror)
-           + fres * vec3(1.0, 0.97, 0.92) * 0.4 * mirror
-           + tint * (0.05 + uRough * 0.6);
-  gl_FragColor = vec4(col, uFade);
+  gl_FragColor = vec4(chromeShade(n, rd), uFade);
 }
 `;
 
@@ -267,12 +221,10 @@ void main(){
 }
 `;
 
-export function LiquidDna({ about, work, scroll, reduced }: Props) {
+export function LiquidDna({ reduced }: Props) {
   const { camera, size } = useThree();
   const envMap = useEnvironment({ preset: "studio" });
   const meshRef = useRef<Mesh>(null);
-  const pres = useRef(0);
-  const spin = useRef(0);
   const appear = useRef(0); // load-in fade (the liquid is the permanent hero form)
   const modeVis = useRef(1); // eased visibility for the "blob" (liquid) form mode
   const colScratch = useMemo(() => new Color(), []);
@@ -299,6 +251,10 @@ export function LiquidDna({ about, work, scroll, reduced }: Props) {
         uRough: { value: 0.12 },
         uDistort: { value: 0.25 },
         uFreq: { value: 0.5 },
+        uStretch: { value: new Vector3(1, 1, 1) },
+        uMoodD: { value: 1 },
+        uMoodF: { value: 1 },
+        uSpike: { value: 0 },
         uEnv: { value: null },
         uEnvInt: { value: ENV_INTENSITY },
         uEnvRot: { value: ENV_ROT_Y },
@@ -312,43 +268,36 @@ export function LiquidDna({ about, work, scroll, reduced }: Props) {
       depthWrite: false,
     });
     return { geometry, material };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useFrame((_, delta) => {
     const u = material.uniforms;
     const tw = blobTweak.get();
 
+    // clock, turntable and scroll position all come from the shared form clock —
+    // the liquid keeps no animation state of its own, so it cannot drift out of
+    // phase with the skull mesh it hands the frame over to.
+    const s = formState();
+
     // fade in on load; only visible while the panel's Form is "blob" (liquid)
     appear.current += (1 - appear.current) * (1 - Math.pow(0.04, delta));
     const modeTarget = tw.mode === "blob" ? 1 : 0;
     modeVis.current += (modeTarget - modeVis.current) * (1 - Math.pow(0.06, delta));
-    const fade = (reduced ? 1 : appear.current) * modeVis.current;
+
+    // The liquid is the resting form only: as About arrives it hands the frame to
+    // ChromeSkull (which is still drawing this same sphere at that point) and
+    // fades out. It comes back when About recedes, or when the exit choreography
+    // dips the form back to a sphere on the way to Work.
+    const fade = (reduced ? 1 : appear.current) * modeVis.current * (1 - s.handover);
     u.uFade.value = fade;
     if (meshRef.current) meshRef.current.visible = fade > 0.004;
     if (fade <= 0.004) return;
 
-    // living motion + speed from the panel (speed 0 → fully frozen)
-    u.uTime.value += delta * tw.speed * TIME_RATE;
-
-    // eased About presence (blob→DNA + dock)
-    const aboutTarget = reduced ? 0 : Math.max(0, Math.min(1, about?.current ?? 0));
-    pres.current += (aboutTarget - pres.current) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
-    const a = pres.current;
-
-    // ---- About→Work exit choreography (placeholder: grow → exit → re-sphere) ----
-    const w = reduced ? 0 : Math.max(0, Math.min(1, work?.current ?? 0));
-    const dip = smoothstep(0.5, 0.72, w); // DNA → sphere (placeholder next form)
-    const grow = smoothstep(0, 0.5, w) - smoothstep(0.5, 1.0, w); // 0 → ~1 → 0
-    u.uPres.value = a * (1 - dip);
-    u.uDock.value = DOCK_X * a * (1 - smoothstep(0.4, 0.85, w));
-    u.uScale.value = 1 + grow * 0.9; // grows as it exits, back to 1 for the sphere
-    spin.current += delta * (tw.speed * SPIN_RATE + w * 2.0); // faster on exit
-    u.uSpin.value = spin.current + (scroll?.current ?? 0) * Math.PI * 3.0;
-
-    // visibility dips at the exit midpoint (the "transform" moment) then re-enters
-    const visMul = w < 0.5 ? 1 - smoothstep(0.2, 0.5, w) : smoothstep(0.5, 0.85, w);
-    u.uFade.value = fade * visMul;
+    u.uTime.value = s.time;
+    u.uPres.value = s.pres;
+    u.uDock.value = s.dock;
+    u.uScale.value = s.scale;
+    u.uSpin.value = s.spin;
 
     // panel-driven material: colour → tint, roughness, distort/freq → living noise
     colScratch.set(tw.color);
@@ -359,6 +308,11 @@ export function LiquidDna({ about, work, scroll, reduced }: Props) {
     // BR itself) like the old blob did. 0 in the panel → perfectly smooth.
     u.uDistort.value = tw.distort * DISTORT_MAX;
     u.uFreq.value = tw.freq;
+    // hovered project → silhouette (eased in the shared clock, see workHover)
+    (u.uStretch.value as Vector3).set(s.mood.sx, s.mood.sy, s.mood.sz);
+    u.uMoodD.value = s.mood.distort;
+    u.uMoodF.value = s.mood.freq;
+    u.uSpike.value = s.mood.spike;
     u.uEnv.value = envMap;
 
     const fov = (camera as { fov?: number }).fov ?? 42;

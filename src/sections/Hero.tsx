@@ -8,17 +8,24 @@ import { site } from "@/data/site";
 export function Hero() {
   const rowRef = useRef<HTMLDivElement>(null);
 
-  // On scroll, the bottom row ([ Portfolio ] + barcode) rises and fades out over
-  // the first ~45% of a viewport of scroll (and fades back in on the way up).
+  // On scroll, the bottom row ([ Portfolio ] + barcode) fades out where it stands
+  // — no rise, so nothing competes with the form for the eye's attention (and it
+  // fades back in on the way up).
+  //
+  // It has to be gone BEFORE the form starts changing shape, not during: the
+  // blob→skull handover opens at roughly 0.16 vh of scroll (HANDOVER_IN in
+  // formChoreo, read against the About presence ramp in ChromeCanvas), so the
+  // window is sized just under that. Opacity falls as the square of the progress
+  // on top of it, so the eye reads the row as gone by the first third of even that
+  // window: the Hero's furniture leaves the frame before the metal moves.
   useEffect(() => {
     let ticking = false;
     const update = () => {
       ticking = false;
       const el = rowRef.current;
       if (!el) return;
-      const p = Math.min(1, window.scrollY / (window.innerHeight * 0.3));
-      el.style.opacity = String(1 - p);
-      el.style.transform = `translateY(${(-p * 44).toFixed(1)}px)`;
+      const p = Math.min(1, window.scrollY / (window.innerHeight * 0.14));
+      el.style.opacity = String((1 - p) * (1 - p));
     };
     const onScroll = () => {
       if (!ticking) {
@@ -45,7 +52,7 @@ export function Hero() {
       <div
         ref={rowRef}
         className="shell relative z-20 mt-auto flex items-end justify-between"
-        style={{ willChange: "opacity, transform" }}
+        style={{ willChange: "opacity" }}
       >
         <span className="font-mono text-[0.72rem] uppercase tracking-[0.2em] text-silver-muted">
           [ Portfolio ]

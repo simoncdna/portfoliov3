@@ -5,12 +5,11 @@ import { useFrame } from "@react-three/fiber";
 import { BufferAttribute, BufferGeometry, Color, ShaderMaterial } from "three";
 import type { LineSegments } from "three";
 // the form's radius arrives through FORM_DISPLACE's FORM_R, on the GLSL side
-import { blobTweak, SPIN_RATE, TIME_RATE, DISTORT_MAX } from "@/lib/blobTweak";
+import { blobTweak, DISTORT_MAX } from "@/lib/blobTweak";
 import { SNOISE, FORM_DISPLACE } from "@/lib/formField";
+import { formState } from "@/lib/formClock";
 
 type Props = {
-  about?: React.MutableRefObject<number>;
-  scroll?: React.MutableRefObject<number>;
   reduced?: boolean;
 };
 
@@ -23,8 +22,6 @@ type Props = {
 const LATS = 40; // parallels
 const LONGS = 80; // meridians
 const RING_SEG = 96; // subdivisions per line — smoothness, not cell count
-
-const DOCK_X = -3.6;
 
 /**
  * How visible the far side is. 0 makes the form an opaque shell and it loses its
@@ -194,10 +191,8 @@ void main(){
  * it behaves like the liquid and the particles instead of dissolving between two
  * separate objects. Shares the displacement field, dock and spin with them.
  */
-export function MeshDna({ about, scroll, reduced }: Props) {
+export function MeshDna({ reduced }: Props) {
   const lines = useRef<LineSegments>(null);
-  const pres = useRef(0);
-  const spin = useRef(0);
   const appear = useRef(0);
   const modeVis = useRef(0);
   const colScratch = useMemo(() => new Color(), []);
@@ -233,6 +228,8 @@ export function MeshDna({ about, scroll, reduced }: Props) {
     if (!l) return;
     const tw = blobTweak.get();
     const u = material.uniforms;
+    // shared clock/turntable/scroll position — see formClock
+    const s = formState();
 
     appear.current += (1 - appear.current) * (1 - Math.pow(0.04, delta));
     const modeTarget = tw.mode === "wire" ? 1 : 0;
@@ -242,14 +239,10 @@ export function MeshDna({ about, scroll, reduced }: Props) {
     l.visible = fade > 0.004;
     if (fade <= 0.004) return;
 
-    const target = reduced ? 0 : Math.max(0, Math.min(1, about?.current ?? 0));
-    pres.current += (target - pres.current) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
-    const v = pres.current;
-
-    u.uTime.value += delta * tw.speed * TIME_RATE;
+    u.uTime.value = s.time;
     u.uDistort.value = tw.distort * DISTORT_MAX;
     u.uFreq.value = tw.freq;
-    u.uPres.value = v;
+    u.uPres.value = s.pres;
     u.uRough.value = tw.roughness;
     u.uCamDist.value = camera.position.length();
 
@@ -257,9 +250,9 @@ export function MeshDna({ about, scroll, reduced }: Props) {
     (u.uHi.value as Color).setRGB(colScratch.r, colScratch.g, colScratch.b);
     (u.uLo.value as Color).setRGB(colScratch.r * 0.45, colScratch.g * 0.45, colScratch.b * 0.5);
 
-    l.position.setX(DOCK_X * v);
-    spin.current += delta * tw.speed * SPIN_RATE;
-    l.rotation.set(0, spin.current + (scroll?.current ?? 0) * Math.PI * 3.0, 0);
+    l.position.setX(s.dock);
+    l.scale.setScalar(s.scale);
+    l.rotation.set(0, s.spin, 0);
   });
 
   return (

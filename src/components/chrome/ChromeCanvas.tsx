@@ -5,7 +5,9 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Environment, Lightformer } from "@react-three/drei";
 import type { Group } from "three";
 import type { BlobShape } from "./ChromeBlob";
+import { FormDriver } from "./FormDriver";
 import { LiquidDna } from "./LiquidDna";
+import { ChromeSkull } from "./ChromeSkull";
 import { DnaParticles } from "./DnaParticles";
 import { MeshDna } from "./MeshDna";
 
@@ -142,9 +144,9 @@ export function ChromeCanvas({
   ...shape
 }: Props) {
   const scroll = useRef(0);
-  // 0..1 presence of the About section → drives the blob→DNA morph + dock
+  // 0..1 presence of the About section → drives the blob→skull morph + left dock
   const about = useRef(0);
-  // 0..1 progress of the About→Work transition → drives the grow/exit/re-form
+  // 0..1 presence of the Work section → carries the blob to the right dock
   const work = useRef(0);
   // start off-screen so the blob loads SOLID (cursor not over it yet)
   const pointer = useRef({ x: 2, y: 2 });
@@ -179,9 +181,11 @@ export function ChromeCanvas({
         const vh = window.innerHeight;
         const ab = document.getElementById("about");
         about.current = ab ? smoothstep(vh * 1.0, vh * 0.35, ab.getBoundingClientRect().top) : 0;
-        // About→Work: rises as Work approaches → grow/exit/re-form choreography
+        // Work presence → the right dock. The section's own arrival is a fair
+        // thing to read off its position; the About *exit* is not, which is why
+        // that one is scrubbed by the pinned timeline instead (see formChoreo).
         const wk = document.getElementById("work");
-        work.current = wk ? smoothstep(vh * 0.9, vh * 0.2, wk.getBoundingClientRect().top) : 0;
+        work.current = wk ? smoothstep(vh * 0.95, vh * 0.45, wk.getBoundingClientRect().top) : 0;
         ticking = false;
       });
     };
@@ -216,7 +220,15 @@ export function ChromeCanvas({
         dpr={dpr}
         gl={{ antialias: true, alpha: true, toneMappingExposure: 1.15 }}
         camera={{ position: [0, 0, 10], fov: 42 }}
-        style={{ background: "transparent" }}
+        // pointerEvents: none is NOT redundant with the pointer-events-none on the
+        // wrapper. R3F's own container div sets pointer-events: auto on itself,
+        // which breaks the inheritance from the stage above it — and since this
+        // canvas is fixed, full-width and ~viewport-tall, it was swallowing every
+        // pointer event on the page: no hover on the Work rows, no clicks on links,
+        // no text selection in About. Nothing in this scene is interactive (the
+        // cursor is tracked by a window-level listener, not by R3F events), so the
+        // canvas has no business receiving them.
+        style={{ background: "transparent", pointerEvents: "none" }}
       >
         <Suspense fallback={null}>
           {/* No scene background → canvas stays transparent so the chrome form
@@ -252,12 +264,20 @@ export function ChromeCanvas({
           ) : (
             <ChromeClean intensity={lights.streaks} />
           )}
-          {/* The central form is the blob→DNA morph, in 3 panel-selectable
-              representations (Form switch): liquid / particles / wireframe mesh.
-              All follow the same about-driven morph + dock. */}
-          <LiquidDna about={about} work={work} scroll={scroll} reduced={reduced} />
-          <DnaParticles about={about} scroll={scroll} reduced={reduced} />
-          <MeshDna about={about} scroll={scroll} reduced={reduced} />
+          {/* The central form, in 3 panel-selectable representations (Form
+              switch): liquid / particles / wireframe mesh — plus the skull mesh the
+              liquid hands the frame to. The scroll choreography they all follow is
+              integrated ONCE, here, and only read by the forms: see formClock. */}
+          <FormDriver about={about} work={work} scroll={scroll} reduced={reduced} />
+          <LiquidDna reduced={reduced} />
+          <MeshDna reduced={reduced} />
+          {/* The two skull-sampling forms wait on an 8.9 MB glb, so they get their
+              own boundary — inside the outer one they would hold the liquid (which
+              needs nothing but a shader) off the screen until the model landed. */}
+          <Suspense fallback={null}>
+            <ChromeSkull reduced={reduced} />
+            <DnaParticles reduced={reduced} />
+          </Suspense>
         </Suspense>
       </Canvas>
     </div>

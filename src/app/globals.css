@@ -283,6 +283,85 @@ a {
   color: var(--chrome);
 }
 
+/* Quiet variant: the list sits beside the docked form, which is doing the
+   reacting, so the row itself only lightens its rule and slides a hair. No
+   background wash and no big travel — two things moving that much next to a
+   morphing blob is one thing too many. */
+.work-row--quiet {
+  border-color: var(--steel);
+  transition: border-color var(--dur-med) var(--ease-out);
+}
+.work-row--quiet .work-row-inner {
+  padding-block: clamp(1.1rem, 2vw, 1.6rem);
+}
+/* The arrow is the row's only ornament, and it is absent until asked for: it
+   slides out of the title's baseline rather than sitting there waiting. */
+.work-row--quiet .work-arrow {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+.work-index {
+  transition: color var(--dur-med) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .work-row--quiet:hover {
+    background: none;
+    border-color: var(--silver-muted);
+  }
+  .work-row--quiet:hover .work-row-inner {
+    transform: translateX(clamp(3px, 0.5vw, 8px));
+  }
+  .work-row--quiet:hover .work-arrow {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .work-row--quiet:hover .work-index {
+    color: var(--chrome);
+  }
+}
+.work-row--quiet:focus-visible .work-arrow {
+  opacity: 1;
+  transform: translateX(0);
+}
+.work-row--quiet:focus-visible .work-index {
+  color: var(--chrome);
+}
+
+/* The per-row fold: closed at 0fr, opened to the content's own height. Animating
+   grid-template-rows means nothing has to be measured in JS, and the closed state
+   is genuinely zero-height (so it is skipped by find-in-page and screen readers
+   only when hidden, not clipped-but-present). */
+.work-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--dur-med) var(--ease-out),
+    opacity var(--dur-med) var(--ease-out);
+}
+@media (hover: hover) {
+  .work-row--quiet:hover .work-fold {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+.work-row--quiet:focus-visible .work-fold {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+/* No hover to speak of on touch: show the detail rather than hide it forever. */
+@media (hover: none) {
+  .work-fold {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .work-fold {
+    transition: opacity var(--dur-med) linear;
+  }
+}
+
 /* Skill row: baseline list item with a hairline that lights on hover */
 .skill-row {
   display: flex;

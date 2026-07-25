@@ -7,34 +7,15 @@ import { Box3, BufferGeometry, BufferAttribute, Color, Euler, Matrix3, Matrix4, 
 import type { Mesh, Points } from "three";
 import { MeshSurfaceSampler } from "three/examples/jsm/math/MeshSurfaceSampler.js";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
-import {
-  blobTweak,
-  useBlobTweak,
-  DISTORT_MAX,
-  TIME_RATE,
-  SPIN_RATE,
-  FORM_RADIUS,
-} from "@/lib/blobTweak";
+import { blobTweak, useBlobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
+import { formState } from "@/lib/formClock";
 
 type Props = {
-  /** 0..1 presence of the About section (drives assembly / dock / spin) */
-  about?: React.MutableRefObject<number>;
-  /** whole-page scroll fraction 0..1 (scrubs rotation) */
-  scroll?: React.MutableRefObject<number>;
   reduced?: boolean;
 };
 
 const HOME_R = FORM_RADIUS; // rest cluster radius — shared with the liquid's BR
-const R = 0.8; // helix radius (matches the liquid HR)
-const H = 3.8; // helix height (matches the liquid 2*HH)
-const TURNS = 1.0; // a single loop, like the liquid DNA
-const RUNGS = 5; // ladder steps
-const STRAND_FRAC = 0.78; // share of particles on the strands (rest = rungs)
-const TUBE_RADIUS = 0.17; // strands fill a tube of this radius (not a thin line)
-const RUNG_RADIUS = 0.1; // rungs are tubes too
-const DOCK_X = -3.6;
 const GROUP_SCALE = 1.0;
-const SPIN_SPEED = 0.5; // continuous turntable rate (rad/s), around Y
 const SPIN_AXIS = new Vector3(0, 1, 0); // Y = turntable; (1,0,0) = X tumble
 // baked skull base orientation (found via the dev menu): X=30° Y=10° Z=−5°
 const ROT_X = 0.524;
@@ -170,10 +151,8 @@ void main(){
  * stagger and turbulence — to trace two helical strands + ladder rungs. Reads as
  * particles assembling into a double helix, then docks left and spins on scroll.
  */
-export function DnaParticles({ about, scroll, reduced }: Props) {
+export function DnaParticles({ reduced }: Props) {
   const points = useRef<Points>(null);
-  const pres = useRef(0);
-  const spin = useRef(0);
   const appear = useRef(0); // load-in fade
   const modeVis = useRef(0); // eased visibility for the "particles" form mode
   const colScratch = useMemo(() => new Color(), []);
@@ -252,7 +231,6 @@ export function DnaParticles({ about, scroll, reduced }: Props) {
     }
     const tp = new Vector3();
     const tn = new Vector3();
-    const headRot = new Euler(ROT_X, ROT_Y, ROT_Z);
 
     for (let i = 0; i < N; i++) {
       const y = 1 - (i / (N - 1)) * 2;
@@ -293,12 +271,14 @@ export function DnaParticles({ about, scroll, reduced }: Props) {
     const pts = points.current;
     if (!pts) return;
     const tw = blobTweak.get();
+    // shared clock/turntable/scroll position — see formClock
+    const s = formState();
 
     // visible from the hero (as the central sphere), only in "particles" mode
     appear.current += (1 - appear.current) * (1 - Math.pow(0.04, delta));
     const modeTarget = tw.mode === "particles" ? 1 : 0;
     modeVis.current += (modeTarget - modeVis.current) * (1 - Math.pow(0.06, delta));
-    const fade = appear.current * modeVis.current;
+    const fade = (reduced ? 1 : appear.current) * modeVis.current;
 
     const u = material.uniforms;
     u.uFade.value = fade;
@@ -306,13 +286,10 @@ export function DnaParticles({ about, scroll, reduced }: Props) {
     pts.visible = on;
     if (!on) return;
 
-    // scroll morphs the cluster (sphere) → DNA + docks left (same as the liquid)
-    const target = reduced ? 0 : Math.max(0, Math.min(1, about?.current ?? 0));
-    pres.current += (target - pres.current) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
-    const v = pres.current;
-    // no baseline term: Speed 0 must freeze this form exactly like the liquid
-    u.uTime.value += delta * tw.speed * TIME_RATE;
-    u.uAbout.value = v;
+    // scroll assembles the cluster (sphere) → skull + docks left, like the liquid.
+    // No baseline term on the clock: Speed 0 must freeze this form too.
+    u.uTime.value = s.time;
+    u.uAbout.value = s.pres;
 
     // colour from the panel
     colScratch.set(tw.color);
@@ -322,11 +299,10 @@ export function DnaParticles({ about, scroll, reduced }: Props) {
     u.uDistort.value = tw.distort * DISTORT_MAX; // fraction of FORM_R, as the liquid
     u.uFreq.value = tw.freq;
 
-    pts.position.setX(DOCK_X * v);
-    pts.scale.setScalar(GROUP_SCALE);
-    // baked base orientation + continuous turntable (around SPIN_AXIS)
-    spin.current += delta * SPIN_SPEED;
-    _qSpin.setFromAxisAngle(SPIN_AXIS, spin.current);
+    pts.position.setX(s.dock);
+    pts.scale.setScalar(GROUP_SCALE * s.scale);
+    // baked base orientation + the shared turntable (around SPIN_AXIS)
+    _qSpin.setFromAxisAngle(SPIN_AXIS, s.spin);
     pts.quaternion.copy(_qSpin).multiply(BASE_Q);
   });
 

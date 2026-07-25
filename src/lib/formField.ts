@@ -87,3 +87,42 @@ float formOffset(vec3 pos){
   return lump + flow;
 }
 `;
+
+/** Reflection environment, shared so every representation reflects the same room. */
+export const ENV_INTENSITY = 3.2;
+export const ENV_ROT_Y = 2.4;
+
+/**
+ * The chrome itself: an equirect environment reflection, a fresnel rim and a flat
+ * tinted fill, as a function of the surface normal and the view ray.
+ *
+ * Shared between the raymarched liquid and the mesh skull because they hand over
+ * to one another mid-transition — the same pixel has to be the same metal on both
+ * sides of the swap.
+ *
+ * Roughness (panel 0..1): 0 = punchy mirror, 1 = fully matte. Both the mirror and
+ * its fresnel rim reach exactly zero at 1.0 — a rim highlight surviving on a
+ * "fully rough" surface is what would still read as chrome — leaving only the
+ * flat tinted fill.
+ *
+ * Requires uniforms uEnv / uEnvInt / uEnvRot / uRough / uLo / uHi in scope.
+ */
+export const CHROME_SHADE = /* glsl */ `
+vec3 sampleEnv(vec3 dir){
+  float ca = cos(uEnvRot), sa = sin(uEnvRot);
+  vec3 d = normalize(vec3(dir.x*ca - dir.z*sa, dir.y, dir.x*sa + dir.z*ca));
+  vec2 uv = vec2(atan(d.z, d.x) * 0.15915494 + 0.5, asin(clamp(d.y,-1.0,1.0)) * 0.31830989 + 0.5);
+  vec3 e = texture2D(uEnv, uv).rgb * uEnvInt;
+  return vec3(1.0) - exp(-e * 1.3);       // exposure tone map
+}
+
+vec3 chromeShade(vec3 n, vec3 rd){
+  vec3 env = sampleEnv(reflect(rd, n));
+  float fres = pow(1.0 - clamp(dot(n, -rd), 0.0, 1.0), 3.0);
+  vec3 tint = mix(uLo, uHi, 0.75);
+  float mirror = 1.0 - uRough;
+  return env * tint * (1.2 * mirror)
+       + fres * vec3(1.0, 0.97, 0.92) * 0.4 * mirror
+       + tint * (0.05 + uRough * 0.6);
+}
+`;
