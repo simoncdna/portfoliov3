@@ -323,7 +323,12 @@ export function ChromeBlob({
     const wp = surfaceP.current * ss(0, 0.65, wireMix.current);
     if (mat.current) {
       mat.current.opacity = fp;
-      mat.current.depthWrite = true; // stable (no mid-fade flip → no flash)
+      // only occlude (write depth) while the surface is essentially full (blob
+      // mode). While it dissolves toward particles it must NOT write depth, or
+      // it leaves a blob-shaped "hole" punched in the particle cloud. This stays
+      // true across the whole blob↔mesh fade (surfaceP ≈ 1 there), so that
+      // transition is unaffected.
+      mat.current.depthWrite = surfaceP.current > 0.95;
     }
     if (wireMat.current) {
       wireMat.current.opacity = wp;
@@ -444,8 +449,9 @@ export function ChromeBlob({
         <icosahedronGeometry args={[1, 64]} />
         {material}
       </mesh>
-      {/* slightly larger so it sits just outside the fill → no z-fighting */}
-      <mesh ref={wireMesh} scale={1.004} frustumCulled={false} visible={false}>
+      {/* drawn on top without depth test → the fill never occludes it, so it
+          can't "pop in" when the fill fades out (x-ray wireframe globe) */}
+      <mesh ref={wireMesh} scale={1.004} renderOrder={2} frustumCulled={false} visible={false}>
         <icosahedronGeometry args={[1, 64]} />
         <meshStandardMaterial
           ref={wireMat}
@@ -458,6 +464,8 @@ export function ChromeBlob({
           side={DoubleSide}
           transparent
           wireframe
+          depthTest={false}
+          depthWrite={false}
           opacity={0}
           onBeforeCompile={onBeforeCompile}
         />
