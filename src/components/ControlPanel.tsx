@@ -229,17 +229,23 @@ function Oscilloscope({
   max,
   step,
   boot = 1,
+  active = true,
 }: {
   min: number;
   max: number;
   step: number;
   boot?: number;
+  active?: boolean;
 }) {
   const t = useBlobTweak();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef({ on: false, y: 0, v: 0 });
   const bootRef = useRef(1);
   bootRef.current = boot;
+  // keep the trace running while the panel is on screen (incl. the close
+  // retract) rather than blanking the moment `open` flips false
+  const activeRef = useRef(true);
+  activeRef.current = active;
 
   useEffect(() => {
     const cv = canvasRef.current;
@@ -260,7 +266,7 @@ function Oscilloscope({
       const dt = (now - last) / 1000;
       last = now;
       ctx.clearRect(0, 0, w, h);
-      if (!blobTweak.get().open) return;
+      if (!activeRef.current) return;
       phase += dt * 2.4;
       // graticule — minor grid
       const minor = 7;
@@ -466,6 +472,10 @@ export function ControlPanel() {
   // "power-on": after the piano cascade, gauges wind up from 0 to their value
   // and the panel brightens from grey to full — like a dashboard lighting up.
   const [boot, setBoot] = useState(0);
+  // stays true through the reverse "piano" retract on close (before hiding)
+  const [show, setShow] = useState(false);
+  const STAGGER = 100;
+  const REVEAL = 460;
 
   const rows = [
     <div key="head" className="flex items-center justify-between">
@@ -488,7 +498,7 @@ export function ControlPanel() {
       <Dial label="Rough" value={t.roughness} min={0} max={0.6} step={0.01} boot={boot}
         onChange={(v) => blobTweak.set({ roughness: v })} />
     </div>,
-    <Oscilloscope key="freq" min={0.1} max={2} step={0.01} boot={boot} />,
+    <Oscilloscope key="freq" min={0.1} max={2} step={0.01} boot={boot} active={show} />,
     <SegBar key="speed" label="Speed" value={t.speed} min={0} max={3} step={0.05} boot={boot}
       onChange={(v) => blobTweak.set({ speed: v })} />,
     <SegBar key="particles" label="Particles" value={t.particleDetail} min={8} max={72} step={1} boot={boot}
@@ -514,33 +524,39 @@ export function ControlPanel() {
   const n = rows.length;
 
   useEffect(() => {
-    if (!t.open) {
+    if (t.open) {
+      setShow(true);
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        setBoot(1);
+        return;
+      }
       setBoot(0);
-      return;
-    }
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setBoot(1);
-      return;
-    }
-    setBoot(0);
-    const startDelay = 240; // just after the piano starts (overlaps it)
-    const DUR = 1150;
-    const ease = (x: number) => 1 - Math.pow(1 - x, 3);
-    let raf = 0;
-    let s0 = 0;
-    const tid = window.setTimeout(() => {
-      s0 = performance.now();
-      const tick = (now: number) => {
-        const p = Math.min(1, (now - s0) / DUR);
-        setBoot(ease(p));
-        if (p < 1) raf = requestAnimationFrame(tick);
+      const startDelay = 240; // just after the piano starts (overlaps it)
+      const DUR = 1150;
+      const ease = (x: number) => 1 - Math.pow(1 - x, 3);
+      let raf = 0;
+      let s0 = 0;
+      const tid = window.setTimeout(() => {
+        s0 = performance.now();
+        const tick = (now: number) => {
+          const p = Math.min(1, (now - s0) / DUR);
+          setBoot(ease(p));
+          if (p < 1) raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+      }, startDelay);
+      return () => {
+        clearTimeout(tid);
+        cancelAnimationFrame(raf);
       };
-      raf = requestAnimationFrame(tick);
-    }, startDelay);
-    return () => {
-      clearTimeout(tid);
-      cancelAnimationFrame(raf);
-    };
+    }
+    // closing: let the reverse "piano" retract play out, THEN hide + reset
+    const total = (n - 1) * STAGGER + REVEAL + 40;
+    const tid = window.setTimeout(() => {
+      setShow(false);
+      setBoot(0);
+    }, total);
+    return () => clearTimeout(tid);
   }, [t.open, n]);
 
   // grey → full brightness with a mid flash → the "lights coming on" breath
@@ -556,7 +572,7 @@ export function ControlPanel() {
         aria-label="Blob controls"
         className="pointer-events-auto flex flex-col gap-6"
         style={{
-          visibility: t.open ? "visible" : "hidden",
+          visibility: show ? "visible" : "hidden",
           filter: `brightness(${glow.toFixed(3)})`,
         }}
       >
@@ -566,8 +582,9 @@ export function ControlPanel() {
             style={{
               opacity: t.open ? 1 : 0,
               transform: t.open ? "translateY(0)" : "translateY(14px)",
-              transition: "opacity 460ms var(--ease-out), transform 460ms var(--ease-out)",
-              transitionDelay: t.open ? `${(n - 1 - i) * 100}ms` : "0ms",
+              transition: `opacity ${REVEAL}ms var(--ease-out), transform ${REVEAL}ms var(--ease-out)`,
+              // open: bottom→top (piano). close: reversed (top leaves first) → "ranger".
+              transitionDelay: t.open ? `${(n - 1 - i) * STAGGER}ms` : `${i * STAGGER}ms`,
             }}
           >
             {row}
