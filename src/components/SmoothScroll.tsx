@@ -34,11 +34,24 @@ export function SmoothScroll({ children }: { children: React.ReactNode }) {
     if (prefersReduced) return;
 
     const lenis = new Lenis({
-      // a touch more inertia/resistance than before (heavier, slower settle)
-      duration: 1.35,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      // Lerp mode, not duration mode. The two are exclusive: `duration` + `easing`
+      // gives every scroll a fixed length and a fixed curve, which lands the page in a
+      // predictable time but always ARRIVES — the movement has an end you can feel.
+      // `lerp` closes a fraction of the remaining distance every frame instead, so the
+      // tail is long and never quite finishes. That is the weight; there is no duration
+      // to tune, only how much of the gap is eaten per frame (0.075 ≈ 8 frames to be
+      // half way, ~30 to be 90% there, framerate-independent).
+      lerp: 0.075,
       smoothWheel: true,
-      wheelMultiplier: 0.9,
+      // THE resistance, and the one number that actually produces the sensation: a
+      // wheel notch is worth half its native distance. You push and the page gives you
+      // less than you asked for, so covering ground takes gesture — which is what lets
+      // a scrubbed sequence be READ rather than flicked past. Work's putting-away is
+      // ~680px of scroll: at 0.9 that was one and a half wheel gestures (i.e. the four
+      // beats played as one), at 0.5 it is three.
+      // Below ~0.4 it stops reading as weight and starts reading as a page that is
+      // fighting you — this whole document is ~12 screens tall.
+      wheelMultiplier: 0.5,
       touchMultiplier: 1.6,
     });
 
