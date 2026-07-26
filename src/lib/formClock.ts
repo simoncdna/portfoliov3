@@ -90,6 +90,15 @@ let primed = false;
 // stops growing on release, so the turntable simply carries on from where it was
 // left, permanently but invisibly offset on a modular spin.
 let holdOffset = 0;
+// Eased freeze amount. `aboutReveal.hold` arrives as a binary from the About
+// pin's onToggle; easing it here — beside dir and the about presence, where the
+// clock does all its other smoothing — is what keeps the skull from HITCHING as
+// the pin engages. A hard 0→1 cuts the ambient scroll-turn dead in one frame,
+// while the controlled 360° that replaces it starts from zero velocity
+// (sine.inOut, scrub-smoothed on top): the turntable's speed would drop to
+// nothing for a moment before the spin picks it up. Ramping the freeze in lets
+// the ambient turn bleed out exactly as the spin builds, with no gap between.
+let holdEased = 0;
 
 export function advanceFormClock(
   delta: number,
@@ -140,9 +149,14 @@ export function advanceFormClock(
   if (Math.abs(moved) > STILL) dirTarget = Math.sign(moved);
   dir += (dirTarget - dir) * (reduced ? 1 : 1 - Math.pow(0.02, delta));
 
+  const holdTarget = reduced ? 0 : aboutReveal.hold;
+  holdEased += (holdTarget - holdEased) * (reduced ? 1 : 1 - Math.pow(0.1, delta));
+
   // While the About pin holds, swallow this frame's scroll movement into the
   // offset so the ambient turntable freezes (the section owns the rotation).
-  holdOffset += moved * (reduced ? 0 : aboutReveal.hold);
+  // Eased, not binary — see holdEased: a hard freeze here is what made the skull
+  // hitch as the pin engaged.
+  holdOffset += moved * holdEased;
 
   Object.assign(state, c);
   // The living surface flow does NOT reverse: that is the metal breathing, not the
@@ -155,7 +169,7 @@ export function advanceFormClock(
   // (Holding only the scroll-scrub term left the idle turn running through the
   // pinned 360°, which is the "~1.5 turns" the hold exists to prevent — just a
   // smaller share of it, and one that grows the slower you scroll.)
-  const hold = reduced ? 0 : aboutReveal.hold;
+  const hold = holdEased;
   drift += delta * dir * (tw.speed * SPIN_RATE * (1 - hold) + c.spinBoost);
   // The scrub is a function of scroll POSITION, so it rewinds exactly; the drift
   // carries the direction of the last gesture. `scroll - holdOffset` freezes the
