@@ -7,6 +7,7 @@ import { useGSAP } from "@gsap/react";
 import { ScrambleText } from "@/components/ScrambleText";
 import { works } from "@/data/site";
 import { workPlate } from "@/lib/workPlate";
+import { workReveal } from "@/lib/workReveal";
 import { scrollPageTo } from "@/lib/pageScroll";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -54,12 +55,21 @@ gsap.registerPlugin(ScrollTrigger, useGSAP);
 const LAST = works.length - 1;
 
 /**
- * The share of the band's travel given to the setting-up. Against the 400vh band
- * (300vh of travel) that is ~45vh for the entrance and ~64vh per plate after it. Used
- * both to size the entrance timeline and to offset the plate selection, so the two
- * cannot disagree about where the section proper starts.
+ * The shares of the band's travel given to the setting-up and to the putting-away.
+ * Against the 480vh band (380vh of travel) that is ~68vh for the entrance and ~84vh
+ * for the exit, leaving ~57vh per plate. Each is used twice — to size its timeline and
+ * to bound the plate selection — so the two halves cannot disagree about where the
+ * section proper starts and ends.
+ *
+ * Both sequences live INSIDE the band, which is the point: the screen is stuck for
+ * the whole of the band, so the furniture is centred on the form throughout, and the
+ * putting-away is finished before Contact arrives. The exit used to run from the
+ * band's end onwards, i.e. over Contact's first screen — the piece was still being
+ * put away while the next section was reading, and the whole four-beat sequence had
+ * to fit in whatever scroll was left, which at wheelMultiplier 0.9 is one flick.
  */
-const ENTER = 0.15;
+const ENTER = 0.18;
+const EXIT = 0.22;
 
 /**
  * The entrance's beats, in timeline units. Absolute positions rather than the usual
@@ -69,15 +79,42 @@ const ENTER = 0.15;
  */
 const BEAT = { notch: 0, name: 0.64, picks: 1.2, tail: 0.25 };
 
+/**
+ * The shortest time a plate is allowed to hold the screen (ms).
+ *
+ * One flick of the wheel is a long way down the band, and without a floor it
+ * would cross two or three plates at once: three turns queued on top of each other,
+ * three names churning over one another, and no plate ever actually SEEN. So the
+ * shown plate does not jump to wherever the scroll is — it walks there, one plate at
+ * a time, never faster than this. The pause is a pause in the SELECTION only: the
+ * clock keeps running underneath, so the piece is still turning and the metal still
+ * flowing all the way through it (see formClock — nothing here touches the form's own
+ * animation).
+ *
+ * 1400 ms because that is what the name's brouillage takes to settle (LEAD 620 plus
+ * eight locks at 90 — see ScrambleText): every plate is held at least long enough for
+ * its own name to finish decoding before the next one starts breaking up.
+ */
+const DWELL = 1400;
+
 export function Work() {
   const ref = useRef<HTMLElement>(null);
   const [plate, setPlate] = useState(0);
   /** true from the moment the metal starts taking a project's shape */
   const [formed, setFormed] = useState(false);
-  // The plate the form is currently showing, as the scroll handler last left it. A
-  // ref, because the handler needs the previous value to know which WAY the plates
-  // are being crossed (the turn is signed) and it must not re-subscribe to get it.
-  const last = useRef(0);
+
+  // The plate walk. Refs rather than state because the walk is a timing machine, not
+  // a rendering concern: the scroll handler must read the current values without
+  // re-subscribing, and a timer firing between two renders must see the truth.
+  /** what is on screen */
+  const shown = useRef(0);
+  /** where the scroll says we are — the walk's destination */
+  const target = useRef(0);
+  /** when `shown` last changed, for the DWELL floor */
+  const changedAt = useRef(0);
+  const timer = useRef(0);
+  /** is a plate presented at all — false through the entrance and past the exit */
+  const live = useRef(false);
 
   // The churn only rolls through letters that appear in the four names, so a glyph
   // passing through a slot always has a plausible width for that slot — on a
@@ -105,6 +142,46 @@ export function Work() {
     return { top: r.top + window.scrollY, span };
   }, []);
 
+  /** Put plate i on screen now, and start its dwell. */
+  const present = useCallback((i: number, step: number) => {
+    shown.current = i;
+    changedAt.current = performance.now();
+    setPlate(i);
+    // The step is signed so the changeover's 360° follows the gesture: scrolling down
+    // winds the piece over, scrolling back up unwinds it — the same rule the ambient
+    // turntable follows (see the scroll direction in formClock).
+    workPlate.show(works[i].title, step);
+  }, []);
+
+  /**
+   * Walk `shown` one plate toward `target`, no faster than DWELL, and keep walking
+   * until it arrives.
+   *
+   * The timer is what makes it a walk rather than a rate limiter: the last scroll
+   * event of a flick may be the last event we ever get, so if the dwell blocks a step
+   * there has to be something scheduled to take it afterwards — otherwise the piece
+   * would simply stop two plates short of where the reader is.
+   *
+   * A NAMED function expression, so it schedules itself by that name rather than
+   * through the `walk` binding: a timer reaching back out for the variable it was
+   * created from is the kind of thing that goes stale.
+   */
+  const walk = useCallback(
+    function step() {
+      window.clearTimeout(timer.current);
+      if (!live.current || target.current === shown.current) return;
+      const wait = DWELL - (performance.now() - changedAt.current);
+      if (wait > 0) {
+        timer.current = window.setTimeout(step, wait);
+        return;
+      }
+      const dir = Math.sign(target.current - shown.current);
+      present(shown.current + dir, dir);
+      if (shown.current !== target.current) timer.current = window.setTimeout(step, DWELL);
+    },
+    [present]
+  );
+
   useEffect(() => {
     const onScroll = () => {
       const g = geometry();
@@ -116,17 +193,16 @@ export function Work() {
       // handler that also cleared at the edges would, on the way out, reset the name
       // to plate 01 halfway through its own fade-out.
       if (p < ENTER || p > 1) return;
-      const q = Math.min(1, (p - ENTER) / (1 - ENTER));
+      // Clamped at both ends: past 1 - EXIT the putting-away has the floor, and the
+      // last plate simply stays selected for it (so the type that is fading out is
+      // still the plate that was being read).
+      const q = Math.min(1, (p - ENTER) / (1 - ENTER - EXIT));
       // Equal bins, not `round(q * LAST)`: rounding gives the first and last plates
       // half a bin each, which would have left plate 01 — the one that has just been
       // formed at the end of the entrance — on screen for half as long as 02 and 03.
-      const i = Math.min(LAST, Math.floor(q * works.length));
-      setPlate(i);
-      // The step is signed so the changeover's 360° follows the gesture: scrolling
-      // down winds the piece over, scrolling back up unwinds it — the same rule the
-      // ambient turntable follows (see the scroll direction in formClock).
-      workPlate.show(works[i].title, i - last.current);
-      last.current = i;
+      // This only sets the DESTINATION; the walk decides when to get there.
+      target.current = Math.min(LAST, Math.floor(q * works.length));
+      walk();
     };
     // Lenis writes real scroll positions (it is not a transform-based scroller), so
     // the native event is the honest signal here — and it fires on its frames.
@@ -136,16 +212,17 @@ export function Work() {
     return () => {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
+      window.clearTimeout(timer.current);
       workPlate.clear();
     };
-  }, [geometry]);
+  }, [geometry, walk]);
 
   /** Scroll to the middle of plate i's bin — see the binning in the handler above. */
   const go = (i: number) => {
     const g = geometry();
     if (!g) return;
     const q = (i + 0.5) / works.length;
-    scrollPageTo(g.top + g.span * (ENTER + q * (1 - ENTER)));
+    scrollPageTo(g.top + g.span * (ENTER + q * (1 - ENTER - EXIT)));
   };
 
   useGSAP(
@@ -159,7 +236,8 @@ export function Work() {
 
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         gsap.set([...notches, ...type], { clearProps: "all" });
-        workPlate.show(works[0].title, 0);
+        live.current = true;
+        present(0, 0);
         setFormed(true);
         return;
       }
@@ -207,31 +285,52 @@ export function Work() {
         on = want;
         setFormed(want);
         if (want) {
-          workPlate.show(works[last.current].title, 0);
+          // The first plate starts its dwell here, so scrolling straight on cannot
+          // switch away from it before it has been seen.
+          live.current = true;
+          present(shown.current, 0);
         } else {
           // Backing out of the section rewinds it: the metal is released AND the
           // selection is wound back to the first plate, so coming down again plays
           // the sequence from the top rather than resuming where it was left.
+          live.current = false;
+          window.clearTimeout(timer.current);
           workPlate.clear();
           setPlate(0);
-          last.current = 0;
+          shown.current = 0;
+          target.current = 0;
         }
       });
 
       // --- 3. putting away -----------------------------------------------------
-      // The entrance backwards: the type goes first, then the notches retract into
-      // the corners they were struck from, and the metal is let go.
+      // The entrance backwards, in four beats and strictly in this order:
+      //
+      //   1. the type goes — name, then numbers
+      //   2. the metal is released, and finds its own form again (the blob)
+      //   3. the notches retract into the corners they were struck from
+      //   4. only then does the piece leave the middle, for the next section
+      //
+      // Beat 4 is the reason workReveal exists. It used to be a smoothstep on the
+      // band's bottom edge over in ChromeCanvas, which had no way of knowing where
+      // beats 1–3 had got to: the piece slid away while the frame was still around it.
+      // Scrubbed from here, it cannot get ahead of them.
       //
       // fromTo, not to: a scrubbed `to` renders at progress 0 on refresh and records
       // whatever autoAlpha is at that moment as its start — which is 0, since the
       // section has not been reached yet. It would then tween 0 → 0 and the furniture
       // would never leave. immediateRender: false so declaring the start values does
       // not undo the hidden state above.
+      workReveal.away = 0;
       const outTl = gsap.timeline({
         scrollTrigger: {
           trigger: el,
-          start: "bottom bottom",
-          end: "bottom 50%",
+          // The band's last EXIT share, and not a pixel past it: `bottom bottom+=N`
+          // fires when the band's bottom edge is still N px BELOW the fold, i.e. N px
+          // of scroll before the band ends. So the four beats play out while the
+          // screen is still stuck — the piece framed and centred — and the section is
+          // put away by the time the sticky screen releases.
+          start: () => "bottom bottom+=" + (el.offsetHeight - window.innerHeight) * EXIT,
+          end: "bottom bottom",
           scrub: 1,
           invalidateOnRefresh: true,
         },
@@ -242,7 +341,11 @@ export function Work() {
           { autoAlpha: 1 },
           { autoAlpha: 0, ease: "sine.in", duration: 0.5, immediateRender: false }
         )
+        // The release, on its own beat — the blob has a moment to be a blob before the
+        // frame around it goes. The melt itself takes about four seconds of real time
+        // (see MOOD_RATE), so this is where it STARTS, not where it finishes.
         .addLabel("free")
+        .to({}, { duration: 0.4 })
         .fromTo(
           notches,
           { autoAlpha: 1, scale: 1 },
@@ -254,14 +357,21 @@ export function Work() {
             stagger: 0.06,
             immediateRender: false,
           },
-          "free"
+          ">"
+        )
+        // …and last, the piece steps aside. sine.inOut because this one is a MOVE
+        // across the stage rather than a fade: it has to start and stop from rest.
+        .fromTo(
+          workReveal,
+          { away: 0 },
+          { away: 1, ease: "sine.inOut", duration: 0.7, immediateRender: false },
+          ">-0.1"
         );
 
-      // …and the release rides with the notches: as the frame lets go of the piece,
-      // the piece lets go of its shape. Reversible in both directions, like the
-      // entrance gate — scrolling back up out of Contact has to hand the plate back,
-      // and the plate it hands back is the one that was left (not the first), so the
-      // section resumes rather than restarting.
+      // The release gate. Reversible in both directions, like the entrance gate —
+      // scrolling back up out of Contact has to hand the plate back, and the plate it
+      // hands back is the one that was left (not the first), so the section resumes
+      // rather than restarting.
       const FREE = outTl.labels.free / outTl.duration();
       let freed = false;
       outTl.eventCallback("onUpdate", () => {
@@ -269,11 +379,20 @@ export function Work() {
         if (want === freed) return;
         freed = want;
         setFormed(!want);
-        if (want) workPlate.clear();
-        else workPlate.show(works[last.current].title, 0);
+        live.current = !want;
+        if (want) {
+          window.clearTimeout(timer.current);
+          workPlate.clear();
+        } else {
+          present(shown.current, 0);
+          // …and if the scroll moved on while the piece was let go, the walk picks up
+          // the difference from here instead of the plate silently disagreeing with
+          // where the reader is.
+          walk();
+        }
       });
     },
-    { scope: ref }
+    { scope: ref, dependencies: [present, walk] }
   );
 
   const current = works[plate];

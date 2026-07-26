@@ -262,11 +262,13 @@ a {
    piece would drift apart on every aspect ratio but the one they were tuned at. */
 
 /* A tall band with a sticky screen. The scroll IS the selector, so the band's height
-   is the length of what it has to say: 300vh of travel, the first 15% of it the
-   setting-up (see ENTER in Work.tsx) and the rest four plates at ~85vh each. */
+   is the length of what it has to say: 380vh of travel, split 15% setting-up, four
+   plates at ~66vh, 15% putting-away (ENTER and EXIT in Work.tsx). Both sequences are
+   INSIDE the band so they play while the screen is stuck and the furniture is centred
+   on the form — and so a flick of the wheel cannot swallow one whole. */
 .plate-band {
   position: relative;
-  height: 400vh;
+  height: 480vh;
 }
 .plate-screen {
   position: sticky;

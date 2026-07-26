@@ -3,6 +3,7 @@
 import { blobTweak, TIME_RATE, SPIN_RATE } from "./blobTweak";
 import { formChoreo, type FormChoreo } from "./formChoreo";
 import { aboutReveal } from "./aboutReveal";
+import { workReveal } from "./workReveal";
 import { workPlate, MOOD_REST, SHAPES, type Shape } from "./workPlate";
 
 /**
@@ -125,7 +126,6 @@ export function advanceFormClock(
   delta: number,
   about: number,
   work: number,
-  after: number,
   scroll: number,
   reduced: boolean
 ) {
@@ -134,13 +134,17 @@ export function advanceFormClock(
   eased += (target - eased) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
   const workTarget = reduced ? 0 : Math.max(0, Math.min(1, work));
   easedWork += (workTarget - easedWork) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
-  const afterTarget = reduced ? 0 : Math.max(0, Math.min(1, after));
+  // The putting-away is scrubbed by Work's own exit timeline (workReveal), not read
+  // off that section's position — like About's exit, it is the last beat of a sequence
+  // and has to stay behind the three DOM beats in front of it.
+  const afterTarget = reduced ? 0 : Math.max(0, Math.min(1, workReveal.away));
   easedAfter += (afterTarget - easedAfter) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
 
   // The About→Work transition is the pinned sequence's own last beat, scrubbed
   // through aboutReveal.exit — not a second trigger reading the Work section's
-  // position, which could drift from the text fade it is supposed to follow. The
-  // Work dock, by contrast, IS a function of that section's position.
+  // position, which could drift from the text fade it is supposed to follow. Work's
+  // ARRIVAL, by contrast, is a fair function of where that section is; only its
+  // departure has an order to respect, hence workReveal above.
   const c = formChoreo(eased, reduced ? 0 : aboutReveal.exit, easedWork, easedAfter);
 
   // shown plate → silhouette, eased so the matter flows into it
