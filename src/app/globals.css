@@ -94,6 +94,45 @@ body {
   overflow-x: hidden;
 }
 
+/* ------------------------------------------------------------
+   Grain — the page's paper
+   ------------------------------------------------------------
+   --void was deliberately lifted from #050505 to #0c0c0e to read as a flat, matte
+   black rather than as an absence. This finishes that intent: without it the black
+   is an unlit screen, with it the black is ink.
+
+   Static, not animated. Film grain moves; paper grain does not, and this universe
+   is a printed edition — an object, not a projection. It also means the layer is
+   composited once and never repaints, so it costs nothing per frame.
+
+   Sparse white specks over transparency rather than a grey haze: the feColorMatrix
+   forces RGB to white and puts (noise − 0.5) in the alpha, so only the crests of the
+   turbulence register and the black is never lifted as a whole. A mid-grey noise
+   blended over a near-black ground would just wash it out to charcoal.
+
+   Normal compositing on purpose — no mix-blend-mode. The footer wordmark and the
+   cursor both already use `difference`, and a third blending layer on top of them
+   is how you get results nobody can predict.
+
+   z-index 90: above the fixed chrome stage (4) and the header (50) — paper is over
+   the ink, including the type — and below the cursor (100), which has to stay the
+   sharpest thing on screen. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  /* The dial, tuned by measuring a flat patch of void — deviation / how far the
+     black lifts, both out of 255: 0.085 → 1.5 / 1 (too timid on a real display),
+     0.14 → 2.5 / 1.7, and this → about 3.1 / 2.3. Past ~0.2 the void starts reading
+     grey and the chrome loses its edge; going further than that is not a louder
+     grain, it is a different universe (photocopy, not paper). */
+  opacity: 0.175;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1 0 0 0 -0.5'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
 /* Hide the native cursor everywhere (incl. links/buttons that force a pointer)
    while the custom crosshair is active — fine-pointer + motion-allowed only. */
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
