@@ -145,46 +145,10 @@ a {
   font-size: clamp(1.25rem, 2vw, 1.75rem);
 }
 
-/* Chrome gradient text fill */
-.text-chrome-grad {
-  background: var(--grad-chrome);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-
-/* Real chrome type: hard reflection horizon + bevel + a slow sweeping sheen */
-.chrome-text {
-  background: linear-gradient(
-    180deg,
-    #faf6f1 0%,
-    #eaedf3 16%,
-    #9a9ea8 40%,
-    #45484f 49%,
-    #202228 51%,
-    #838893 60%,
-    #e6e9ef 82%,
-    #faf6f1 100%
-  );
-  background-size: 100% 260%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.35))
-    drop-shadow(0 3px 10px rgba(0, 0, 0, 0.55));
-  animation: chrome-sheen 5s ease-in-out infinite;
-}
-@keyframes chrome-sheen {
-  0%,
-  100% {
-    background-position: 50% 12%;
-  }
-  50% {
-    background-position: 50% 88%;
-  }
-}
+/* The chrome-gradient text fills (.text-chrome-grad, .chrome-text and their
+   sheen) lived here and are gone: the metal on this page is the form, and type
+   that imitates it competes with the real thing while costing legibility. Type
+   is set in flat silver/cream — see the --silver-* and --chrome tokens. */
 
 /* ============================================================
    Layout helpers
@@ -268,11 +232,7 @@ a {
     transform: translateX(clamp(6px, 1.2vw, 18px));
   }
   .work-row:hover .work-title {
-    background: var(--grad-chrome);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    color: transparent;
+    color: var(--chrome);
   }
   .work-row:hover .work-arrow {
     transform: translateX(8px);

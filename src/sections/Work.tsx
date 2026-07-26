@@ -144,27 +144,23 @@ export function Work() {
                         <span className="work-title font-display fs-h3">{w.title}</span>
                         <ArrowRight className="work-arrow h-3 w-7 shrink-0 self-center text-silver-muted" />
                       </span>
-                      <span className="font-mono text-[0.66rem] whitespace-nowrap uppercase tracking-[0.14em] text-silver-muted">
+                      {/* Edition number, not a date — see the note in data/site.ts.
+                          Set at the system's own label size and tracking
+                          (--fs-label / 0.18em) rather than a hair under it. */}
+                      <span className="font-mono text-[0.6875rem] whitespace-nowrap uppercase tracking-[0.18em] text-silver-muted">
                         {w.timeline}
                       </span>
                     </div>
 
                     {/* Opens on hover / focus only. Grid-rows 0fr → 1fr animates a
-                        height the content decides, so nothing has to be measured. */}
+                        height the content decides, so nothing has to be measured.
+                        One sentence about the project and nothing else: the stack is
+                        deliberately not shown — see the note in data/site.ts. */}
                     <div className="work-fold">
-                      {/* Guarded: a project can legitimately have no summary or
-                          stack yet, and an empty <p> would still cost its margin. */}
                       <div className="min-h-0 overflow-hidden">
                         {w.summary && (
-                          <p className="mt-4 max-w-md text-[0.88rem] leading-relaxed text-silver">
+                          <p className="mt-3 max-w-md text-[0.88rem] leading-relaxed text-silver">
                             {w.summary}
-                          </p>
-                        )}
-                        {(w.languages.length > 0 || w.tools.length > 0) && (
-                          <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-silver-muted">
-                            {[...w.languages, ...w.tools].map((t) => (
-                              <span key={t}>{t}</span>
-                            ))}
                           </p>
                         )}
                       </div>

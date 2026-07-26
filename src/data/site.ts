@@ -45,15 +45,38 @@ export type Work = {
   timeline: string;
   url: string;
   summary: string;
+  /**
+   * Kept, and deliberately NOT rendered in the Work rows.
+   *
+   * A stack list is a résumé convention — it is there to be matched by a keyword
+   * search, not read. On a site whose own reason for existing is to demonstrate
+   * front-end craft, printing "Next.js, TypeScript" next to the proof of it says
+   * less than the proof does. If it ever needs to be visible, the place for it is a
+   * case-study page or a CV, where someone has come looking for it.
+   */
   languages: string[];
   tools: string[];
 };
 
+/*
+ * Dates use the universe's own notation, not calendar prose: `20.24`, the split
+ * year MASTER.md sets out for meta lines ("// SCRAPBOOK 20.01") and that the footer
+ * already carries ("20.24 — SCRAPBOOK / N°003"). It reads as an edition number
+ * rather than as a CV entry, which is the whole register of the section — numbered
+ * plates in a catalogue.
+ *
+ * Conventions: a bare `20.YY` for a single edition, `20.YY — YY` for a range (the
+ * second year shortened, as print does), and an OPEN range — a trailing dash with
+ * nothing after it — for work still running. An arrow would have read better on its
+ * own, but the row already grows an arrow on hover for the outbound link, and two
+ * arrows a few centimetres apart meaning different things is one too many.
+ * Months are dropped: at this scale they were noise, and they broke the column.
+ */
 export const works: Work[] = [
   {
     index: "01",
     title: "Pictarine",
-    timeline: "2024 — Today",
+    timeline: "20.24 —",
     // TODO(simon): your own words. Left empty rather than invented — the row and
     // its fold render fine without them, and a portfolio should not describe work
     // in a sentence you did not write. The URL is the company's; swap it if the
@@ -66,7 +89,7 @@ export const works: Work[] = [
   {
     index: "02",
     title: "Forma",
-    timeline: "2023 — 2024",
+    timeline: "20.23 — 24",
     url: "https://forma.legal/",
     summary:
       "A SaaS platform for legal and accounting professionals — client messaging, document management and activity scheduling in one workspace.",
@@ -76,7 +99,7 @@ export const works: Work[] = [
   {
     index: "03",
     title: "Crazee.B",
-    timeline: "Jan 2023 — May 2023",
+    timeline: "20.23",
     url: "https://crazee-burger-ki3o6okfp-simoncdn.vercel.app/",
     summary:
       "An online restaurant ordering dashboard designed to provide a smooth and enjoyable ordering experience.",
@@ -85,12 +108,12 @@ export const works: Work[] = [
   },
   {
     index: "04",
-    title: "Workshopbya",
-    timeline: "Dec 2022 — Jan 2023",
-    url: "https://www.workshopbya.com/",
+    title: "Klay",
+    timeline: "20.24",
+    url: "https://klay-craft.netlify.app",
     summary:
-      "A showcase website with blog integration, highlighting the community's expertise and creative identity.",
-    languages: ["Next.js", "TypeScript"],
-    tools: ["Tailwind", "Sanity.io", "Sendgrid", "Framer-Motion", "Figma"],
+      "Klay merges the craft of pottery with a modern touch — selling ceramics and opening workshop registration through an accessible online platform.",
+    languages: ["Nuxt.js", "TypeScript"],
+    tools: ["Tailwind", "Pinia", "Figma"],
   },
 ];
