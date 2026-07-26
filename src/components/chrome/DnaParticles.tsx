@@ -3,12 +3,13 @@
 import { useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
-import { Box3, BufferGeometry, BufferAttribute, Color, Euler, Matrix3, Matrix4, Quaternion, ShaderMaterial, Vector3 } from "three";
+import { Box3, BufferGeometry, BufferAttribute, Color, Euler, Matrix3, Matrix4, Quaternion, ShaderMaterial, Vector3, Vector4 } from "three";
 import type { Mesh, Points } from "three";
 import { MeshSurfaceSampler } from "three/examples/jsm/math/MeshSurfaceSampler.js";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import { blobTweak, useBlobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { formState } from "@/lib/formClock";
+import { SHAPE_SDF } from "@/lib/formShapes";
 
 type Props = {
   reduced?: boolean;
@@ -78,11 +79,16 @@ uniform float uTime;
 uniform float uAbout;
 uniform float uDistort;   // panel: displaces the whole cloud (living deform)
 uniform float uFreq;      // panel: noise scale
+uniform vec3  uStretch;   // hovered project: silhouette proportions
+uniform float uMoodD;     // hovered project: x amplitude
+uniform float uMoodF;     // hovered project: x lump size
+uniform vec4  uShape;     // hovered project: gavel / camera / burger / vase
 attribute vec3 aTarget;
 attribute float aSeed;
 varying float vSeed;
 const float FORM_R = ${FORM_RADIUS.toFixed(2)};  // shared, see blobTweak
 ${SNOISE}
+${SHAPE_SDF}
 // same 2-octave mix as the liquid's fbm
 float fbm(vec3 p){ return snoise(p) * 0.7 + snoise(p * 2.1) * 0.3; }
 void main(){
@@ -98,16 +104,30 @@ void main(){
     snoise(pos * 1.3 + vec3(9.1, uTime * 0.2, aSeed * 12.0))
   );
   pos += nz * fly * 0.2;
+
+  // The hovered project's object (Work). The cloud lands ON the field's surface
+  // rather than being deformed toward it: at amount 0 that field IS the resting
+  // sphere these particles already sit on, so this costs nothing until a row is
+  // hovered, and the same GLSL serves the liquid — see formShapes.
+  float shaped = max(max(uShape.x, uShape.y), max(uShape.z, uShape.w));
+  if (shaped > 0.001) pos = shapeProject(pos, uShape);
+
+  // Anisotropic stretch, from the same mood.
+  pos *= uStretch;
+
   // Panel distort — the SAME field as the liquid's sdBlob, so both forms wear
   // the same lumps: domain-warped fbm, domain normalised by the shared radius so
   // uFreq means one feature size everywhere, amplitude a fraction of that radius,
   // pushed along the radial direction (the liquid displaces its sphere radially).
-  vec3 sp = (pos / FORM_R) * uFreq;
+  // The mood's multipliers ride on top, exactly as they do in the liquid.
+  vec3 sp = (pos / FORM_R) * uFreq * uMoodF;
   vec3 wrp = sp + vec3(snoise(sp + vec3(0.0, uTime * 0.30, 0.0)),
                        snoise(sp + vec3(3.1, 1.7, uTime * 0.18)),
                        snoise(sp + vec3(9.2, 5.3, uTime * 0.12))) * 0.9;
   vec3 rdir = normalize(pos + vec3(1e-4));
-  pos += rdir * (fbm(wrp) * uDistort * FORM_R);
+  // Damped while a shape is held: the lumps are the blob's own texture, and at full
+  // amplitude they eat the edges the objects are recognised by.
+  pos += rdir * (fbm(wrp) * uDistort * uMoodD * FORM_R * (1.0 - 0.75 * shaped));
   vSeed = aSeed;
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
   gl_PointSize = (1.6 + uAbout * 0.7) * (15.0 / -mv.z);
@@ -188,6 +208,10 @@ export function DnaParticles({ reduced }: Props) {
           uRough: { value: 0.1 },
           uDistort: { value: 0.25 },
           uFreq: { value: 0.5 },
+          uStretch: { value: new Vector3(1, 1, 1) },
+          uMoodD: { value: 1 },
+          uMoodF: { value: 1 },
+          uShape: { value: new Vector4() },
           uLo: { value: new Color(0.45, 0.48, 0.54) },
           uHi: { value: new Color(0.95, 0.97, 1.0) },
         },
@@ -233,12 +257,18 @@ export function DnaParticles({ reduced }: Props) {
     const tn = new Vector3();
 
     for (let i = 0; i < N; i++) {
+      // Golden-angle spiral, then a grain of jitter. The spiral alone is a perfect
+      // lattice, and a perfect lattice moirés the moment it is projected onto a
+      // curved surface — which is exactly what the hovered project's shape does to
+      // this cloud (see shapeProject). The jitter is far too small to soften the
+      // resting sphere and just enough to decorrelate the interference.
       const y = 1 - (i / (N - 1)) * 2;
       const rad = Math.sqrt(Math.max(0, 1 - y * y));
       const th = golden * i;
-      home[i * 3] = Math.cos(th) * rad * HOME_R;
-      home[i * 3 + 1] = y * HOME_R;
-      home[i * 3 + 2] = Math.sin(th) * rad * HOME_R;
+      const j = 0.035 * HOME_R;
+      home[i * 3] = Math.cos(th) * rad * HOME_R + (Math.random() - 0.5) * j;
+      home[i * 3 + 1] = y * HOME_R + (Math.random() - 0.5) * j;
+      home[i * 3 + 2] = Math.sin(th) * rad * HOME_R + (Math.random() - 0.5) * j;
 
       if (sampler) {
         // sample the whole surface → the complete skull (no front-facing filter)
@@ -298,6 +328,12 @@ export function DnaParticles({ reduced }: Props) {
     u.uRough.value = tw.roughness;
     u.uDistort.value = tw.distort * DISTORT_MAX; // fraction of FORM_R, as the liquid
     u.uFreq.value = tw.freq;
+    // hovered project → the same silhouette the liquid gets (see workHover)
+    (u.uStretch.value as Vector3).set(s.mood.sx, s.mood.sy, s.mood.sz);
+    u.uMoodD.value = s.mood.distort;
+    u.uMoodF.value = s.mood.freq;
+    const sh = s.mood.shapes;
+    (u.uShape.value as Vector4).set(sh.gavel, sh.camera, sh.burger, sh.vase);
 
     pts.position.setX(s.dock);
     pts.scale.setScalar(GROUP_SCALE * s.scale);

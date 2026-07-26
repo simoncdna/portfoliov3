@@ -3,7 +3,7 @@
 import { blobTweak, TIME_RATE, SPIN_RATE } from "./blobTweak";
 import { formChoreo, type FormChoreo } from "./formChoreo";
 import { aboutReveal } from "./aboutReveal";
-import { workHover, MOOD_REST } from "./workHover";
+import { workHover, MOOD_REST, SHAPES, type Shape } from "./workHover";
 
 /**
  * The central form's live state: one clock, one turntable, one eased scroll
@@ -40,6 +40,8 @@ export type FormState = FormChoreo & {
     distort: number;
     freq: number;
     spike: number;
+    /** one eased amount per bespoke shape, keyed as in SHAPES */
+    shapes: Record<Shape, number>;
   };
 };
 
@@ -71,6 +73,7 @@ const state: FormState = {
     distort: MOOD_REST.distort,
     freq: MOOD_REST.freq,
     spike: MOOD_REST.spike,
+    shapes: { gavel: 0, camera: 0, burger: 0, vase: 0 },
   },
 };
 
@@ -117,6 +120,11 @@ export function advanceFormClock(
   md.distort += (m.distort - md.distort) * mr;
   md.freq += (m.freq - md.freq) * mr;
   md.spike += (m.spike - md.spike) * mr;
+  // Every shape eases, not just the hovered one: that is what makes project → project
+  // a melt (the old form drains away as the new one fills) rather than a cut.
+  for (const s of SHAPES) {
+    md.shapes[s] += ((m.shape === s ? 1 : 0) - md.shapes[s]) * mr;
+  }
 
   // Scroll direction decides which way the form turns. Scrolling down winds it,
   // scrolling up unwinds it — the idle drift is the same gesture continued, so it

@@ -3,10 +3,11 @@
 import { useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEnvironment } from "@react-three/drei";
-import { BufferAttribute, BufferGeometry, Color, Matrix3, ShaderMaterial, Vector2, Vector3 } from "three";
+import { BufferAttribute, BufferGeometry, Color, Matrix3, ShaderMaterial, Vector2, Vector3, Vector4 } from "three";
 import type { Mesh } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { CHROME_SHADE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
+import { SHAPE_SDF } from "@/lib/formShapes";
 import { formState } from "@/lib/formClock";
 
 type Props = {
@@ -32,6 +33,8 @@ uniform vec3  uStretch;   // hovered project: silhouette proportions
 uniform float uMoodD;     // hovered project: x amplitude
 uniform float uMoodF;     // hovered project: x lump size
 uniform float uSpike;     // hovered project: radial thorns
+uniform vec4  uShape;     // hovered project: how much of each bespoke field is
+                          // mixed in — gavel / camera / burger / vase, in SHAPES order
 uniform sampler2D uEnv;
 uniform float uEnvInt;
 uniform float uEnvRot;
@@ -93,6 +96,8 @@ float fbm(vec3 p){ return snoise(p) * 0.7 + snoise(p * 2.1) * 0.3; }
 // ---------- shape constants ----------
 const float BR = ${FORM_RADIUS.toFixed(2)};  // blob radius (shared, see blobTweak)
 
+${SHAPE_SDF}
+
 // Domain-warped fbm, ported from the old vertex-displaced blob: the noise field
 // is itself displaced by noise (offsets larger than the domain), which is what
 // produced the stringy asymmetric "liquid" lobes rather than regular bumps.
@@ -136,7 +141,8 @@ float map(vec3 wp){
   float c = cos(uSpin), s = sin(uSpin);
   p = vec3(c*p.x - s*p.z, p.y, s*p.x + c*p.z);
   p /= uScale;                 // global grow/shrink for the section exit
-  float d = sdBlob(p);
+  // The blob, with the hovered project's object mixed into it — see shapeField.
+  float d = shapeField(p, uShape, sdBlob(p));
   // living surface flow (ripples), stronger once assembled. The 0.55 keeps this
   // term at its previous absolute amplitude now that uDistort is no longer
   // pre-scaled on the JS side.
@@ -170,8 +176,13 @@ void main(){
   // The margin now also has to cover the silhouette: the widest stretch axis, the
   // hovered project's lump amplitude and its thorns. Under-covering it would clip
   // the form's outline against an invisible sphere.
+  // …and, when a project's object is mixed in, whichever of the two reaches
+  // further: the shapes are scaled to read at a similar size, which puts their
+  // tips past the noise-displaced blob's own radius.
   float wide = max(uStretch.x, max(uStretch.y, uStretch.z));
-  float bRad = uScale * (BR * wide * (1.0 + uDistort * uMoodD + uSpike) + 0.6);
+  float shaped = max(max(uShape.x, uShape.y), max(uShape.z, uShape.w));
+  float bRad = uScale * max(BR * wide * (1.0 + uDistort * uMoodD + uSpike) + 0.6,
+                            shaped * (SHAPE_REACH + 0.5));
   vec3  bc  = vec3(uDock, 0.0, 0.0) - ro;
   float tca = dot(bc, rd);
   float dc2 = dot(bc, bc) - tca * tca;
@@ -255,6 +266,7 @@ export function LiquidDna({ reduced }: Props) {
         uMoodD: { value: 1 },
         uMoodF: { value: 1 },
         uSpike: { value: 0 },
+        uShape: { value: new Vector4() },
         uEnv: { value: null },
         uEnvInt: { value: ENV_INTENSITY },
         uEnvRot: { value: ENV_ROT_Y },
@@ -313,6 +325,8 @@ export function LiquidDna({ reduced }: Props) {
     u.uMoodD.value = s.mood.distort;
     u.uMoodF.value = s.mood.freq;
     u.uSpike.value = s.mood.spike;
+    const sh = s.mood.shapes;
+    (u.uShape.value as Vector4).set(sh.gavel, sh.camera, sh.burger, sh.vase);
     u.uEnv.value = envMap;
 
     const fov = (camera as { fov?: number }).fov ?? 42;

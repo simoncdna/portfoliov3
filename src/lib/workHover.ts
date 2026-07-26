@@ -11,6 +11,11 @@
  * every other by a true melt, and the control panel still governs the base look
  * (the multipliers multiply its values rather than replacing them).
  *
+ * Where a project calls for a literal object rather than a mood — Forma's gavel —
+ * it brings its own distance field, and that field is MIXED into the blob's rather
+ * than replacing it. Same principle: mixing two distance fields is what melting
+ * is, so the metal flows into the shape and back out of it.
+ *
  * A plain mutable singleton (like aboutReveal / sectionStore): written by the
  * project rows on hover/focus, eased and read every frame by the form clock.
  */
@@ -34,10 +39,28 @@ export type Mood = {
    * for both.
    */
   spike: number;
+  /**
+   * The literal object this project melts into, if any. Each has its own SDF in the
+   * shader (parameters can deform a sphere; they cannot build a camera), and the
+   * clock keeps one eased amount per shape — so moving from one project to the next
+   * fades the first out while the second fades in, both mixed into the blob's own
+   * field. The metal always travels THROUGH the blob rather than cutting.
+   */
+  shape: Shape | null;
 };
 
+/** The bespoke fields, in the order the shader mixes them. */
+export const SHAPES = ["gavel", "camera", "burger", "vase"] as const;
+export type Shape = (typeof SHAPES)[number];
+
 /** No row hovered: the blob is exactly what the panel says it is. */
-export const MOOD_REST: Mood = { stretch: [1, 1, 1], distort: 1, freq: 1, spike: 0 };
+export const MOOD_REST: Mood = {
+  stretch: [1, 1, 1],
+  distort: 1,
+  freq: 1,
+  spike: 0,
+  shape: null,
+};
 
 /**
  * Keyed by project title rather than index, so reordering `works` cannot silently
@@ -49,14 +72,17 @@ export const MOOD_REST: Mood = { stretch: [1, 1, 1], distort: 1, freq: 1, spike:
  * different lever to its limit: thorns, one axis, the opposite axis, amplitude.
  */
 export const MOODS: Record<string, Mood> = {
-  // 01 — a sea urchin: calm base so the thorns are the whole statement
-  Pictarine: { stretch: [1, 1, 1], distort: 0.45, freq: 1.0, spike: 0.45 },
-  // 02 — a standing column, smooth and tight: the most architectural of the four
-  Forma: { stretch: [0.62, 1.55, 0.62], distort: 0.25, freq: 1.8, spike: 0 },
-  // 03 — squashed flat and lumpy, wider than it is tall
-  "Crazee.B": { stretch: [1.45, 0.55, 1.45], distort: 1.5, freq: 0.7, spike: 0 },
-  // 04 — molten: a few enormous slow lobes, barely holding together
-  Workshopbya: { stretch: [1.15, 0.95, 1.15], distort: 2.0, freq: 0.42, spike: 0 },
+  // Each project melts into its own subject. The parameters only govern the
+  // crossing — once `shape` is fully mixed in, the field IS that object.
+  //
+  // 01 — a camera, for a company whose product is photographs
+  Pictarine: { stretch: [1, 1, 1], distort: 0.4, freq: 1.0, spike: 0, shape: "camera" },
+  // 02 — a judge's gavel, for a platform built for legal work
+  Forma: { stretch: [1, 1, 1], distort: 0.5, freq: 1.0, spike: 0, shape: "gavel" },
+  // 03 — a burger, for a restaurant ordering dashboard
+  "Crazee.B": { stretch: [1.1, 0.8, 1.1], distort: 0.8, freq: 0.9, spike: 0, shape: "burger" },
+  // 04 — a Roman amphora, for a pottery workshop
+  Klay: { stretch: [1, 1, 1], distort: 0.45, freq: 1.0, spike: 0, shape: "vase" },
 };
 
 /** The mood the form should be heading toward right now. */
