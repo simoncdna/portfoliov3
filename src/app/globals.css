@@ -39,6 +39,18 @@
   /* layout */
   --gutter: clamp(20px, 5vw, 64px);
   --section-y: clamp(96px, 14vh, 192px);
+
+  /* The height of the canvas the chrome form is drawn into (see HeroChrome, which
+     reads this same value). It is here rather than only in the component because
+     the DOM has to frame the form — Work's notches are a fraction of it — and the
+     form's on-screen size is set by this box, not by the viewport. */
+  --form-dim: min(108vw, 103.68vh, 1188px);
+  /* How far above the viewport's centre the form rides in Work, in pixels: DOCK_Y_WORK
+     (1.0 world unit, see formChoreo) ÷ 7.677, the world height the stage's camera
+     sees. Both halves of the composition are then a fraction of the same box, so the
+     notch frame lands on the metal at every window size rather than only at the one
+     it was measured at. */
+  --form-lift: calc(var(--form-dim) * 0.1303);
 }
 
 /* Expose tokens to Tailwind v4 utilities */
@@ -236,130 +248,219 @@ a {
   text-orientation: mixed;
 }
 
-/* Work row: full-width editorial project link */
-.work-row {
-  display: block;
-  border-top: 1px solid var(--steel);
-  transition: background var(--dur-med) var(--ease-out);
+/* ============================================================
+   Work — la côte
+   ============================================================
+   One plate at a time, centred: the chrome form as the piece on display, four
+   corner notches for a frame, its name underneath, and 01–04 under that. The
+   scroll is the selector.
+
+   The piece itself is NOT in this DOM — it is drawn by the fixed chrome stage, so
+   everything here is furniture arranged around a form it cannot contain. That is
+   why the frame is a fraction of --form-dim (the canvas box the form is drawn
+   into) rather than of the viewport: sized off vh instead, the notches and the
+   piece would drift apart on every aspect ratio but the one they were tuned at. */
+
+/* A tall band with a sticky screen. The scroll IS the selector, so the band's height
+   is the length of what it has to say: 300vh of travel, the first 15% of it the
+   setting-up (see ENTER in Work.tsx) and the rest four plates at ~85vh each. */
+.plate-band {
+  position: relative;
+  height: 400vh;
 }
-.work-row:last-child {
-  border-bottom: 1px solid var(--steel);
-}
-.work-row-inner {
-  padding-block: clamp(1.5rem, 3vw, 2.75rem);
-  padding-inline: clamp(0px, 1.5vw, 1.5rem);
-  transition: transform var(--dur-slow) var(--ease-out),
-    opacity var(--dur-med) var(--ease-out);
-}
-.work-title {
-  color: var(--silver);
-  transition: color var(--dur-med) var(--ease-out);
-}
-.work-arrow {
-  transition: transform var(--dur-med) var(--ease-out),
-    color var(--dur-med) var(--ease-out);
-}
-@media (hover: hover) {
-  .work-row:hover {
-    background: linear-gradient(
-      90deg,
-      rgba(214, 216, 222, 0.05),
-      rgba(214, 216, 222, 0)
-    );
-  }
-  .work-row:hover .work-row-inner {
-    transform: translateX(clamp(6px, 1.2vw, 18px));
-  }
-  .work-row:hover .work-title {
-    color: var(--chrome);
-  }
-  .work-row:hover .work-arrow {
-    transform: translateX(8px);
-    color: var(--chrome);
-  }
-}
-.work-row:focus-visible .work-title {
-  color: var(--chrome);
+.plate-screen {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  /* The group and the section label are both placed against this box (not the band),
+     so they stay put while the band scrolls past underneath. */
+  overflow: hidden;
+  /* Half the canvas box → the piece fills a little over half the frame (measured:
+     237px of metal in a 421px frame on a 1440×813 screen). A piece that fills its
+     frame leaves no air for the notches to enclose, and the air is the whole point of
+     marking a field instead of drawing a box. */
+  --plate-frame: calc(var(--form-dim) * 0.5);
 }
 
-/* Quiet variant: the list sits beside the docked form, which is doing the
-   reacting, so the row itself only lightens its rule and slides a hair. No
-   background wash and no big travel — two things moving that much next to a
-   morphing blob is one thing too many. */
-.work-row--quiet {
-  border-color: var(--steel);
+/* Frame, name and numbers as one column — positioned so that the FRAME's centre
+   lands on the form's centre, with the type hanging below it. Centring the group as
+   a whole instead (place-items: center) is the tempting version and it is wrong: the
+   text block's height is in px while the form's lift scales with the canvas, so the
+   two only agree at one window height and the notches drift off the metal at every
+   other. Anchoring the frame makes that exact everywhere and leaves the group
+   optically off-centre by a few px, which is the error nobody can see.
+
+   The gap is measured from the frame's BOX, and the notches hang 34px outside it, so
+   it has to clear those first and then be the air you actually want. */
+.plate-group {
+  position: absolute;
+  left: 50%;
+  top: calc(50% - var(--form-lift) - var(--plate-frame) / 2);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 112px;
+}
+
+/* The field the piece stands in. Its size is --plate-frame, on .plate-screen, since
+   the group's own offset is a function of it. The whole group needs frame + 112 +
+   name + 40 + numbers ≈ frame + 228px of height, which is what keeps the notches
+   clear of the header on short screens — raising the fraction eats that first. */
+.plate-frame {
+  position: relative;
+  width: var(--plate-frame);
+  aspect-ratio: 1;
+}
+
+/* Four notches, nothing else: the corners of a field, the way a press marks a
+   sheet. They sit well OUTSIDE the frame — a mark that grazes the object reads as
+   a crop, not as a field. */
+.plate-notch {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  pointer-events: none;
+}
+.plate-notch::before,
+.plate-notch::after {
+  content: "";
+  position: absolute;
+  background: var(--steel-2);
+}
+.plate-notch::before {
+  width: 100%;
+  height: 1px;
+}
+.plate-notch::after {
+  height: 100%;
+  width: 1px;
+}
+/* transform-origin is load-bearing, not decoration: the entrance grows each notch
+   from scale 0, and it has to grow OUT OF its own corner — the two arms drawn from
+   the angle, the way a press marks a sheet. Scaled from the centre they would
+   inflate, which reads as a fade with extra steps. */
+.plate-notch--tl {
+  top: -34px;
+  left: -34px;
+  transform-origin: top left;
+}
+.plate-notch--tl::before,
+.plate-notch--tl::after {
+  top: 0;
+  left: 0;
+}
+.plate-notch--tr {
+  top: -34px;
+  right: -34px;
+  transform-origin: top right;
+}
+.plate-notch--tr::before,
+.plate-notch--tr::after {
+  top: 0;
+  right: 0;
+}
+.plate-notch--bl {
+  bottom: -34px;
+  left: -34px;
+  transform-origin: bottom left;
+}
+.plate-notch--bl::before,
+.plate-notch--bl::after {
+  bottom: 0;
+  left: 0;
+}
+.plate-notch--br {
+  bottom: -34px;
+  right: -34px;
+  transform-origin: bottom right;
+}
+.plate-notch--br::before,
+.plate-notch--br::after {
+  bottom: 0;
+  right: 0;
+}
+
+/* The name. Monospaced digits are not the issue here — the churn is: the letters
+   are swapped in place, so the word's width breathes a little while it decodes.
+   Centred, so that breathing is symmetric instead of shunting the word sideways. */
+.plate-name {
+  margin: 0;
+  text-align: center;
+  font-size: clamp(2rem, 4.4vw, 3.2rem);
+  line-height: 1;
+  color: var(--chrome);
+  /* The word is the piece's only label, so it is also the link to the live site:
+     no extra furniture, and nothing visible until it is asked for. */
+  text-decoration: none;
+}
+.plate-name a {
+  display: inline-block;
+  border-bottom: 1px solid transparent;
   transition: border-color var(--dur-med) var(--ease-out);
 }
-.work-row--quiet .work-row-inner {
-  padding-block: clamp(1.1rem, 2vw, 1.6rem);
+@media (hover: hover) {
+  .plate-name a:hover {
+    border-bottom-color: var(--steel-2);
+  }
 }
-/* The arrow is the row's only ornament, and it is absent until asked for: it
-   slides out of the title's baseline rather than sitting there waiting. */
-.work-row--quiet .work-arrow {
-  opacity: 0;
-  transform: translateX(-8px);
-}
-.work-index {
-  transition: color var(--dur-med) var(--ease-out);
+.plate-name a:focus-visible {
+  outline: 1px solid var(--silver-bright);
+  outline-offset: 6px;
 }
 
+/* The selector: the four numbers, and nothing around them. */
+.plate-picks {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 40px;
+}
+.plate-picks button {
+  background: none;
+  border: 0;
+  padding: 3px 2px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  color: var(--steel-2);
+  transition: color var(--dur-fast) linear;
+}
 @media (hover: hover) {
-  .work-row--quiet:hover {
-    background: none;
-    border-color: var(--silver-muted);
-  }
-  .work-row--quiet:hover .work-row-inner {
-    transform: translateX(clamp(3px, 0.5vw, 8px));
-  }
-  .work-row--quiet:hover .work-arrow {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  .work-row--quiet:hover .work-index {
-    color: var(--chrome);
+  .plate-picks button:hover {
+    color: var(--silver-bright);
   }
 }
-.work-row--quiet:focus-visible .work-arrow {
-  opacity: 1;
-  transform: translateX(0);
-}
-.work-row--quiet:focus-visible .work-index {
+/* The shown plate is white, full stop — no box, no fill. */
+.plate-picks button[aria-current="true"] {
   color: var(--chrome);
 }
+.plate-picks button:focus-visible {
+  outline: 1px solid var(--silver-bright);
+  outline-offset: 2px;
+}
 
-/* The per-row fold: closed at 0fr, opened to the content's own height. Animating
-   grid-template-rows means nothing has to be measured in JS, and the closed state
-   is genuinely zero-height (so it is skipped by find-in-page and screen readers
-   only when hidden, not clipped-but-present). */
-.work-fold {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  transition: grid-template-rows var(--dur-med) var(--ease-out),
-    opacity var(--dur-med) var(--ease-out);
-}
-@media (hover: hover) {
-  .work-row--quiet:hover .work-fold {
-    grid-template-rows: 1fr;
-    opacity: 1;
+/* The group hangs BELOW the frame, so on a short window it is the numbers that run
+   out of room first (frame + 228px against ~62% of the height). The air comes down
+   with the type — on narrow screens too, where the notches would otherwise crowd the
+   gutters. */
+@media (max-width: 760px), (max-height: 700px) {
+  .plate-group {
+    gap: 72px;
+  }
+  .plate-picks {
+    margin-top: 28px;
   }
 }
-.work-row--quiet:focus-visible .work-fold {
-  grid-template-rows: 1fr;
-  opacity: 1;
-}
-/* No hover to speak of on touch: show the detail rather than hide it forever. */
-@media (hover: none) {
-  .work-fold {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-}
+
+/* Under reduced motion the form does not travel at all — it stays where the Hero
+   left it, dead centre — so the frame must not go looking for it above the middle. */
 @media (prefers-reduced-motion: reduce) {
-  .work-fold {
-    transition: opacity var(--dur-med) linear;
+  .plate-screen {
+    --form-lift: 0px;
   }
 }
+
 
 /* Skill row: baseline list item with a hairline that lights on hover */
 .skill-row {

@@ -5,6 +5,7 @@ import Lenis from "lenis";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { blobTweak, PANEL_CLOSE_MS } from "@/lib/blobTweak";
+import { setPageScroller } from "@/lib/pageScroll";
 
 // Keys that would scroll the page natively. Lenis governs wheel and touch but not
 // the keyboard, so these are caught by hand while the panel holds the lock.
@@ -40,6 +41,11 @@ export function SmoothScroll({ children }: { children: React.ReactNode }) {
       wheelMultiplier: 0.9,
       touchMultiplier: 1.6,
     });
+
+    // Lent out to anything that needs to MOVE the page rather than watch it (Work's
+    // plate numbers): while Lenis runs, it is the only thing allowed to write the
+    // scroll position — see pageScroll.
+    setPageScroller(lenis);
 
     // Single clock: drive Lenis from GSAP's ticker so Lenis, ScrollTrigger and
     // every scrubbed animation share the exact same frame → no desync.
@@ -113,6 +119,7 @@ export function SmoothScroll({ children }: { children: React.ReactNode }) {
       clearTimeout(startTimer);
       unsubscribePanel();
       lenis.off("scroll", onLenisScroll);
+      setPageScroller(null);
       lenis.destroy();
     };
   }, []);

@@ -250,7 +250,7 @@ export function MeshDna({ reduced }: Props) {
     (u.uHi.value as Color).setRGB(colScratch.r, colScratch.g, colScratch.b);
     (u.uLo.value as Color).setRGB(colScratch.r * 0.45, colScratch.g * 0.45, colScratch.b * 0.5);
 
-    l.position.setX(s.dock);
+    l.position.set(s.dockX, s.dockY, 0);
     l.scale.setScalar(s.scale);
     l.rotation.set(0, s.spin, 0);
   });

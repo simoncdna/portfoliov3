@@ -3,7 +3,7 @@
 import { blobTweak, TIME_RATE, SPIN_RATE } from "./blobTweak";
 import { formChoreo, type FormChoreo } from "./formChoreo";
 import { aboutReveal } from "./aboutReveal";
-import { workHover, MOOD_REST, SHAPES, type Shape } from "./workHover";
+import { workPlate, MOOD_REST, SHAPES, type Shape } from "./workPlate";
 
 /**
  * The central form's live state: one clock, one turntable, one eased scroll
@@ -30,8 +30,8 @@ export type FormState = FormChoreo & {
   /** turntable angle, radians — signed by the scroll direction */
   spin: number;
   /**
-   * The hovered project's silhouette, eased. Mutated in place (never replaced), so
-   * a form can hold a reference to it and read it every frame without allocating.
+   * The shown plate's silhouette, eased. Mutated in place (never replaced), so a
+   * form can hold a reference to it and read it every frame without allocating.
    */
   mood: {
     sx: number;
@@ -60,10 +60,27 @@ const STILL = 1e-5;
  * is a mass being reshaped, and a snap would read as a sprite swap rather than as
  * the same metal finding a new form.
  */
-const MOOD_RATE = 0.02;
+const MOOD_RATE = 0.56;
+
+/**
+ * The plate changeover's own 360°, as the fraction of it still to go after a second.
+ * 0.68 → about 6s to be 90% through the turn: a heavy object being rolled over on a
+ * turntable, and heavy is the whole point — the piece should feel like it takes its
+ * time to come back round. The melt above is set a little quicker (~4s) so the new
+ * object is finished by the time the turn is rather than still arriving, which is
+ * what makes the turn read as carrying the change instead of following it.
+ *
+ * Both used to be far faster (a 0.6s melt, no turn at all) — right when the change
+ * was a hover and had to answer the cursor. The scroll is a much slower instrument.
+ *
+ * Exponential, so neither ever quite lands: on a modular rotation the residual is
+ * invisible, and it means a change arriving mid-turn extends the same movement rather
+ * than restarting it.
+ */
+const PLATE_TURN_RATE = 0.68;
 
 const state: FormState = {
-  ...formChoreo(0, 0, 0),
+  ...formChoreo(0, 0, 0, 0),
   time: 0,
   spin: 0,
   mood: {
@@ -78,7 +95,8 @@ const state: FormState = {
 };
 
 let eased = 0; // eased About presence — the input to the whole choreography
-let easedWork = 0; // eased Work presence — the right dock
+let easedWork = 0; // eased Work presence — the piece on display, centre stage
+let easedAfter = 0; // eased presence of everything past Work — the right dock
 let drift = 0; // integrated idle turntable
 let dir = 1; // eased scroll direction, -1..1
 let dirTarget = 1;
@@ -99,11 +117,15 @@ let holdOffset = 0;
 // nothing for a moment before the spin picks it up. Ramping the freeze in lets
 // the ambient turn bleed out exactly as the spin builds, with no gap between.
 let holdEased = 0;
+// Eased plate-changeover turn (radians). Chases workPlate.turns × 2π, so a change
+// that lands mid-turn extends the same movement instead of restarting it.
+let plateTurn = 0;
 
 export function advanceFormClock(
   delta: number,
   about: number,
   work: number,
+  after: number,
   scroll: number,
   reduced: boolean
 ) {
@@ -112,15 +134,17 @@ export function advanceFormClock(
   eased += (target - eased) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
   const workTarget = reduced ? 0 : Math.max(0, Math.min(1, work));
   easedWork += (workTarget - easedWork) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
+  const afterTarget = reduced ? 0 : Math.max(0, Math.min(1, after));
+  easedAfter += (afterTarget - easedAfter) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
 
   // The About→Work transition is the pinned sequence's own last beat, scrubbed
   // through aboutReveal.exit — not a second trigger reading the Work section's
   // position, which could drift from the text fade it is supposed to follow. The
   // Work dock, by contrast, IS a function of that section's position.
-  const c = formChoreo(eased, reduced ? 0 : aboutReveal.exit, easedWork);
+  const c = formChoreo(eased, reduced ? 0 : aboutReveal.exit, easedWork, easedAfter);
 
-  // hovered project → silhouette, eased so the matter flows into it
-  const m = reduced ? MOOD_REST : workHover.mood;
+  // shown plate → silhouette, eased so the matter flows into it
+  const m = reduced ? MOOD_REST : workPlate.mood;
   const mr = reduced ? 1 : 1 - Math.pow(MOOD_RATE, delta);
   const md = state.mood;
   md.sx += (m.stretch[0] - md.sx) * mr;
@@ -129,7 +153,7 @@ export function advanceFormClock(
   md.distort += (m.distort - md.distort) * mr;
   md.freq += (m.freq - md.freq) * mr;
   md.spike += (m.spike - md.spike) * mr;
-  // Every shape eases, not just the hovered one: that is what makes project → project
+  // Every shape eases, not just the shown one: that is what makes project → project
   // a melt (the old form drains away as the new one fills) rather than a cut.
   for (const s of SHAPES) {
     md.shapes[s] += ((m.shape === s ? 1 : 0) - md.shapes[s]) * mr;
@@ -148,6 +172,10 @@ export function advanceFormClock(
   lastScroll = scroll;
   if (Math.abs(moved) > STILL) dirTarget = Math.sign(moved);
   dir += (dirTarget - dir) * (reduced ? 1 : 1 - Math.pow(0.02, delta));
+
+  // The plate changeover's turn. Reduced motion gets the shape, not the spin.
+  const turnTarget = reduced ? 0 : workPlate.turns * Math.PI * 2;
+  plateTurn += (turnTarget - plateTurn) * (reduced ? 1 : 1 - Math.pow(PLATE_TURN_RATE, delta));
 
   const holdTarget = reduced ? 0 : aboutReveal.hold;
   holdEased += (holdTarget - holdEased) * (reduced ? 1 : 1 - Math.pow(0.1, delta));
@@ -176,8 +204,10 @@ export function advanceFormClock(
   // ambient turn during the About pin, and aboutReveal.spin is the single
   // controlled turn the pinned sequence scrubs in (the skull's 360° once the text
   // is drawn). Sum = the whole turntable angle, so no representation keeps a
-  // rotation of its own.
-  state.spin = drift + (scroll - holdOffset) * SCRUB + (reduced ? 0 : aboutReveal.spin);
+  // rotation of its own. `plateTurn` is the Work section's equivalent of that
+  // controlled turn: one full revolution per plate change, laid over the melt.
+  state.spin =
+    drift + (scroll - holdOffset) * SCRUB + (reduced ? 0 : aboutReveal.spin) + plateTurn;
 }
 
 export const formState = (): Readonly<FormState> => state;

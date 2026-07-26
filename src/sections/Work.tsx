@@ -1,179 +1,333 @@
 "use client";
 
-import { useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
-import { ArrowRight } from "@/components/Bits";
+import { ScrambleText } from "@/components/ScrambleText";
 import { works } from "@/data/site";
-import { workHover } from "@/lib/workHover";
+import { workPlate } from "@/lib/workPlate";
+import { scrollPageTo } from "@/lib/pageScroll";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
 /**
- * Work — About in mirror image: the chrome form docks RIGHT here, so the list
- * lives on the LEFT. The section PINS centred and one scrubbed timeline plays the
- * whole sequence, exactly as About does:
+ * Work — la côte. One plate at a time, and the plate is the chrome form itself.
  *
- *   1. the mono rule beside "Selected Work" draws itself left → right
- *   2. "Selected Work" draws in
- *   3. "02" draws in
- *   4. the project rows draw in, one after another
- *   5. everything stays put for a long beat — the section is pinned and still, so
- *      this is where the list is actually read and hovered
- *   6. it fades out, handing off to Contact
+ * The section is a tall band with a sticky screen: the form sits in the middle,
+ * framed by four corner notches, its name under it, and 01–04 under that. Scrolling
+ * advances the plate and the metal melts from one project's object into the next
+ * (see workPlate); the name decodes itself as it changes (see ScrambleText).
  *
- * The rows are deliberately quiet: index, title, year, and nothing more until you
- * ask. Hovering one opens its summary and stack AND reshapes the blob beside it
- * (see workHover, where each project's silhouette echoes its subject). The form is
- * this section's hover state, which is why the rows themselves need not shout.
+ * The band is read in three parts.
  *
- * Same unveil vocabulary as About: a top→bottom clip curtain plus fade for text
- * (no vertical slide), a scaleX draw for the rule.
+ *  1. SETTING UP — the blob arrives in the middle, the four notches are struck one
+ *     corner at a time, then the name fades in and the numbers appear WHILE the metal
+ *     forms itself into the first project. The forming is not queued after the type;
+ *     they are one beat, which is why that beat is owned by the entrance timeline
+ *     rather than by the plate handler (see the `forms` gate).
+ *  2. THE PLATES — four equal stretches of scroll, one per project.
+ *  3. PUTTING AWAY — the same sequence backwards: the type fades, the notches retract
+ *     into their corners, and the metal is released back to a blob.
+ *
+ * All three are scrubbed, not played on arrival: every transition on this page is
+ * reversible, and the entrance in particular has to happen while the screen is
+ * already STUCK — before it sticks, the DOM furniture is still sliding up the page
+ * while the form (drawn by a fixed canvas) is not, so anything visible then is
+ * misaligned by however far the band still has to travel.
+ *
+ * Two things are worth knowing before changing anything here.
+ *
+ * The piece is not in this DOM. It is drawn by the fixed chrome stage, at the
+ * viewport's centre, so this section cannot contain it — only arrange furniture
+ * around it. Hence the frame sized off --form-dim rather than the viewport, and
+ * hence the form's own lift above centre (DOCK_Y_WORK): what has to look centred is
+ * the whole group, so the piece must sit above the middle by half the height of the
+ * text below it, and only the WebGL side can move it.
+ *
+ * The scroll is the single source of truth for the selection. Clicking a number
+ * SCROLLS to that plate rather than setting the index — a click that sets state
+ * directly is undone by the very next scroll event, which is the classic trap of
+ * this kind of double control.
  */
 
-const VEILED = "inset(0% 0% 100% 0%)";
-const SHOWN = "inset(0% 0% -8% 0%)";
+const LAST = works.length - 1;
+
+/**
+ * The share of the band's travel given to the setting-up. Against the 400vh band
+ * (300vh of travel) that is ~45vh for the entrance and ~64vh per plate after it. Used
+ * both to size the entrance timeline and to offset the plate selection, so the two
+ * cannot disagree about where the section proper starts.
+ */
+const ENTER = 0.15;
+
+/**
+ * The entrance's beats, in timeline units. Absolute positions rather than the usual
+ * relative ones because the forming is pinned to the same instant as the name (see
+ * FORMS below): with `>`-relative placement, inserting a beat would silently move the
+ * moment the metal starts to change.
+ */
+const BEAT = { notch: 0, name: 0.64, picks: 1.2, tail: 0.25 };
 
 export function Work() {
   const ref = useRef<HTMLElement>(null);
+  const [plate, setPlate] = useState(0);
+  /** true from the moment the metal starts taking a project's shape */
+  const [formed, setFormed] = useState(false);
+  // The plate the form is currently showing, as the scroll handler last left it. A
+  // ref, because the handler needs the previous value to know which WAY the plates
+  // are being crossed (the turn is signed) and it must not re-subscribe to get it.
+  const last = useRef(0);
+
+  // The churn only rolls through letters that appear in the four names, so a glyph
+  // passing through a slot always has a plausible width for that slot — on a
+  // condensed display face a `W` rolling through an `I` is a lurch, not a decode.
+  const pool = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          works
+            .map((w) => w.title.toUpperCase())
+            .join("")
+            .replace(/[^A-Z0-9]/g, "")
+        )
+      ).join(""),
+    []
+  );
+
+  /** The band's document position and the scroll distance the whole band spans. */
+  const geometry = useCallback(() => {
+    const el = ref.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const span = r.height - window.innerHeight;
+    if (span <= 0) return null;
+    return { top: r.top + window.scrollY, span };
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const g = geometry();
+      if (!g) return;
+      const p = (window.scrollY - g.top) / g.span;
+      // Only the four plates belong to this handler. The setting-up and the putting
+      // away are owned by their timelines — including releasing the metal — because
+      // both are sequences with an order, and the order is what the user reads. A
+      // handler that also cleared at the edges would, on the way out, reset the name
+      // to plate 01 halfway through its own fade-out.
+      if (p < ENTER || p > 1) return;
+      const q = Math.min(1, (p - ENTER) / (1 - ENTER));
+      // Equal bins, not `round(q * LAST)`: rounding gives the first and last plates
+      // half a bin each, which would have left plate 01 — the one that has just been
+      // formed at the end of the entrance — on screen for half as long as 02 and 03.
+      const i = Math.min(LAST, Math.floor(q * works.length));
+      setPlate(i);
+      // The step is signed so the changeover's 360° follows the gesture: scrolling
+      // down winds the piece over, scrolling back up unwinds it — the same rule the
+      // ambient turntable follows (see the scroll direction in formClock).
+      workPlate.show(works[i].title, i - last.current);
+      last.current = i;
+    };
+    // Lenis writes real scroll positions (it is not a transform-based scroller), so
+    // the native event is the honest signal here — and it fires on its frames.
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    onScroll();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      workPlate.clear();
+    };
+  }, [geometry]);
+
+  /** Scroll to the middle of plate i's bin — see the binning in the handler above. */
+  const go = (i: number) => {
+    const g = geometry();
+    if (!g) return;
+    const q = (i + 0.5) / works.length;
+    scrollPageTo(g.top + g.span * (ENTER + q * (1 - ENTER)));
+  };
 
   useGSAP(
     () => {
       const el = ref.current;
       if (!el) return;
-
-      const rule = el.querySelector<HTMLElement>("[data-line]");
-      const label = el.querySelector<HTMLElement>("[data-label]");
-      const index = el.querySelector<HTMLElement>("[data-index]");
-      const rows = gsap.utils.toArray<HTMLElement>(el.querySelectorAll("[data-row]"));
-      const text = [label, index, ...rows].filter(Boolean) as HTMLElement[];
+      const notches = gsap.utils.toArray<HTMLElement>(el.querySelectorAll("[data-notch]"));
+      const name = el.querySelector<HTMLElement>("[data-name]");
+      const picks = gsap.utils.toArray<HTMLElement>(el.querySelectorAll("[data-pick]"));
+      const type = [name, ...picks].filter(Boolean) as HTMLElement[];
 
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        gsap.set([rule, ...text].filter(Boolean), { clearProps: "all" });
+        gsap.set([...notches, ...type], { clearProps: "all" });
+        workPlate.show(works[0].title, 0);
+        setFormed(true);
         return;
       }
 
-      gsap.set(rule, { scaleX: 0, transformOrigin: "left center", willChange: "transform" });
-      gsap.set(text, { clipPath: VEILED, autoAlpha: 0, willChange: "clip-path, opacity" });
+      gsap.set([...notches, ...type], { autoAlpha: 0 });
+      // The notches are struck, not faded: each one grows out of its own corner, so
+      // the mark reads as being made rather than as appearing. transform-origin lives
+      // in the CSS, per corner.
+      gsap.set(notches, { scale: 0 });
 
-      // One ScrollTrigger pins and scrubs, as in About. `end` is sized from the
-      // timeline's own length (~5.05 units here against About's ~10.55, at ~246 px
-      // per unit) so that a beat costs the same amount of scroll in both sections —
-      // otherwise the two read at different speeds despite using the same eases.
-      gsap
-        .timeline({
-          scrollTrigger: {
-            trigger: el,
-            start: "center 62%",
-            end: "+=1240",
-            scrub: 1,
-            pin: true,
-            anticipatePin: 1,
-            invalidateOnRefresh: true,
-          },
-        })
-        .to(rule, { scaleX: 1, ease: "sine.inOut", duration: 0.5 })
-        .to(label, { clipPath: SHOWN, autoAlpha: 1, ease: "sine.out", duration: 0.5 }, ">-0.05")
-        .to(index, { clipPath: SHOWN, autoAlpha: 1, ease: "sine.out", duration: 0.5 }, ">0.1")
-        // 4. the rows, as a cascade rather than as four separate events. The
-        //    stagger has to stay well UNDER each row's own duration: at 0.4 against
-        //    a 0.6 duration the first row finished a full ~150 px of scroll before
-        //    the last one started, so row 01 sat alone on screen for a third of the
-        //    pin and read as belonging to a different animation. At 0.16 they
-        //    overlap heavily and the eye reads one wave down the list.
+      // --- 1. setting up -------------------------------------------------------
+      const inTl = gsap.timeline({
+        scrollTrigger: {
+          trigger: el,
+          // Anchored to the stick point, so the whole sequence plays with the
+          // furniture already centred on the form.
+          start: "top top",
+          end: () => "+=" + (el.offsetHeight - window.innerHeight) * ENTER,
+          scrub: 1,
+          invalidateOnRefresh: true,
+        },
+      });
+      inTl
         .to(
-          rows,
-          { clipPath: SHOWN, autoAlpha: 1, ease: "sine.out", duration: 0.6, stagger: 0.16 },
-          ">0.1"
+          notches,
+          { autoAlpha: 1, scale: 1, ease: "sine.out", duration: 0.5, stagger: 0.08 },
+          BEAT.notch
         )
-        // 5. the reading beat: a long pause with everything drawn and nothing
-        //    moving. It exists so the hover interaction has somewhere to happen —
-        //    without it the list would still be arriving, or already leaving.
-        .to({}, { duration: 1.6 })
-        .to([rule, ...text], { autoAlpha: 0, ease: "sine.in", duration: 0.7 });
+        .to(name, { autoAlpha: 1, ease: "sine.out", duration: 0.5 }, BEAT.name)
+        .to(picks, { autoAlpha: 1, ease: "sine.out", duration: 0.4, stagger: 0.06 }, BEAT.picks)
+        // A tail so the last beat does not land on the very edge of the range, where
+        // a scrub of one pixel would finish it.
+        .to({}, { duration: BEAT.tail });
+
+      // The forming, as a fraction of the entrance's progress: the same instant the
+      // name starts to arrive. Derived from the timeline's own duration rather than
+      // written down, so re-timing the beats above cannot leave it behind.
+      const FORMS = BEAT.name / inTl.duration();
+      // Edge-triggered: onUpdate fires on every scrubbed frame, and setState (plus
+      // workPlate's own turn accounting) has no business running 60 times a second.
+      let on = false;
+      inTl.eventCallback("onUpdate", () => {
+        const want = inTl.progress() >= FORMS;
+        if (want === on) return;
+        on = want;
+        setFormed(want);
+        if (want) {
+          workPlate.show(works[last.current].title, 0);
+        } else {
+          // Backing out of the section rewinds it: the metal is released AND the
+          // selection is wound back to the first plate, so coming down again plays
+          // the sequence from the top rather than resuming where it was left.
+          workPlate.clear();
+          setPlate(0);
+          last.current = 0;
+        }
+      });
+
+      // --- 3. putting away -----------------------------------------------------
+      // The entrance backwards: the type goes first, then the notches retract into
+      // the corners they were struck from, and the metal is let go.
+      //
+      // fromTo, not to: a scrubbed `to` renders at progress 0 on refresh and records
+      // whatever autoAlpha is at that moment as its start — which is 0, since the
+      // section has not been reached yet. It would then tween 0 → 0 and the furniture
+      // would never leave. immediateRender: false so declaring the start values does
+      // not undo the hidden state above.
+      const outTl = gsap.timeline({
+        scrollTrigger: {
+          trigger: el,
+          start: "bottom bottom",
+          end: "bottom 50%",
+          scrub: 1,
+          invalidateOnRefresh: true,
+        },
+      });
+      outTl
+        .fromTo(
+          type,
+          { autoAlpha: 1 },
+          { autoAlpha: 0, ease: "sine.in", duration: 0.5, immediateRender: false }
+        )
+        .addLabel("free")
+        .fromTo(
+          notches,
+          { autoAlpha: 1, scale: 1 },
+          {
+            autoAlpha: 0,
+            scale: 0,
+            ease: "sine.in",
+            duration: 0.5,
+            stagger: 0.06,
+            immediateRender: false,
+          },
+          "free"
+        );
+
+      // …and the release rides with the notches: as the frame lets go of the piece,
+      // the piece lets go of its shape. Reversible in both directions, like the
+      // entrance gate — scrolling back up out of Contact has to hand the plate back,
+      // and the plate it hands back is the one that was left (not the first), so the
+      // section resumes rather than restarting.
+      const FREE = outTl.labels.free / outTl.duration();
+      let freed = false;
+      outTl.eventCallback("onUpdate", () => {
+        const want = outTl.progress() >= FREE;
+        if (want === freed) return;
+        freed = want;
+        setFormed(!want);
+        if (want) workPlate.clear();
+        else workPlate.show(works[last.current].title, 0);
+      });
     },
     { scope: ref }
   );
+
+  const current = works[plate];
 
   return (
     <section
       ref={ref}
       id="work"
-      className="relative min-h-screen py-[var(--section-y)]"
+      className="plate-band"
       style={{ scrollMarginTop: "6rem" }}
     >
-      <div className="shell grid min-h-screen grid-cols-1 items-start md:grid-cols-12">
-        {/* left column — the list */}
-        <div className="pt-[14vh] md:col-span-7 md:pr-8">
-          {/* section label + index, built like About's so the two read as a pair */}
-          <div className="mb-10 flex items-baseline justify-between">
-            <span className="font-mono-label inline-flex items-center gap-2">
-              <span data-line aria-hidden className="inline-block h-px w-6 bg-steel-2" />
-              <span data-label>Work</span>
-            </span>
-            <span
-              data-index
-              className="font-display fs-h3 tabular-nums text-silver-muted"
-            >
-              02
-            </span>
+      {/* No section label here, unlike About: the composition is a piece on a field,
+          and a rule + "WORK" + "02" in the corners of that field reads as a second
+          frame competing with the notches. The plate numbers already say where you
+          are. */}
+      <div className="plate-screen">
+        <div className="plate-group">
+          {/* The frame the piece stands in. Empty on purpose — the form is drawn
+              behind this box by the fixed stage. */}
+          <div className="plate-frame" aria-hidden>
+            <span data-notch className="plate-notch plate-notch--tl" />
+            <span data-notch className="plate-notch plate-notch--tr" />
+            <span data-notch className="plate-notch plate-notch--bl" />
+            <span data-notch className="plate-notch plate-notch--br" />
           </div>
 
-          <ul>
-            {works.map((w) => (
-              <li key={w.title} data-row>
-                <a
-                  href={w.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="work-row work-row--quiet group"
-                  aria-label={`${w.title} — open live site in a new tab`}
-                  // Focus mirrors hover, so the form answers the keyboard too
-                  onPointerEnter={() => workHover.enter(w.title)}
-                  onPointerLeave={() => workHover.leave(w.title)}
-                  onFocus={() => workHover.enter(w.title)}
-                  onBlur={() => workHover.leave(w.title)}
+          <div>
+            <h3 data-name className="font-display plate-name">
+              <a
+                href={current.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`${current.title} — open the live site in a new tab`}
+              >
+                <ScrambleText text={current.title.toUpperCase()} pool={pool} />
+              </a>
+            </h3>
+
+            <div className="plate-picks" role="group" aria-label="Choose a plate">
+              {works.map((w, i) => (
+                <button
+                  data-pick
+                  key={w.title}
+                  type="button"
+                  onClick={() => go(i)}
+                  aria-current={formed && i === plate ? "true" : "false"}
+                  aria-label={`Plate ${w.index} — ${w.title}`}
                 >
-                  <div className="work-row-inner">
-                    <div className="flex items-baseline justify-between gap-6">
-                      <span className="flex items-baseline gap-4">
-                        <span className="work-index font-mono text-[0.68rem] tabular-nums text-silver-muted">
-                          {w.index}
-                        </span>
-                        <span className="work-title font-display fs-h3">{w.title}</span>
-                        <ArrowRight className="work-arrow h-3 w-7 shrink-0 self-center text-silver-muted" />
-                      </span>
-                      {/* Edition number, not a date — see the note in data/site.ts.
-                          Set at the system's own label size and tracking
-                          (--fs-label / 0.18em) rather than a hair under it. */}
-                      <span className="font-mono text-[0.6875rem] whitespace-nowrap uppercase tracking-[0.18em] text-silver-muted">
-                        {w.timeline}
-                      </span>
-                    </div>
-
-                    {/* Opens on hover / focus only. Grid-rows 0fr → 1fr animates a
-                        height the content decides, so nothing has to be measured.
-                        One sentence about the project and nothing else: the stack is
-                        deliberately not shown — see the note in data/site.ts. */}
-                    <div className="work-fold">
-                      <div className="min-h-0 overflow-hidden">
-                        {w.summary && (
-                          <p className="mt-3 max-w-md text-[0.88rem] leading-relaxed text-silver">
-                            {w.summary}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </a>
-              </li>
-            ))}
-          </ul>
+                  {w.index}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-
-        {/* right half kept open for the docked chrome form */}
-        <div className="hidden md:col-span-5 md:block" aria-hidden />
       </div>
     </section>
   );

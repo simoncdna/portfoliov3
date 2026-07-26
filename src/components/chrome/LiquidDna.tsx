@@ -23,7 +23,7 @@ uniform vec2  uTanHalf;   // tan(fov/2) * (aspect, 1)
 uniform float uTime;
 uniform float uPres;      // 0..1 blob → DNA
 uniform float uSpin;      // helix rotation (rad)
-uniform float uDock;      // world x offset
+uniform vec2  uDock;      // world x/y offset
 uniform float uScale;     // global grow/shrink (section exit choreography)
 uniform float uFade;
 uniform float uRough;     // 0 = mirror, higher = duller (panel)
@@ -106,7 +106,7 @@ ${SHAPE_SDF}
 // fraction of the radius (it used to be an absolute world offset → 4x weaker).
 //
 // uStretch / uMoodD / uMoodF / uSpike are the hovered project's silhouette (see
-// workHover): the field is scaled anisotropically, its lumps are scaled in
+// workPlate): the field is scaled anisotropically, its lumps are scaled in
 // amplitude and in size, and it can grow thorns. Every project is therefore the
 // SAME blob with its parameters moved, which is what lets one melt into the next
 // instead of cutting to it — and the multipliers multiply the panel's values
@@ -137,7 +137,7 @@ float sdBlob(vec3 p){
 // full scene SDF (the resting blob + living flow)
 float map(vec3 wp){
   // into local space: undock + unspin
-  vec3 p = wp - vec3(uDock, 0.0, 0.0);
+  vec3 p = wp - vec3(uDock, 0.0);
   float c = cos(uSpin), s = sin(uSpin);
   p = vec3(c*p.x - s*p.z, p.y, s*p.x + c*p.z);
   p /= uScale;                 // global grow/shrink for the section exit
@@ -183,7 +183,7 @@ void main(){
   float shaped = max(max(uShape.x, uShape.y), max(uShape.z, uShape.w));
   float bRad = uScale * max(BR * wide * (1.0 + uDistort * uMoodD + uSpike) + 0.6,
                             shaped * (SHAPE_REACH + 0.5));
-  vec3  bc  = vec3(uDock, 0.0, 0.0) - ro;
+  vec3  bc  = vec3(uDock, 0.0) - ro;
   float tca = dot(bc, rd);
   float dc2 = dot(bc, bc) - tca * tca;
   float r2  = bRad * bRad;
@@ -256,7 +256,7 @@ export function LiquidDna({ reduced }: Props) {
         uTime: { value: 0 },
         uPres: { value: 0 },
         uSpin: { value: 0 },
-        uDock: { value: 0 },
+        uDock: { value: new Vector2() },
         uScale: { value: 1 },
         uFade: { value: 0 },
         uRough: { value: 0.12 },
@@ -307,7 +307,7 @@ export function LiquidDna({ reduced }: Props) {
 
     u.uTime.value = s.time;
     u.uPres.value = s.pres;
-    u.uDock.value = s.dock;
+    (u.uDock.value as Vector2).set(s.dockX, s.dockY);
     u.uScale.value = s.scale;
     u.uSpin.value = s.spin;
 
@@ -320,7 +320,7 @@ export function LiquidDna({ reduced }: Props) {
     // BR itself) like the old blob did. 0 in the panel → perfectly smooth.
     u.uDistort.value = tw.distort * DISTORT_MAX;
     u.uFreq.value = tw.freq;
-    // hovered project → silhouette (eased in the shared clock, see workHover)
+    // the shown plate → silhouette (eased in the shared clock, see workPlate)
     (u.uStretch.value as Vector3).set(s.mood.sx, s.mood.sy, s.mood.sz);
     u.uMoodD.value = s.mood.distort;
     u.uMoodF.value = s.mood.freq;

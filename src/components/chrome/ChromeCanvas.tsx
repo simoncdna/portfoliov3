@@ -146,8 +146,10 @@ export function ChromeCanvas({
   const scroll = useRef(0);
   // 0..1 presence of the About section → drives the blob→skull morph + left dock
   const about = useRef(0);
-  // 0..1 presence of the Work section → carries the blob to the right dock
+  // 0..1 presence of the Work section → settles the form centre stage as the piece
   const work = useRef(0);
+  // 0..1 presence of everything past Work → puts it away, off to the right
+  const after = useRef(0);
   // start off-screen so the blob loads SOLID (cursor not over it yet)
   const pointer = useRef({ x: 2, y: 2 });
   const hover = useRef(0);
@@ -181,11 +183,22 @@ export function ChromeCanvas({
         const vh = window.innerHeight;
         const ab = document.getElementById("about");
         about.current = ab ? smoothstep(vh * 1.0, vh * 0.35, ab.getBoundingClientRect().top) : 0;
-        // Work presence → the right dock. The section's own arrival is a fair
-        // thing to read off its position; the About *exit* is not, which is why
-        // that one is scrubbed by the pinned timeline instead (see formChoreo).
+        // Work presence → centre stage, at display size. The section's own arrival
+        // is a fair thing to read off its position; the About *exit* is not, which
+        // is why that one is scrubbed by the pinned timeline instead (see
+        // formChoreo). Work is a tall band with a sticky screen, so its top passing
+        // is the section STARTING, and its bottom passing is the last plate leaving.
         const wk = document.getElementById("work");
-        work.current = wk ? smoothstep(vh * 0.95, vh * 0.45, wk.getBoundingClientRect().top) : 0;
+        if (wk) {
+          const r = wk.getBoundingClientRect();
+          work.current = smoothstep(vh * 0.95, vh * 0.45, r.top);
+          // …and once the band's bottom has come up past the fold, the piece is put
+          // away: the form leaves the centre, which Contact's full-width text needs.
+          after.current = smoothstep(vh * 1.0, vh * 0.55, r.bottom);
+        } else {
+          work.current = 0;
+          after.current = 0;
+        }
         ticking = false;
       });
     };
@@ -268,7 +281,13 @@ export function ChromeCanvas({
               switch): liquid / particles / wireframe mesh — plus the skull mesh the
               liquid hands the frame to. The scroll choreography they all follow is
               integrated ONCE, here, and only read by the forms: see formClock. */}
-          <FormDriver about={about} work={work} scroll={scroll} reduced={reduced} />
+          <FormDriver
+            about={about}
+            work={work}
+            after={after}
+            scroll={scroll}
+            reduced={reduced}
+          />
           <LiquidDna reduced={reduced} />
           <MeshDna reduced={reduced} />
           {/* The two skull-sampling forms wait on an 8.9 MB glb, so they get their

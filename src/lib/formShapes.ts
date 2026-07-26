@@ -1,5 +1,5 @@
 /**
- * The bespoke fields — one object per project (see workHover) — as shared GLSL.
+ * The bespoke fields — one object per project (see workPlate) — as shared GLSL.
  *
  * They live here rather than inside one renderer because the liquid and the
  * particles both have to be able to become them: the liquid raymarches the field,
@@ -153,7 +153,7 @@ float sdVase(vec3 p){
  * The tests are on a uniform, so they are coherent across the whole draw: a shape
  * that is fully absent costs nothing.
  *
- * @param amt gavel / camera / burger / vase, in SHAPES order (see workHover)
+ * @param amt gavel / camera / burger / vase, in SHAPES order (see workPlate)
  */
 float shapeField(vec3 p, vec4 amt, float base){
   float d = base;

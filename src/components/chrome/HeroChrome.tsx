@@ -7,8 +7,11 @@ import { ChromeMount } from "./ChromeMount";
  * defaults that were previously exposed through a dev-only Leva panel; the panel
  * is gone and these are now the single source of truth.
  */
-const SIZE = 108; // vmin-ish footprint
-const DIM = `min(${SIZE}vw, ${SIZE * 0.96}vh, ${SIZE * 11}px)`;
+// The canvas box the form is drawn into. Defined in globals.css as --form-dim
+// rather than here, because the DOM has to be able to frame the form: Work's notch
+// frame is a fraction of this box (see .plate-frame), and the form's on-screen size
+// is a function of this height, not of the viewport's.
+const DIM = "var(--form-dim)";
 
 const LIGHTS = {
 	ambient: 0.35,

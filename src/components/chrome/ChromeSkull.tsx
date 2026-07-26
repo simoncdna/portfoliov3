@@ -334,7 +334,7 @@ export function ChromeSkull({ reduced }: Props) {
     (u.uHi.value as Color).setRGB(colScratch.r, colScratch.g, colScratch.b);
     (u.uLo.value as Color).setRGB(colScratch.r * 0.5, colScratch.g * 0.5, colScratch.b * 0.5);
 
-    m.position.setX(s.dock);
+    m.position.set(s.dockX, s.dockY, 0);
     m.scale.setScalar(s.scale);
     m.rotation.set(0, s.spin, 0);
   });

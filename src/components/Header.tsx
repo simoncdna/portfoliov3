@@ -2,14 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { MagneticLink } from "./MagneticLink";
-import { ScrambleText } from "./ScrambleText";
-
-const NAV = [
-	{ label: "Index", href: "#top" },
-	{ label: "About", href: "#about" },
-	{ label: "Work", href: "#work" },
-	{ label: "Contact", href: "#contact" },
-];
 
 export function Header() {
 	const [scrolled, setScrolled] = useState(false);
@@ -31,24 +23,8 @@ export function Header() {
 						<span className="text-[0.95rem] font-extrabold uppercase tracking-tight text-chrome">
 							Simon Cardona
 						</span>
-						<span className="font-mono-label mt-1">// Frontend Developer</span>
 					</span>
 				</MagneticLink>
-
-				<ul className="hidden items-center gap-5 sm:flex">
-					{NAV.slice(1).map((item) => (
-						<li key={item.href}>
-							<MagneticLink href={item.href} strength={4}>
-								<ScrambleText
-									text={item.label}
-									prefix="[ "
-									suffix=" ]"
-									className="font-mono text-[0.72rem] uppercase tracking-[0.16em] text-silver transition-colors duration-200 hover:text-chrome"
-								/>
-							</MagneticLink>
-						</li>
-					))}
-				</ul>
 			</nav>
 		</header>
 	);
