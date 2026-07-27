@@ -22,7 +22,7 @@ import { FORM_RADIUS } from "./blobTweak";
  * burger is squat — and what has to match between them is how big they READ, not
  * their raw dimensions. Tuned so each one fills about the same amount of frame.
  */
-const K = { gavel: 1.15, camera: 1.6, burger: 1.85, vase: 1.45 };
+const K = { gavel: 1.15, camera: 1.6, burger: 1.8, vase: 1.45 };
 
 /** The farthest any scaled shape reaches from the origin — the marcher's bound. */
 export const SHAPE_REACH = 2.5;
@@ -115,13 +115,65 @@ float sdCamera(vec3 p){
  * the stack into one loaf, and the whole read depends on the seams between bun,
  * cheese and patty staying legible. The buns are domes — ellipsoids cut flat where
  * they meet the filling — for the same reason.
+ *
+ * Because the union is min(), every slice must OVERLAP the next one: nothing here
+ * bridges a gap. The first pass got this wrong in two places — the top bun started
+ * 0.11 above where the cheese ended, and the patty ended 0.16 above the bottom bun —
+ * and since the shape is only ever seen in chrome, with no material change from bun
+ * to meat, the result did not read as a burger with thin seams. It read as four
+ * saucers hanging in the air. Check the intervals, not the drawing, when moving any
+ * of these numbers:
+ *
+ *   base    -0.96 … -0.44      top bun   0.22 … 1.02  (+ sesame to ~1.05)
+ *   patty   -0.44 …  0.04      lettuce   0.115 … 0.225
+ *   cheese  -0.06 …  0.18
+ *
+ * The one exception to legible seams is the sesame, which is smin'd: a seed has to
+ * be a swelling of the bun, not a bead resting on it.
  */
 float sdBurger(vec3 p){
-  float top = max(sdEllip(p - vec3(0.0, 0.42, 0.0), vec3(1.06, 0.66, 1.06)), 0.42 - p.y);
-  float cheese = sdRoundBox(p - vec3(0.0, 0.20, 0.0), vec3(1.02, 0.05, 1.02), 0.06);
-  float patty = sdCylY(p - vec3(0.0, -0.06, 0.0), 0.20, 0.98);
-  float base = max(sdEllip(p - vec3(0.0, -0.42, 0.0), vec3(1.00, 0.52, 1.00)), p.y + 0.42);
-  return min(min(top, cheese), min(patty, base));
+  float top = max(sdEllip(p - vec3(0.0, 0.22, 0.0), vec3(1.06, 0.80, 1.06)), 0.22 - p.y);
+
+  // Seven seeds, hand-placed just under the dome so each one breaks the surface by
+  // about a third of its height. Placed rather than tiled: a domain repetition on a
+  // sphere either bunches at the poles or needs a mapping that costs more than seven
+  // ellipsoids do.
+  float seed = 1e9;
+  seed = min(seed, sdEllip(p - vec3( 0.00, 1.00,  0.00), vec3(0.11, 0.055, 0.15)));
+  seed = min(seed, sdEllip(p - vec3( 0.42, 0.92,  0.18), vec3(0.14, 0.055, 0.10)));
+  seed = min(seed, sdEllip(p - vec3(-0.35, 0.93, -0.30), vec3(0.12, 0.055, 0.11)));
+  seed = min(seed, sdEllip(p - vec3( 0.10, 0.90, -0.52), vec3(0.10, 0.055, 0.14)));
+  seed = min(seed, sdEllip(p - vec3(-0.55, 0.84,  0.42), vec3(0.14, 0.055, 0.11)));
+  seed = min(seed, sdEllip(p - vec3( 0.62, 0.78, -0.44), vec3(0.11, 0.055, 0.13)));
+  seed = min(seed, sdEllip(p - vec3(-0.05, 0.86,  0.66), vec3(0.13, 0.055, 0.10)));
+  float d = smin(top, seed, 0.05);
+
+  // The lettuce: a thin disc whose radius is modulated around the axis — that is the
+  // frill, and the frill is what stops the middle of the stack being three flat discs.
+  // A varying radius is no longer an exact distance: the field over-reports by at most
+  // sqrt(1 + (dr/ds)^2), about 1.2 at this amplitude, so the result is scaled back to
+  // stay UNDER the true distance and keep the marcher safe.
+  //
+  // It only just clears the bun (1.06). It used to stand 0.15 proud on a 0.09
+  // thickness, and a thin flange in chrome is not a frill — it is a blade: the
+  // specular runs the whole way round it in one unbroken line and the burger reads
+  // as two domes with a saw between them. Proud enough to be seen, thick enough to
+  // roll the highlight.
+  float a = atan(p.z, p.x);
+  float rl = 1.10 + 0.065 * cos(9.0 * a);
+  vec2 dl = vec2(length(p.xz) - rl, abs(p.y - 0.17) - 0.055);
+  float lettuce = (min(max(dl.x, dl.y), 0.0) + length(max(dl, 0.0))) * 0.80;
+
+  // The cheese stays square — that squareness is most of what says cheese — but it is
+  // tucked well inside the buns so only the four corners come out past the round, and
+  // by less than the lettuce does. It used to be a half-extent of 1.02, i.e. corners
+  // reaching 1.44 against a 1.06 bun: from above, a plank through the middle of the
+  // burger.
+  float cheese = sdRoundBox(p - vec3(0.0, 0.05, 0.0), vec3(0.74, 0.042, 0.74), 0.09);
+  float patty = sdCylY(p - vec3(0.0, -0.20, 0.0), 0.18, 0.94) - 0.06;
+  float base = max(sdEllip(p - vec3(0.0, -0.44, 0.0), vec3(1.02, 0.52, 1.02)), p.y + 0.44);
+
+  return min(min(min(d, lettuce), cheese), min(patty, base));
 }
 
 /**

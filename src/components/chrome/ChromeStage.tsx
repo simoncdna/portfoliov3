@@ -13,7 +13,11 @@ export function ChromeStage() {
       // covered — see .chrome-stage in globals.css for why that is not an optimisation
       // but a fix.
       className="chrome-stage"
-      style={{ position: "fixed", inset: 0, zIndex: 4, pointerEvents: "none" }}
+      // NOTE the z-index is NOT here. It lives in globals.css because the preloader has to
+      // raise this layer above its own backdrop for the length of the intro, and an inline
+      // style beats any class rule — including that one. Leaving it inline meant the override
+      // silently did nothing.
+      style={{ position: "fixed", inset: 0, pointerEvents: "none" }}
     >
       <HeroChrome />
     </div>

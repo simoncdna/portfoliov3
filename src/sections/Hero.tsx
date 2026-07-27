@@ -8,7 +8,7 @@ import { site } from "@/data/site";
 export function Hero() {
   const rowRef = useRef<HTMLDivElement>(null);
 
-  // On scroll, the bottom row ([ Portfolio ] + barcode) fades out where it stands
+  // On scroll, the bottom row (the barcode) fades out where it stands
   // — no rise, so nothing competes with the form for the eye's attention (and it
   // fades back in on the way up).
   //
@@ -47,16 +47,16 @@ export function Hero() {
         {site.name} — {site.role}
       </h1>
 
-      {/* Bottom row: [ Portfolio ] tag (left) + edit no. & barcode (right).
-          mt-auto pins it to the bottom now that the headline above is gone. */}
+      {/* Bottom row: the barcode alone, on the right. mt-auto pins it to the bottom now that
+          the headline above is gone.
+          `justify-end` rather than `justify-between`: the "[ Portfolio ]" tag that used to
+          hold the left end is gone, and between-with-one-child would have thrown the barcode
+          against the left gutter. */}
       <div
         ref={rowRef}
-        className="shell relative z-20 mt-auto flex items-end justify-between"
+        className="shell relative z-20 mt-auto flex items-end justify-end"
         style={{ willChange: "opacity" }}
       >
-        <span className="font-mono text-[0.72rem] uppercase tracking-[0.2em] text-silver-muted">
-          [ Portfolio ]
-        </span>
         {/* hidden cipher — A=01..Z=26 → "CHROME" (03 08 18 15 13 05);
             hover reveals TWEAK; click opens the blob control panel */}
         <button

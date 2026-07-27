@@ -2,6 +2,7 @@ import { Reveal } from "@/components/Reveal";
 import { ScrubReveal } from "@/components/ScrubReveal";
 import { Kicker, Index } from "@/components/Bits";
 import { MagneticLink } from "@/components/MagneticLink";
+import { MailDust } from "@/components/MailDust";
 import { site } from "@/data/site";
 
 export function Contact() {
@@ -44,30 +45,28 @@ export function Contact() {
           </ScrubReveal>
         </div>
 
-        <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-12">
-          <div className="md:col-span-6">
-            <span className="font-mono-label block">Direct</span>
-            <MagneticLink href={`mailto:${site.email}`} strength={4}>
-              <span className="magnetic-underline mt-2 inline-block font-mono text-[0.9rem] text-silver-bright">
-                {site.email}
-              </span>
-            </MagneticLink>
-          </div>
+        <div className="mt-14">
+          <MailDust email={site.email} />
+        </div>
 
-          <div className="md:col-span-6">
-            <span className="font-mono-label block">Elsewhere</span>
-            <ul className="mt-2 flex flex-wrap gap-x-8 gap-y-3">
-              {site.socials.map((s) => (
-                <li key={s.label}>
-                  <MagneticLink href={s.href} external strength={4}>
-                    <span className="magnetic-underline font-mono text-[0.8rem] uppercase tracking-[0.12em] text-silver transition-colors duration-200 hover:text-chrome">
-                      {s.label} ↗
-                    </span>
-                  </MagneticLink>
-                </li>
-              ))}
-            </ul>
-          </div>
+        {/* The "Direct" column that used to sit beside this held the address in 0.9rem mono —
+            the same address the dust above now gives at 128px, a few centimetres apart. Two
+            printings of one string, one of them the section's whole payoff. The grid it shared
+            went with it: a twelve-column layout for a single list is scaffolding for a column
+            that no longer exists. */}
+        <div className="mt-16">
+          <span className="font-mono-label block">Elsewhere</span>
+          <ul className="mt-2 flex flex-wrap gap-x-8 gap-y-3">
+            {site.socials.map((s) => (
+              <li key={s.label}>
+                <MagneticLink href={s.href} external strength={4}>
+                  <span className="magnetic-underline font-mono text-[0.8rem] uppercase tracking-[0.12em] text-silver transition-colors duration-200 hover:text-chrome">
+                    {s.label} ↗
+                  </span>
+                </MagneticLink>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
     </section>

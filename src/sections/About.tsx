@@ -15,21 +15,19 @@ gsap.registerPlugin(ScrollTrigger, useGSAP);
  * scrolling) and a single scrubbed timeline plays the whole sequence in sync
  * with the scroll:
  *
- *   1. the mono rule beside "About" draws itself left → right
- *   2. "About" draws in
- *   3. "01" draws in
- *   4. the bio paragraphs draw in, one after another
+ *   1. the bio paragraphs draw in, one after another — no section title above
+ *      them: the nav in the margin already names and numbers the section
  *   …all of it while the skull turns a single 360° (via aboutReveal.spin, added
  *      into the form clock): the rotation is laid over the reveal rather than
  *      queued after it, so the same scroll writes the text and turns the head
- *   5. the section fades out in place (opacity only, nothing slides)
- *   6. the form takes the emptied stage: back to the middle, swelling, then
+ *   2. the section fades out in place (opacity only, nothing slides)
+ *   3. the form takes the emptied stage: back to the middle, swelling, then
  *      unmaking itself into the resting sphere — the About→Work transition,
  *      scrubbed from here via aboutReveal.exit rather than read off the Work
  *      section's position, so it cannot drift from the fade it follows
  *
- * Text pieces are unveiled with a top→bottom clip curtain + fade (no vertical
- * slide); the rule is a scaleX draw from its left edge.
+ * The paragraphs are unveiled with a top→bottom clip curtain + fade (no vertical
+ * slide).
  */
 
 // clip-path keyframes for the top→bottom unveil. VEILED hides a piece by
@@ -46,23 +44,18 @@ export function About() {
       const el = ref.current;
       if (!el) return;
 
-      const rule = el.querySelector<HTMLElement>("[data-line]");
-      const about = el.querySelector<HTMLElement>("[data-about]");
-      const index = el.querySelector<HTMLElement>("[data-index]");
       const bio = gsap.utils.toArray<HTMLElement>(el.querySelectorAll("[data-zone]"));
-      const text = [about, index, ...bio].filter(Boolean) as HTMLElement[];
 
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        gsap.set([rule, ...text].filter(Boolean), { clearProps: "all" });
+        gsap.set(bio, { clearProps: "all" });
         aboutReveal.spin = 0;
         aboutReveal.exit = 0;
         return;
       }
 
-      // start states: the rule collapsed to its left edge; every text piece
-      // veiled and transparent (opacity, not translation → no vertical slide).
-      gsap.set(rule, { scaleX: 0, transformOrigin: "left center", willChange: "transform" });
-      gsap.set(text, { clipPath: VEILED, autoAlpha: 0, willChange: "clip-path, opacity" });
+      // start state: every paragraph veiled and transparent (opacity, not
+      // translation → no vertical slide).
+      gsap.set(bio, { clipPath: VEILED, autoAlpha: 0, willChange: "clip-path, opacity" });
       aboutReveal.spin = 0;
       aboutReveal.hold = 0;
       aboutReveal.exit = 0;
@@ -83,8 +76,9 @@ export function About() {
             // exit) would otherwise speed every other beat up by the same share.
             // Sized from the timeline's length at ~246 px per unit, the rate Work
             // is calibrated against too. Folding the 360° into the reveal instead of
-            // queueing it after took the timeline from ~10.55 units to ~7.75.
-            end: "+=1900",
+            // queueing it after took the timeline from ~10.55 units to ~7.75; dropping
+            // the rule / "About" / "01" beats took it from ~7.75 to ~6.1.
+            end: "+=1500",
             scrub: 1, // a frame of smoothing on top of the scrub → softer
             pin: true,
             anticipatePin: 1,
@@ -94,23 +88,13 @@ export function About() {
             },
           },
         })
-        // 1. rule draws left → right
-        .to(rule, { scaleX: 1, ease: "sine.inOut", duration: 0.5 })
-        // 2. "About"
-        .to(about, { clipPath: SHOWN, autoAlpha: 1, ease: "sine.out", duration: 0.5 }, ">-0.05")
-        // 3. "01"
-        .to(index, { clipPath: SHOWN, autoAlpha: 1, ease: "sine.out", duration: 0.5 }, ">0.1")
-        // 4. bio paragraphs, one after another
-        .to(
-          bio,
-          { clipPath: SHOWN, autoAlpha: 1, ease: "sine.out", duration: 0.6, stagger: 0.45 },
-          ">0.1"
-        )
-        // 5. the whole section fades out where it stands — no slide, so the eye is
+        // 1. bio paragraphs, one after another
+        .to(bio, { clipPath: SHOWN, autoAlpha: 1, ease: "sine.out", duration: 0.6, stagger: 0.45 })
+        // 2. the whole section fades out where it stands — no slide, so the eye is
         //    handed straight to the form rather than following text off-screen
-        .to([rule, ...text], { autoAlpha: 0, ease: "sine.in", duration: 0.7 }, ">0.15")
+        .to(bio, { autoAlpha: 0, ease: "sine.in", duration: 0.7 }, ">0.15")
         .addLabel("faded")
-        // 6. …and the form takes the emptied stage: it leaves the left dock, comes
+        // 3. …and the form takes the emptied stage: it leaves the left dock, comes
         //    back to the middle, swells into the space the text just vacated, then
         //    unmakes itself into the resting sphere the next section's form melts
         //    out of. One scrubbed value, overlapping beats — see formChoreo.
@@ -126,7 +110,7 @@ export function About() {
         // is never left standing still. (Hence the absolute position and the label
         // above: `>` is relative to the previously INSERTED tween, which would make
         // this one's placement reorder everything after it.)
-        .to(aboutReveal, { spin: Math.PI * 2, ease: "sine.inOut", duration: 4.45 }, 0);
+        .to(aboutReveal, { spin: Math.PI * 2, ease: "sine.inOut", duration: 2.8 }, 0);
     },
     { scope: ref }
   );
@@ -147,24 +131,9 @@ export function About() {
             upper third of the screen rather than dead-centre. The label pieces
             are split out (rule / word / index) so each can be sequenced. */}
         <div className="pt-[14vh] md:col-span-7 md:pl-6">
-          {/* section label + index */}
-          <div className="mb-10 flex items-baseline justify-between">
-            <span className="font-mono-label inline-flex items-center gap-2">
-              <span
-                data-line
-                aria-hidden
-                className="inline-block h-px w-6 bg-steel-2"
-              />
-              <span data-about>About</span>
-            </span>
-            <span
-              data-index
-              className="font-display fs-h3 text-silver-muted tabular-nums"
-            >
-              01
-            </span>
-          </div>
-
+          {/* No rule + "About" + "01" here, same reason as Work: the nav in the
+              margin already names the section and counts it. A second title inside
+              the section only repeats it. The bio opens the page on its own. */}
           <div className="flex max-w-xl flex-col gap-5">
             {site.bio.map((line, i) => (
               <p
