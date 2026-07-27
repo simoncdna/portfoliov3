@@ -205,6 +205,16 @@ export function advanceFormClock(
   scroll: number,
   reduced: boolean
 ) {
+  // The frame the stage RESUMES on (menu curtain, preloader — anything that flips the
+  // canvas's frameloop never→always) arrives with the entire pause as its delta: R3F's
+  // clock is not advanced while the loop is held. Integrated raw, one menu cycle threw
+  // `time` forward by tens of thousands of seconds — and a huge uTime is where fp32
+  // dies in the shader: the simplex noise quantises and the chrome comes back covered
+  // in stair-step artifacts, a little worse on every open/close. (This, not buffer
+  // reallocation, was the accumulating degradation the dpr experiment recorded — see
+  // stageLoad.) A real frame is never longer than a tenth of a second; anything above
+  // is a pause being handed back, and the clock treats it as one ordinary frame.
+  delta = Math.min(delta, 0.1);
   const tw = blobTweak.get();
   const target = reduced ? 0 : Math.max(0, Math.min(1, about));
   eased += (target - eased) * (reduced ? 1 : 1 - Math.pow(0.05, delta));
