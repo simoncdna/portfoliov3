@@ -218,7 +218,13 @@ export function ChromeCanvas({
         // "never" stops the loop without unmounting anything: the scene, the geometry and
         // every uniform survive, and drawing resumes from exactly where it stopped.
         frameloop={load === "paused" ? "never" : "always"}
-        dpr={dpr}
+        // "cheap" keeps the loop RUNNING at a fraction of the pixels — the menu's exit and
+        // the preloader's lift set it so the blob stays alive under the moving curtain
+        // instead of visibly freezing. Measured on the menu: resuming at full resolution
+        // under the curtain's heaviest overlap stalls the compositor outright (a zero-frame
+        // window), at dpr 1 it keeps up. The softness is under a black plane for nearly all
+        // of it; full resolution returns the frame the curtain is gone.
+        dpr={load === "cheap" ? 1 : dpr}
         gl={{ antialias: true, alpha: true, toneMappingExposure: 1.15 }}
         camera={{ position: [0, 0, 10], fov: 42 }}
         // pointerEvents: none is NOT redundant with the pointer-events-none on the

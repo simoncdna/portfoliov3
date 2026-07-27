@@ -25,22 +25,27 @@ import { useSyncExternalStore } from "react";
  * unmounted: the scene, the geometry and every uniform survive, and three.js picks up exactly
  * where it left off.
  *
- * TWO DEAD ENDS, KEPT HERE SO THEY ARE NOT RE-TRIED.
+ * ONE DEAD END, KEPT HERE SO IT IS NOT RE-TRIED.
  *
  * `visibility: hidden` on the stage instead of pausing it. Fixed the lift and moved the
  * failure: handing the canvas back to the compositor at the END of the lift is when it died
  * instead — a frozen page with no blob on it.
  *
- * Dropping the canvas's dpr during the lift, so the blob could stay live from the first frame
- * rather than waiting. It worked, and it degraded the render slightly more on every single
- * open. The canvas's dimensions did come back each cycle, so resolution was not what
- * accumulated — something downstream of making three.js reallocate its buffers was. Pausing
- * changes no renderer state at all, which is exactly why it is the one that survives.
+ * AND ONE FALSE CONVICTION, OVERTURNED. Dropping the canvas's dpr during the lift — the blob
+ * live from the first frame — worked, and was abandoned because the render came back a little
+ * worse on every single open. That degradation was blamed on the buffer reallocation and it
+ * was never that: the resume frame was handing formClock the whole pause as one delta, uTime
+ * leapt by tens of thousands of seconds, and fp32 noise at those magnitudes quantises into
+ * stair-steps. The clock now clamps its delta (see advanceFormClock), the accumulation is
+ * gone, and the dpr route is reinstated as "cheap" below: the loop keeps running through the
+ * lift at reduced resolution, so the blob never visibly freezes, and the compositor keeps the
+ * headroom the pause used to buy. "paused" remains for when the stage is fully covered —
+ * a canvas nobody can see has no business rendering at all.
  *
  * A module singleton rather than context: the stage lives in a different subtree from the
  * menu, and there is exactly one page.
  */
-export type StageLoad = "live" | "paused";
+export type StageLoad = "live" | "cheap" | "paused";
 
 let load: StageLoad = "live";
 const listeners = new Set<() => void>();

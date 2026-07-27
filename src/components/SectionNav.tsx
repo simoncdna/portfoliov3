@@ -90,29 +90,25 @@ const EXIT_CHAR_MS = 32;
  */
 const CLOSE_FALLBACK_MS = 1900;
 
-/**
- * When the blob starts moving again, measured from the start of the close.
+/*
+ * THE BLOB IS ALIVE FROM THE FIRST FRAME OF THE CLOSE — at reduced resolution, not paused.
  *
- * NOT at the end of the lift: --ease-out is so front-loaded that of an ~1.1s lift, 60% of the
- * distance is gone by 260ms and 85% by 400ms, so waiting for the end leaves the form fully
- * uncovered and visibly FROZEN for the last third, then snapping into motion.
+ * A resume DELAY was tried at every setting. At the end of the lift, the form sits fully
+ * uncovered and visibly frozen for the last third, then snaps into motion. At 300ms the
+ * freeze was shorter and still read as a stutter. At 0ms, full resolution under the
+ * curtain's heaviest overlap stalled the compositor outright — a window with ZERO frames
+ * rendered, the curtain frozen at -111px, then a jump to -744.
  *
- * And not at 0 either. That was measured: a full-resolution canvas repainting under the
- * curtain at its heaviest overlap stalled the compositor outright — a window with ZERO frames
- * rendered, the curtain frozen at -111px, then a jump to -744. Lowering the dpr for the
- * duration bought that 0ms and was abandoned for degrading the render on every open (see
- * stageLoad).
- *
- * 300ms comes in clean over repeated runs: no zero-frame window, and the curtain travels the
- * whole way. By then it has cleared all but the top ~250px, so what is left overlapping the
- * form's band is small enough for the compositor to keep up.
+ * What buys the 0ms is resolution, not time: stageLoad's "cheap" drops the canvas to dpr 1
+ * for the length of the lift, which was measured to keep the compositor fed at full overlap.
+ * (This exact arrangement was tried once before and abandoned for degrading the render on
+ * every open — that was the form clock's resume-delta bug, since fixed. See stageLoad.)
  *
  * Note what the target is: NOT the frame rate. It drops from ~120fps to ~50fps the moment the
  * blob resumes, and that is not a regression — ~45fps is this page's normal cost with the form
  * alive, and the 120fps stretches are simply the blob doing nothing. What reads as a bug is a
  * zero-frame window, which is a stall, not a slowdown. Tune against those.
  */
-const RESUME_MS = 300;
 
 /** Mirrors the entrance duration in globals.css (.nav-veil[data-open]) — only used as the
  *  backstop for the moment the curtain is fully drawn. */
@@ -552,8 +548,14 @@ export function SectionNav() {
       // reduced motion collapsing the transition, a resize interrupting it.
       timers.push(window.setTimeout(() => stageLoad.set("paused"), OPEN_MS + 150));
     } else {
-      // The blob comes back part-way through the lift, not at the end of it — see RESUME_MS.
-      timers.push(window.setTimeout(() => stageLoad.set("live"), RESUME_MS));
+      // The blob is alive for the whole lift, at reduced resolution — see the compositor
+      // note above OPEN_MS. Full resolution returns in finish(), once the veil is off.
+      // Guarded on the veil actually being up: this effect also runs on MOUNT with
+      // open=false, and a page that loads into low resolution for nobody is the bug the
+      // guard prevents. The inline style is `show`'s reflection in the DOM, which keeps
+      // the effect's deps at [open] — putting `show` in the deps would re-run this branch
+      // when finish() drops it and turn the stage back down right after handing it back.
+      if (veil.style.visibility === "visible") stageLoad.set("cheap");
       // And without this the rows would stay tabbable for ever if the event is lost.
       timers.push(window.setTimeout(finish, CLOSE_FALLBACK_MS));
     }

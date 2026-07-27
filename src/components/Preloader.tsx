@@ -102,20 +102,19 @@ export function Preloader() {
 
       /* The lift is a full-screen transform, and this page has already been bitten once by
          exactly that: a moving full-screen layer composited against a WebGL canvas that repaints
-         every frame starves the compositor (see stageLoad for the frame counts). The menu's
-         curtain solves it by stopping the form's loop for the worst of the overlap; this one has
-         the same conflict and had no such guard, which is why the lift stuttered.
-         260ms covers the interval where the plane still covers most of the screen — and while it
-         does, the form behind it cannot be seen standing still. */
-      stageLoad.set("paused");
-      timers.push(window.setTimeout(() => stageLoad.set("live"), 260));
+         every frame starves the compositor (see stageLoad for the frame counts). Same remedy as
+         the menu's exit: the form's loop keeps running at reduced resolution for the length of
+         the lift, so the first thing the visitor sees is metal already moving — not a still that
+         snaps to life partway up. */
+      stageLoad.set("cheap");
 
       // Just past the 1300ms lift, so the plane is fully off screen before it is unmounted —
-      // cut short, it would vanish mid-travel.
+      // cut short, it would vanish mid-travel. Full resolution returns here too.
       timers.push(
         window.setTimeout(() => {
           setPhase("done");
           document.body.style.overflow = "";
+          stageLoad.set("live");
         }, 1400)
       );
     };
