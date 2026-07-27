@@ -16,20 +16,22 @@ gsap.registerPlugin(ScrollTrigger, useGSAP);
  * Work — la côte. One plate at a time, and the plate is the chrome form itself.
  *
  * The section is a tall band with a sticky screen: the form sits in the middle,
- * framed by four corner notches, its name under it, and 01–04 under that. Scrolling
- * advances the plate and the metal melts from one project's object into the next
- * (see workPlate); the name decodes itself as it changes (see ScrambleText).
+ * with its name under it and 01–04 under that, the neighbouring projects showing at the
+ * edges of the screen. Scrolling
+ * advances the plate: the metal is rolled out into a 16:9 sheet and takes that
+ * project's photograph, and each change throws the sheet out of the frame to come back
+ * carrying the next one (see workPlate and formPhoto); the name decodes itself as it
+ * changes (see ScrambleText).
  *
  * The band is read in three parts.
  *
- *  1. SETTING UP — the blob arrives in the middle, the four notches are struck one
- *     corner at a time, then the name fades in and the numbers appear WHILE the metal
- *     forms itself into the first project. The forming is not queued after the type;
- *     they are one beat, which is why that beat is owned by the entrance timeline
- *     rather than by the plate handler (see the `forms` gate).
+ *  1. SETTING UP — the blob arrives in the middle, then the name fades in and the numbers
+ *     appear WHILE the metal flattens into the first project's picture. The forming is not
+ *     queued after the type; they are one beat, which is why that beat is owned by the
+ *     entrance timeline rather than by the plate handler (see the `forms` gate).
  *  2. THE PLATES — four equal stretches of scroll, one per project.
- *  3. PUTTING AWAY — the same sequence backwards: the type fades, the notches retract
- *     into their corners, and the metal is released back to a blob.
+ *  3. PUTTING AWAY — the same sequence backwards: the type fades, and the metal is
+ *     released back to a blob before the piece leaves the middle.
  *
  * All three are scrubbed, not played on arrival: every transition on this page is
  * reversible, and the entrance in particular has to happen while the screen is
@@ -77,17 +79,17 @@ const EXIT = 0.22;
  * FORMS below): with `>`-relative placement, inserting a beat would silently move the
  * moment the metal starts to change.
  */
-const BEAT = { notch: 0, name: 0.64, picks: 1.2, tail: 0.25 };
+const BEAT = { name: 0.64, picks: 1.2, tail: 0.25 };
 
 /**
  * The shortest time a plate is allowed to hold the screen (ms).
  *
  * One flick of the wheel is a long way down the band, and without a floor it
- * would cross two or three plates at once: three turns queued on top of each other,
+ * would cross two or three plates at once: three pictures boiling through one another,
  * three names churning over one another, and no plate ever actually SEEN. So the
  * shown plate does not jump to wherever the scroll is — it walks there, one plate at
  * a time, never faster than this. The pause is a pause in the SELECTION only: the
- * clock keeps running underneath, so the piece is still turning and the metal still
+ * clock keeps running underneath, so the sheet is still swaying and the metal still
  * flowing all the way through it (see formClock — nothing here touches the form's own
  * animation).
  *
@@ -143,14 +145,14 @@ export function Work() {
   }, []);
 
   /** Put plate i on screen now, and start its dwell. */
-  const present = useCallback((i: number, step: number) => {
+  const present = useCallback((i: number) => {
     shown.current = i;
     changedAt.current = performance.now();
     setPlate(i);
-    // The step is signed so the changeover's 360° follows the gesture: scrolling down
-    // winds the piece over, scrolling back up unwinds it — the same rule the ambient
-    // turntable follows (see the scroll direction in formClock).
-    workPlate.show(works[i].title, step);
+    // No direction is passed on: the changeover is the STRIP sliding to this slot, and a
+    // slide from 01 to 02 is the same movement whichever way the reader is going — its
+    // sign is already in the two positions (see mood.car in formClock).
+    workPlate.show(works[i].title);
   }, []);
 
   /**
@@ -176,7 +178,7 @@ export function Work() {
         return;
       }
       const dir = Math.sign(target.current - shown.current);
-      present(shown.current + dir, dir);
+      present(shown.current + dir);
       if (shown.current !== target.current) timer.current = window.setTimeout(step, DWELL);
     },
     [present]
@@ -229,24 +231,19 @@ export function Work() {
     () => {
       const el = ref.current;
       if (!el) return;
-      const notches = gsap.utils.toArray<HTMLElement>(el.querySelectorAll("[data-notch]"));
       const name = el.querySelector<HTMLElement>("[data-name]");
       const picks = gsap.utils.toArray<HTMLElement>(el.querySelectorAll("[data-pick]"));
       const type = [name, ...picks].filter(Boolean) as HTMLElement[];
 
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        gsap.set([...notches, ...type], { clearProps: "all" });
+        gsap.set(type, { clearProps: "all" });
         live.current = true;
-        present(0, 0);
+        present(0);
         setFormed(true);
         return;
       }
 
-      gsap.set([...notches, ...type], { autoAlpha: 0 });
-      // The notches are struck, not faded: each one grows out of its own corner, so
-      // the mark reads as being made rather than as appearing. transform-origin lives
-      // in the CSS, per corner.
-      gsap.set(notches, { scale: 0 });
+      gsap.set(type, { autoAlpha: 0 });
 
       // --- 1. setting up -------------------------------------------------------
       const inTl = gsap.timeline({
@@ -261,11 +258,6 @@ export function Work() {
         },
       });
       inTl
-        .to(
-          notches,
-          { autoAlpha: 1, scale: 1, ease: "sine.out", duration: 0.5, stagger: 0.08 },
-          BEAT.notch
-        )
         .to(name, { autoAlpha: 1, ease: "sine.out", duration: 0.5 }, BEAT.name)
         .to(picks, { autoAlpha: 1, ease: "sine.out", duration: 0.4, stagger: 0.06 }, BEAT.picks)
         // A tail so the last beat does not land on the very edge of the range, where
@@ -288,7 +280,7 @@ export function Work() {
           // The first plate starts its dwell here, so scrolling straight on cannot
           // switch away from it before it has been seen.
           live.current = true;
-          present(shown.current, 0);
+          present(shown.current);
         } else {
           // Backing out of the section rewinds it: the metal is released AND the
           // selection is wound back to the first plate, so coming down again plays
@@ -307,8 +299,7 @@ export function Work() {
       //
       //   1. the type goes — name, then numbers
       //   2. the metal is released, and finds its own form again (the blob)
-      //   3. the notches retract into the corners they were struck from
-      //   4. only then does the piece leave the middle, for the next section
+      //   3. only then does the piece leave the middle, for the next section
       //
       // Beat 4 is the reason workReveal exists. It used to be a smoothstep on the
       // band's bottom edge over in ChromeCanvas, which had no way of knowing where
@@ -345,20 +336,7 @@ export function Work() {
         // frame around it goes. The melt itself takes about four seconds of real time
         // (see MOOD_RATE), so this is where it STARTS, not where it finishes.
         .addLabel("free")
-        .to({}, { duration: 0.4 })
-        .fromTo(
-          notches,
-          { autoAlpha: 1, scale: 1 },
-          {
-            autoAlpha: 0,
-            scale: 0,
-            ease: "sine.in",
-            duration: 0.5,
-            stagger: 0.06,
-            immediateRender: false,
-          },
-          ">"
-        )
+        .to({}, { duration: 0.9 })
         // …and last, the piece steps aside. sine.inOut because this one is a MOVE
         // across the stage rather than a fade: it has to start and stop from rest.
         .fromTo(
@@ -384,7 +362,7 @@ export function Work() {
           window.clearTimeout(timer.current);
           workPlate.clear();
         } else {
-          present(shown.current, 0);
+          present(shown.current);
           // …and if the scroll moved on while the piece was let go, the walk picks up
           // the difference from here instead of the plate silently disagreeing with
           // where the reader is.
@@ -410,14 +388,17 @@ export function Work() {
           are. */}
       <div className="plate-screen">
         <div className="plate-group">
-          {/* The frame the piece stands in. Empty on purpose — the form is drawn
-              behind this box by the fixed stage. */}
-          <div className="plate-frame" aria-hidden>
-            <span data-notch className="plate-notch plate-notch--tl" />
-            <span data-notch className="plate-notch plate-notch--tr" />
-            <span data-notch className="plate-notch plate-notch--bl" />
-            <span data-notch className="plate-notch plate-notch--br" />
-          </div>
+          {/* The picture's own box. Empty, and invisible: the photograph is drawn behind it
+              by the fixed stage, and this only reserves its height so the name hangs UNDER
+              the picture rather than over it. Its size is published by the renderer (see
+              --plate-px-h in globals.css), because only the shader knows what shape the
+              current photograph is.
+
+              It used to carry four corner notches — the field marks this section was built
+              around. They went with the 16:9 plate: once every project keeps its own aspect
+              and the box is cut to the picture, four marks tight around a photograph mark
+              nothing. */}
+          <div className="plate-frame" aria-hidden />
 
           <div>
             <h3 data-name className="font-display plate-name">
@@ -426,6 +407,25 @@ export function Work() {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label={`${current.title} — open the live site in a new tab`}
+                // Pointing at the name holds the picture still, brings its colour up and
+                // steps it forward — the answer happens on the PIECE, which is where the
+                // reader is looking. The
+                // eased gesture lives in the form clock; this only reports the fact.
+                //
+                // Focus as well as hover, so the same thing is said to a keyboard rather
+                // than to a mouse alone.
+                onPointerEnter={() => {
+                  workPlate.hover = true;
+                }}
+                onPointerLeave={() => {
+                  workPlate.hover = false;
+                }}
+                onFocus={() => {
+                  workPlate.hover = true;
+                }}
+                onBlur={() => {
+                  workPlate.hover = false;
+                }}
               >
                 <ScrambleText text={current.title.toUpperCase()} pool={pool} />
               </a>

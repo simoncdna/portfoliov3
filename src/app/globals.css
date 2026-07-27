@@ -42,15 +42,16 @@
 
   /* The height of the canvas the chrome form is drawn into (see HeroChrome, which
      reads this same value). It is here rather than only in the component because
-     the DOM has to frame the form — Work's notches are a fraction of it — and the
+     the DOM has to arrange itself around the form — Work's furniture is a fraction of it —
+     and the
      form's on-screen size is set by this box, not by the viewport. */
   --form-dim: min(108vw, 103.68vh, 1188px);
   /* How far above the viewport's centre the form rides in Work, in pixels: DOCK_Y_WORK
-     (1.0 world unit, see formChoreo) ÷ 7.677, the world height the stage's camera
+     (0.7 world units, see formChoreo) ÷ 7.677, the world height the stage's camera
      sees. Both halves of the composition are then a fraction of the same box, so the
-     notch frame lands on the metal at every window size rather than only at the one
-     it was measured at. */
-  --form-lift: calc(var(--form-dim) * 0.1303);
+     furniture lands on the metal at every window size rather than only at the one it was
+     measured at. MOVE THIS WITH DOCK_Y_WORK, never on its own. */
+  --form-lift: calc(var(--form-dim) * 0.0912);
 }
 
 /* Expose tokens to Tailwind v4 utilities */
@@ -252,14 +253,14 @@ a {
    Work — la côte
    ============================================================
    One plate at a time, centred: the chrome form as the piece on display, four
-   corner notches for a frame, its name underneath, and 01–04 under that. The
-   scroll is the selector.
+   its name underneath and 01–04 under that, the neighbouring projects showing at the edges of
+   the screen. The scroll is the selector.
 
    The piece itself is NOT in this DOM — it is drawn by the fixed chrome stage, so
    everything here is furniture arranged around a form it cannot contain. That is
    why the frame is a fraction of --form-dim (the canvas box the form is drawn
-   into) rather than of the viewport: sized off vh instead, the notches and the
-   piece would drift apart on every aspect ratio but the one they were tuned at. */
+   into) rather than of the viewport: sized off vh instead, the furniture and the piece would
+   drift apart on every aspect ratio but the one they were tuned at. */
 
 /* A tall band with a sticky screen. The scroll IS the selector, so the band's height
    is the length of what it has to say: 380vh of travel, split 15% setting-up, four
@@ -277,126 +278,67 @@ a {
   /* The group and the section label are both placed against this box (not the band),
      so they stay put while the band scrolls past underneath. */
   overflow: hidden;
-  /* Half the canvas box → the piece fills a little over half the frame (measured:
-     237px of metal in a 421px frame on a 1440×813 screen). A piece that fills its
-     frame leaves no air for the notches to enclose, and the air is the whole point of
-     marking a field instead of drawing a box. */
-  --plate-frame: calc(var(--form-dim) * 0.5);
+  /* The field the plate stands in, as a fraction of the canvas box — and 16:9, because what
+     stands in it is a photograph now (PLATE_HALF in formPhoto). The two are ONE measurement:
+     the plate is 7.25 world units wide against this frame's 7.68, so the marks stand off the
+     picture by about 6% of its width and stay OUTSIDE it.
+
+     The photograph grew from 2.8 half-widths to 5.85 over several passes. It was tried at 7.8
+     and that is past the ceiling: a frame with any air at all would then be wider than the
+     window, the marks had to move inside the picture as crop marks, and the four numbers ended
+     up 7px off the bottom of a 860px window. The ceiling is not this frame — it is the GROUP,
+     because the name and the numbers hang under the picture in fixed px. Going bigger again
+     means giving one of them up, not tightening this. */
+  --plate-frame: calc(var(--form-dim) * 0.86);
+  --plate-frame-h: calc(var(--plate-frame) * 9 / 16);
 }
 
 /* Frame, name and numbers as one column — positioned so that the FRAME's centre
    lands on the form's centre, with the type hanging below it. Centring the group as
    a whole instead (place-items: center) is the tempting version and it is wrong: the
    text block's height is in px while the form's lift scales with the canvas, so the
-   two only agree at one window height and the notches drift off the metal at every
-   other. Anchoring the frame makes that exact everywhere and leaves the group
-   optically off-centre by a few px, which is the error nobody can see.
+   two only agree at one window height and the type drifts off the picture at every other.
+   Anchoring the picture's box makes that exact everywhere and leaves the group optically
+   off-centre by a few px, which is the error nobody can see.
 
-   The gap is measured from the frame's BOX, and the notches hang 34px outside it, so
-   it has to clear those first and then be the air you actually want. */
+   The gap is measured from the picture's own box, so it is the air you actually want. */
 .plate-group {
   position: absolute;
   left: 50%;
-  top: calc(50% - var(--form-lift) - var(--plate-frame) / 2);
+  /* Half the frame's HEIGHT, which since the frame went 16:9 is no longer half its
+     width: the anchor is the frame's centre landing on the form's, so it has to be the
+     height that is halved here. */
+  top: calc(50% - var(--form-lift) - var(--plate-px-h, var(--plate-frame-h)) / 2);
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 112px;
-  /* How far the notches hang outside the frame. Declared HERE, on the group, and not
-     on .plate-frame where the notches live: the call below overrides it on this
-     element, and a declaration further down the tree would win over the inherited
-     one and swallow the whole effect. */
-  --notch-out: 34px;
+  gap: 56px;
 }
 
-/* The field the piece stands in. Its size is --plate-frame, on .plate-screen, since
-   the group's own offset is a function of it. The whole group needs frame + 112 +
-   name + 40 + numbers ≈ frame + 228px of height, which is what keeps the notches
-   clear of the header on short screens — raising the fraction eats that first. */
+/* The field the piece stands in — and it is now the PICTURE's own box, not a fixed one.
+   Every project keeps its file's aspect (see PLATE_H in formPhoto), so there is no single
+   shape for the marks to enclose: the renderer publishes the shown picture's on-screen size
+   as --plate-px-w / --plate-px-h and the frame takes it. The fallback is the old fixed 16:9
+   box, which is what the first frame uses before the canvas has run once.
+
+   Nothing is drawn on it — it is a spacer with a published size, which is the only way a DOM
+   box can follow a picture whose proportions are decided by a file the CSS never sees. */
 .plate-frame {
   position: relative;
-  width: var(--plate-frame);
-  aspect-ratio: 1;
+  width: var(--plate-px-w, var(--plate-frame));
+  height: var(--plate-px-h, var(--plate-frame-h));
 }
 
-/* Four notches, nothing else: the corners of a field, the way a press marks a
-   sheet. They sit well OUTSIDE the frame — a mark that grazes the object reads as
-   a crop, not as a field. */
-.plate-notch {
-  position: absolute;
-  width: 11px;
-  height: 11px;
-  pointer-events: none;
-  /* The offsets are driven by --notch-out, so the four marks travel together. NOT
-     transform: the entrance and the exit already own each notch's transform (they
-     grow it from its own corner), and GSAP writes that inline — a transform here
-     would either be overridden or fight it. Insets are free. */
-  transition:
-    top var(--dur-med) var(--ease-out),
-    right var(--dur-med) var(--ease-out),
-    bottom var(--dur-med) var(--ease-out),
-    left var(--dur-med) var(--ease-out);
-}
-.plate-notch::before,
-.plate-notch::after {
-  content: "";
-  position: absolute;
-  background: var(--steel-2);
-  transition: background-color var(--dur-med) var(--ease-out);
-}
-.plate-notch::before {
-  width: 100%;
-  height: 1px;
-}
-.plate-notch::after {
-  height: 100%;
-  width: 1px;
-}
-/* transform-origin is load-bearing, not decoration: the entrance grows each notch
-   from scale 0, and it has to grow OUT OF its own corner — the two arms drawn from
-   the angle, the way a press marks a sheet. Scaled from the centre they would
-   inflate, which reads as a fade with extra steps. */
-.plate-notch--tl {
-  top: calc(var(--notch-out) * -1);
-  left: calc(var(--notch-out) * -1);
-  transform-origin: top left;
-}
-.plate-notch--tl::before,
-.plate-notch--tl::after {
-  top: 0;
-  left: 0;
-}
-.plate-notch--tr {
-  top: calc(var(--notch-out) * -1);
-  right: calc(var(--notch-out) * -1);
-  transform-origin: top right;
-}
-.plate-notch--tr::before,
-.plate-notch--tr::after {
-  top: 0;
-  right: 0;
-}
-.plate-notch--bl {
-  bottom: calc(var(--notch-out) * -1);
-  left: calc(var(--notch-out) * -1);
-  transform-origin: bottom left;
-}
-.plate-notch--bl::before,
-.plate-notch--bl::after {
-  bottom: 0;
-  left: 0;
-}
-.plate-notch--br {
-  bottom: calc(var(--notch-out) * -1);
-  right: calc(var(--notch-out) * -1);
-  transform-origin: bottom right;
-}
-.plate-notch--br::before,
-.plate-notch--br::after {
-  bottom: 0;
-  right: 0;
-}
+/* THE FOUR NOTCHES ARE GONE. They marked the field a small chrome object stood in — struck
+   one corner at a time on the way in, retracting on the way out, tightening on hover — and
+   they were the section's signature for a while. They went with the fixed 16:9 plate: each
+   project now keeps its own aspect and the box below is cut to the picture, so marks tight
+   around a photograph mark nothing. The gesture they carried (an answer on the piece rather
+   than on the word) is now the hover's colour and step forward, in the shader.
+
+   What is left is the box itself, which reserves the picture's height so the name hangs under
+   it. See .plate-frame. */
 
 /* The name. Monospaced digits are not the issue here — the churn is: the letters
    are swapped in place, so the word's width breathes a little while it decodes.
@@ -415,27 +357,10 @@ a {
   display: inline-block;
 }
 
-/* The call.
-   Pointing at the name pulls the four notches in on the piece and lights them. The
-   underline it replaces was furniture borrowed from a document; this is the section's
-   own gesture — the corners of a field, tightening on what they mark — and it answers
-   at the OBJECT rather than at the word, which is where the reader is looking.
-   Reaching the notches from the link means going up and back across the tree, hence
-   :has(). It fires the same on keyboard focus, so the outline is not the only thing
-   that says this word leads somewhere.
-   Note the limit: hover does not exist on touch, so on a phone the name still gives
-   no sign of being a link. The numbers below it remain the only tap target that
-   announces itself. */
-.plate-group:has(.plate-name a:hover),
-.plate-group:has(.plate-name a:focus-visible) {
-  --notch-out: 16px;
-}
-.plate-group:has(.plate-name a:hover) .plate-notch::before,
-.plate-group:has(.plate-name a:hover) .plate-notch::after,
-.plate-group:has(.plate-name a:focus-visible) .plate-notch::before,
-.plate-group:has(.plate-name a:focus-visible) .plate-notch::after {
-  background: var(--silver-bright);
-}
+/* The call. Pointing at the name answers on the PICTURE — it takes its colour, holds still
+   and steps forward — which happens in the shader, off workPlate.hover. Nothing here: the
+   underline this section never had is not coming back, and the notches that used to tighten
+   are gone. The focus ring stays, since it is the only thing that says "link" to a keyboard. */
 .plate-name a:focus-visible {
   outline: 1px solid var(--silver-bright);
   outline-offset: 6px;
@@ -474,14 +399,22 @@ a {
 
 /* The group hangs BELOW the frame, so on a short window it is the numbers that run
    out of room first (frame + 228px against ~62% of the height). The air comes down
-   with the type — on narrow screens too, where the notches would otherwise crowd the
-   gutters. */
+   with the type. */
 @media (max-width: 760px), (max-height: 700px) {
   .plate-group {
-    gap: 72px;
+    gap: 36px;
   }
   .plate-picks {
-    margin-top: 28px;
+    margin-top: 22px;
+  }
+  .plate-screen {
+    /* Upright, the plate is no longer the size formPhoto asks for: the camera cannot show 9.67
+       world units across a portrait canvas, so the shader caps it (PLATE_FILL / uPlateK in
+       LiquidDna) at about 0.92 of what IS visible. The frame follows that cap rather than the
+       plate's nominal size — 0.92 of the canvas box's width, the canvas being ~1.08 viewports
+       wide. It is the one place the two halves of the measurement are only approximately in
+       step; the marks sitting inside the picture is what makes that survivable. */
+    --plate-frame: calc(var(--form-dim) * 0.78);
   }
 }
 
@@ -641,6 +574,24 @@ a {
    drifts under the type and takes the contrast of individual words with it as it moves.
    A menu has one job. (A blur instead would be worse again — a full-frame readback over
    a live WebGL canvas, every frame, against the smooth scroll's budget.) */
+/* The stage's layer, and its only one. Below the header (50) and the paper grain (90) — the
+   form is the page's ground, not its furniture. In CSS rather than inline on the element
+   because that is where a layer's position in the stack belongs, next to the numbers it has to
+   be read against.
+
+   THE PRELOADER DOES NOT TOUCH IT, and that is deliberate. Raising it over the intro's backdrop
+   was tried two ways — z200 for the whole load, then an opacity ramp over the last 30% of the
+   readout — and both can leave the form invisible at the one moment it must not be: the curtain
+   takes 1300ms to clear and the intro flag only drops when that finishes, so any opacity under
+   1 when the lift starts is a transparent blob for the entire reveal.
+   It buys nothing either. The stage renders continuously whether or not anything can see it, so
+   a curtain rising off it uncovers a form already in motion — there is nothing to fade in. The
+   discontinuity that prompted all of it was never visibility; it was the lift firing before the
+   HDRI had landed, which is fixed where it belongs, in Preloader.tsx. */
+.chrome-stage {
+  z-index: 4;
+}
+
 /* NOTE ON THE HANG THIS MENU USED TO CAUSE. Lifting the curtain off the page froze the
    browser, and the cure is not in this file: the chrome stage is a full-screen WebGL
    surface repainting every frame, and it cannot be composited under a full-screen layer

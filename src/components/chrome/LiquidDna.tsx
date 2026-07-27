@@ -1,14 +1,29 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEnvironment } from "@react-three/drei";
-import { BufferAttribute, BufferGeometry, Color, Matrix3, ShaderMaterial, Vector2, Vector3, Vector4 } from "three";
-import type { Mesh } from "three";
+import {
+  BufferAttribute,
+  BufferGeometry,
+  ClampToEdgeWrapping,
+  Color,
+  DataTexture,
+  Matrix3,
+  ShaderMaterial,
+  TextureLoader,
+  Vector2,
+  Vector3,
+  Vector4,
+} from "three";
+import type { Mesh, Texture } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { CHROME_SHADE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { SHAPE_SDF } from "@/lib/formShapes";
+import { PHOTO_SHADE, PLATE_ASP0, PLATE_GAP, PLATE_H, PLATE_SDF, PLATE_T } from "@/lib/formPhoto";
+import { PLATE_LOOK } from "@/lib/plateLook";
 import { formState } from "@/lib/formClock";
+import { works } from "@/data/site";
 
 type Props = {
   reduced?: boolean;
@@ -35,6 +50,8 @@ uniform float uMoodF;     // hovered project: x lump size
 uniform float uSpike;     // hovered project: radial thorns
 uniform vec4  uShape;     // hovered project: how much of each bespoke field is
                           // mixed in — gavel / camera / burger / vase, in SHAPES order
+uniform float uFlat;      // 0 = the sphere, 1 = the flat 16:9 photographic plate
+uniform float uRelief;    // how hard the flattened sheet undulates (world units)
 uniform sampler2D uEnv;
 uniform float uEnvInt;
 uniform float uEnvRot;
@@ -97,6 +114,38 @@ float fbm(vec3 p){ return snoise(p) * 0.7 + snoise(p * 2.1) * 0.3; }
 const float BR = ${FORM_RADIUS.toFixed(2)};  // blob radius (shared, see blobTweak)
 
 ${SHAPE_SDF}
+${PLATE_SDF}
+
+/** Where slot i's centre is in WORLD space — for its bounding sphere. Undoes exactly
+    what toLocal does: scale, then the turntable's rotation the other way, then the dock. */
+vec3 slotWorld(float i){
+  vec3 v = plateSlot(i) * uScale;
+  float c = cos(uSpin), s = sin(uSpin);
+  return vec3(uDock, 0.0) + vec3(c * v.x + s * v.z, v.y, -s * v.x + c * v.z);
+}
+
+/**
+ * Grow the march's [t0, t1] interval by a bounding sphere, if this ray meets it.
+ *
+ * The form is no longer ONE object — a flattened strip is several sheets a screen apart —
+ * so the analytic bound has to be a union of spheres rather than a single one. t1 < 0
+ * means "nothing bounded yet", which is also the caller's discard test: a ray that meets
+ * none of the spheres has not paid for a single noise fetch.
+ */
+void span(vec3 c, float rad, vec3 ro, vec3 rd, inout float t0, inout float t1){
+  vec3 bc = c - ro;
+  float tca = dot(bc, rd);
+  float dc2 = dot(bc, bc) - tca * tca;
+  float r2 = rad * rad;
+  if (dc2 > r2) return;
+  float thc = sqrt(r2 - dc2);
+  float b = tca + thc;
+  if (b <= 0.0) return;                  // wholly behind the camera
+  float a = max(tca - thc, 0.0);
+  if (t1 < 0.0) { t0 = a; t1 = b; return; }
+  t0 = min(t0, a);
+  t1 = max(t1, b);
+}
 
 // Domain-warped fbm, ported from the old vertex-displaced blob: the noise field
 // is itself displaced by noise (offsets larger than the domain), which is what
@@ -134,19 +183,46 @@ float sdBlob(vec3 p){
   return d * lip;
 }
 
-// full scene SDF (the resting blob + living flow)
-float map(vec3 wp){
-  // into local space: undock + unspin
+// World → the form's own space: undock, unspin, unscale. Factored out of map()
+// because the shading needs it too — the photograph's UV is read off the LOCAL hit
+// point, so the picture is carried by the surface the marcher actually found.
+vec3 toLocal(vec3 wp){
   vec3 p = wp - vec3(uDock, 0.0);
   float c = cos(uSpin), s = sin(uSpin);
   p = vec3(c*p.x - s*p.z, p.y, s*p.x + c*p.z);
-  p /= uScale;                 // global grow/shrink for the section exit
-  // The blob, with the hovered project's object mixed into it — see shapeField.
+  return p / uScale;           // global grow/shrink for the section exit
+}
+/** Same rotation, no translation or scale — for directions (the surface normal). */
+vec3 dirToLocal(vec3 v){
+  float c = cos(uSpin), s = sin(uSpin);
+  return vec3(c*v.x - s*v.z, v.y, s*v.x + c*v.z);
+}
+
+// full scene SDF (the resting blob + living flow)
+//
+// Every branch below is on a UNIFORM, so it is coherent across the whole draw — the GPU
+// takes one side for every pixel of the frame, and the skipped work costs nothing at all.
+// That matters here more than anywhere else in the file: this function runs up to 96 times
+// per pixel for the march, then four more for the normal.
+float map(vec3 wp){
+  vec3 p = toLocal(wp);
+  // Once the metal is fully rolled out, the blob is mixed out of the result entirely —
+  // and it was still being evaluated, at five noise fetches a step, for a contribution of
+  // zero. That is the whole steady state of the Work section, which is where the section
+  // spends nearly all of its time.
+  if (uFlat > 0.999) return plateStrip(p, uRelief) * uScale;
+
+  // The blob, with the hovered project's object mixed into it — see shapeField…
   float d = shapeField(p, uShape, sdBlob(p));
-  // living surface flow (ripples), stronger once assembled. The 0.55 keeps this
-  // term at its previous absolute amplitude now that uDistort is no longer
-  // pre-scaled on the JS side.
-  float flow = snoise(p * 1.6 + vec3(uTime * 0.5, uTime * 0.35, 0.0)) * uDistort * 0.55 * (0.25 + 0.35 * uPres);
+  // …and flattened toward the photographic plate, which is the Work section's whole
+  // subject. Last, so the plate wins over both: at uFlat = 1 the field IS the sheet.
+  d = plateField(p, uFlat, uRelief, d);
+  // Living surface flow (ripples), stronger once assembled. The 0.55 keeps this term at
+  // its previous absolute amplitude now that uDistort is no longer pre-scaled on the JS
+  // side. Faded out as the plate flattens: on a sheet carrying a photograph this is one
+  // more thing deforming the picture, and the wave is supposed to be the only one.
+  float flow = snoise(p * 1.6 + vec3(uTime * 0.5, uTime * 0.35, 0.0))
+             * uDistort * 0.55 * (0.25 + 0.35 * uPres) * (1.0 - uFlat);
   d -= flow;
   return d * uScale;
 }
@@ -161,6 +237,7 @@ vec3 calcNormal(vec3 p){
                    k.xxx * map(p + k.xxx*e));
 }
 ${CHROME_SHADE}
+${PHOTO_SHADE}
 
 void main(){
   vec2 ndc = vUv * 2.0 - 1.0;
@@ -183,14 +260,26 @@ void main(){
   float shaped = max(max(uShape.x, uShape.y), max(uShape.z, uShape.w));
   float bRad = uScale * max(BR * wide * (1.0 + uDistort * uMoodD + uSpike) + 0.6,
                             shaped * (SHAPE_REACH + 0.5));
-  vec3  bc  = vec3(uDock, 0.0) - ro;
-  float tca = dot(bc, rd);
-  float dc2 = dot(bc, bc) - tca * tca;
-  float r2  = bRad * bRad;
-  if (dc2 > r2) discard;
-  float thc  = sqrt(r2 - dc2);
-  float t    = max(tca - thc, 0.0);
-  float tMax = tca + thc;
+  float t = 0.0, tMax = -1.0;
+  span(vec3(uDock, 0.0), bRad, ro, rd, t, tMax);
+
+  // Once the metal flattens, the strip's plates get a sphere EACH, and the march runs
+  // from the first entry to the last exit among the ones this ray meets. One sphere
+  // around the whole strip would be a screen-width across — it would swallow the page and
+  // pay full noise cost on nearly every pixel, which is the opposite of what a bound is
+  // for. Two small spheres a long way apart keep the empty middle of the screen free.
+  if (uFlat > 0.001) {
+    // One sphere per plate on show — the same four slots the field unions, each at its own
+    // size. A single sphere around the gallery would be three screens wide.
+    float base = plateNear();
+    for (int j = -1; j <= 2; j++) {
+      float i = base + float(j);
+      if (i < -0.5 || i > PLATE_LAST + 0.5) continue;
+      float pRad = uScale * uFlat * (length(slotHalf(i)) * slotScale(i) + 0.4);
+      span(slotWorld(i), pRad, ro, rd, t, tMax);
+    }
+  }
+  if (tMax < 0.0) discard;
 
   // The warped-fbm displacement makes map() overestimate the true distance (a
   // subtracted noise is not a distance field), so the step needs a safety factor
@@ -207,7 +296,18 @@ void main(){
   // amplitude and the domain, and thorns are steep by construction (a cubed
   // threshold), so they get a term of their own — a spiky project marches in
   // smaller strides rather than speckling.
-  float stepK = 1.0 / (1.0 + uDistort * uMoodD * (7.5 * uFreq * uMoodF + 1.1) + uSpike * 9.0);
+  // The plate's relief is subtracted from an otherwise exact box, so it enters the
+  // same bound on its own terms: amplitude (uRelief) x fbm slope (~2.7) x warp slope
+  // (~2.8) x its domain scale (1.6 uFreq) ≈ uRelief * 12 * uFreq, plus a constant
+  // for the fixed-frequency flow. A boiling changeover therefore creeps and a settled
+  // plate strides, without a dial to keep in sync.
+  // …and the cloth is a domain shift in depth, which over-reports by its own gradient —
+  // proportional to the wave's amplitude, hence uFlagAmp in the bound rather than a constant:
+  // a sheet that has been calmed flat (the hover) marches in full strides again, and the
+  // figure follows the dev panel's dial instead of having to be kept in sync with it.
+  float stepK = 1.0 / (1.0 + uDistort * uMoodD * (7.5 * uFreq * uMoodF + 1.1) + uSpike * 9.0
+                           + uFlat * (uRelief * (12.0 * uFreq + 1.2) * (1.0 - uFlag)
+                                      + uFlag * uFlagAmp * 4.0));
   float d = 0.0;
   bool hit = false;
   for (int i = 0; i < 96; i++){
@@ -220,7 +320,32 @@ void main(){
 
   vec3 p = ro + rd * t;
   vec3 n = calcNormal(p);
-  gl_FragColor = vec4(chromeShade(n, rd), uFade);
+  vec3 col = chromeShade(n, rd);
+
+  // The photograph, printed on the sheet the march just hit. The only thing done to the
+  // picture itself is a drag along the surface's own tilt (uWarp), which locks it to the
+  // relief the way a wet print is. Nothing else moves it — a plate changing is a
+  // translation, and a photograph being handed to a reader should not be smeared.
+  if (uPhotoOn > 0.002) {
+    vec3 pl = toLocal(p);
+    // Which of the sheets this pixel belongs to — the strip means the answer is not
+    // always the one in the middle of the screen.
+    vec3 q;
+    float slot = plateOwner(pl, q);
+    if (photoHas(slot) > 0.5) {
+      vec3 nl = dirToLocal(n);
+      vec2 uv = plateUv(q.xy, slotHalf(slot).xy) + nl.xy * uWarp;
+      // The colour is given to the plate being READ and to no other: the hover answers on the
+      // project whose name is under the cursor, and its neighbours stay in black and white.
+      // round(uCar), because between two slots the nearer one is the one on show.
+      float shown = floor(uCar + 0.5);
+      float mine = step(abs(slot - shown), 0.5);
+      // The local normal is passed on: it is what shades the print (see photoShade).
+      col = photoShade(col, nl, photoTone(slot, uv, uColour * mine));
+    }
+  }
+
+  gl_FragColor = vec4(col, uFade);
 }
 `;
 
@@ -232,6 +357,43 @@ void main(){
 }
 `;
 
+/**
+ * The widest the WIDEST picture may get, as a fraction of the half-width the camera can see.
+ *
+ * Only ever a CEILING (see uPlateK): on any landscape window the plate's own size binds first
+ * and this does nothing. It exists for the portrait case, where the visible world width
+ * collapses and the plate would otherwise be cropped by the edges of the screen. 0.92 leaves a
+ * little air rather than bleeding to the edge, since the notches still have to sit somewhere.
+ */
+const PLATE_FILL = 0.92;
+
+/**
+ * How much the picture being read steps forward while its name is pointed at.
+ *
+ * A tenth: enough to feel answered, and well inside the gap the strip is packed with, so the
+ * picture grows into its own air rather than into its neighbour's.
+ */
+const PLATE_GROW = 0.1;
+
+/**
+ * The window, in flatness, over which the picture surfaces on the metal.
+ *
+ * It opens EARLY — a fifth of the way out of the ball — because the point is that the
+ * blob literally becomes the photograph: the image is already on the mass while it is
+ * still being rolled out, stretched over whatever shape the field is holding, and it
+ * settles as the sheet does. Opening it late instead gives a piece of metal that
+ * flattens and then has a picture switched on, which is two events where there should
+ * be one. It closes before flatness reaches 1 because that is an exponential ease and
+ * never quite lands: a window ending at 1.0 would never fully open.
+ */
+const PHOTO_IN = 0.2;
+const PHOTO_FULL = 0.8;
+
+const smoothstep = (e0: number, e1: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
 export function LiquidDna({ reduced }: Props) {
   const { camera, size } = useThree();
   const envMap = useEnvironment({ preset: "studio" });
@@ -239,8 +401,13 @@ export function LiquidDna({ reduced }: Props) {
   const appear = useRef(0); // load-in fade (the liquid is the permanent hero form)
   const modeVis = useRef(1); // eased visibility for the "blob" (liquid) form mode
   const colScratch = useMemo(() => new Color(), []);
+  /** Last published on-screen box of the shown picture, so the CSS vars are written on change
+   *  rather than every frame — see the write at the end of the frame loop. */
+  const frameBox = useRef({ w: 0, h: 0 });
 
   const { geometry, material } = useMemo(() => {
+    const blank = new DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
+    blank.needsUpdate = true;
     const geometry = new BufferGeometry();
     geometry.setAttribute(
       "position",
@@ -267,6 +434,35 @@ export function LiquidDna({ reduced }: Props) {
         uMoodF: { value: 1 },
         uSpike: { value: 0 },
         uShape: { value: new Vector4() },
+        // the strip of plates, and the photographs printed on them (see formPhoto)
+        uFlat: { value: 0 },
+        uRelief: { value: 0 },
+        uPhotoOn: { value: 0 },
+        uWarp: { value: 0 },
+        uCar: { value: 0 },
+        uCarX: { value: 0 },
+        uSlotX: { value: works.map(() => 0) },
+        uPhotoAsp: { value: works.map(() => PLATE_ASP0) },
+        uPlateK: { value: 1 },
+        uShrink: { value: 0.32 },
+        uGrow: { value: 0 },
+        uFlag: { value: 0 },
+        // These mirror PLATE_LOOK: the frame loop overwrites them immediately,
+        // but a material built with the panel's *old* values would flash for one frame.
+        uFlagAmp: { value: 2 },
+        uWind: { value: 0.4 },
+        uPrint: { value: new Vector3(0.89, 0, 0) },
+        uContrast: { value: 1.03 },
+        uShade: { value: 0.27 },
+        uWave: { value: 0 },
+        uColour: { value: 0 },
+        uAber: { value: 0.006 },
+        uPhotoReady: { value: works.map(() => 0) },
+        // Every sampler is bound from the start, to a 1×1 grey: an unbound sampler2D is
+        // undefined behaviour that some drivers answer with a warning per draw call. The
+        // placeholder is never SEEN — uPhotoReady gates each slot — it is only there to
+        // keep every texture unit legal while the files are in flight.
+        ...Object.fromEntries(works.map((_, i) => [`uPhoto${i}`, { value: blank }])),
         uEnv: { value: null },
         uEnvInt: { value: ENV_INTENSITY },
         uEnvRot: { value: ENV_ROT_Y },
@@ -282,9 +478,43 @@ export function LiquidDna({ reduced }: Props) {
     return { geometry, material };
   }, []);
 
+  // The photographs, loaded imperatively rather than through drei's useTexture: that
+  // one suspends, and the liquid is the form that must never wait — it is what the
+  // page draws from the first frame, and it needs nothing but a shader. Same reason
+  // the skull sits in its own Suspense boundary (see ChromeCanvas).
+  useEffect(() => {
+    const loader = new TextureLoader();
+    const loaded: Texture[] = [];
+    works.forEach((w, i) => {
+      if (!w.image) return;
+      loader.load(w.image, (t) => {
+        // The uv is warped past the edges by the relief, so it must clamp: repeating
+        // would wrap the sky onto the grass along the top of the plate.
+        t.wrapS = ClampToEdgeWrapping;
+        t.wrapT = ClampToEdgeWrapping;
+        // Left in the texture's own colour space on purpose — this material writes
+        // straight to the framebuffer with no conversion appended, so the file's
+        // display-space values are already what the screen wants (see formPhoto).
+        //
+        // The PLATE is cut to the photograph, not the other way round: its aspect goes to the
+        // shader and the sheet takes that shape, so nothing is cropped and nothing stretched.
+        // (It used to cover-crop every file to one 16:9 box, which of a portrait keeps a
+        // central band — a third of the picture.)
+        (material.uniforms.uPhotoAsp.value as number[])[i] = t.image.width / t.image.height;
+        material.uniforms[`uPhoto${i}`].value = t;
+        (material.uniforms.uPhotoReady.value as number[])[i] = 1;
+        loaded.push(t);
+      });
+    });
+    return () => loaded.forEach((t) => t.dispose());
+  }, [material]);
+
   useFrame((_, delta) => {
     const u = material.uniforms;
     const tw = blobTweak.get();
+    // The plates' look — one documented set of numbers (see plateLook), read through a local so
+    // the whole surface of the thing stays in one place.
+    const pt = PLATE_LOOK;
 
     // clock, turntable and scroll position all come from the shared form clock —
     // the liquid keeps no animation state of its own, so it cannot drift out of
@@ -311,6 +541,14 @@ export function LiquidDna({ reduced }: Props) {
     u.uScale.value = s.scale;
     u.uSpin.value = s.spin;
 
+    // The camera, first: the strip's pitch below is a function of how wide the frame is.
+    const fov = (camera as { fov?: number }).fov ?? 42;
+    const tanHalf = Math.tan((fov * Math.PI) / 180 / 2);
+    const aspect = size.width / size.height;
+    (u.uTanHalf.value as Vector2).set(tanHalf * aspect, tanHalf);
+    (u.uCamPos.value as Vector3).copy(camera.position);
+    (u.uCamRot.value as Matrix3).setFromMatrix4(camera.matrixWorld);
+
     // panel-driven material: colour → tint, roughness, distort/freq → living noise
     colScratch.set(tw.color);
     (u.uHi.value as Vector3).set(colScratch.r, colScratch.g, colScratch.b);
@@ -327,13 +565,95 @@ export function LiquidDna({ reduced }: Props) {
     u.uSpike.value = s.mood.spike;
     const sh = s.mood.shapes;
     (u.uShape.value as Vector4).set(sh.gavel, sh.camera, sh.burger, sh.vase);
-    u.uEnv.value = envMap;
 
-    const fov = (camera as { fov?: number }).fov ?? 42;
-    const tanHalf = Math.tan((fov * Math.PI) / 180 / 2);
-    (u.uTanHalf.value as Vector2).set(tanHalf * (size.width / size.height), tanHalf);
-    (u.uCamPos.value as Vector3).copy(camera.position);
-    (u.uCamRot.value as Matrix3).setFromMatrix4(camera.matrixWorld);
+    // …and the strip. Two numbers out of the clock: how flat the metal is, and where the
+    // strip has slid to.
+    u.uFlat.value = s.mood.flat;
+    u.uCar.value = s.mood.car;
+    // Liquid → cloth happens ONCE, as the ball is rolled out (hence the flatness factor).
+    // It is deliberately NOT undone while a plate crosses the screen: a sheet that
+    // liquefied for the trip, or that picked up an extra ripple on the way, deformed the
+    // photograph exactly when the reader was being handed it. The changeover is a
+    // translation and nothing else — same wave, same shading, moved sideways.
+    //
+    // `cloth` only SCALES that crossing (1 = the section decides), so the dev panel can
+    // pin the sheet to liquid metal without the choreography losing track of where it is.
+    u.uFlag.value = s.mood.flat * pt.cloth;
+    // The hover takes BOTH deformations to zero — the wave's depth and the liquid's lumps —
+    // so what is held under the reader's attention is a clean, still, flat print. Both,
+    // because they are alternatives: cutting only the wave would hand the sheet back to the
+    // liquid term (it is weighted by 1 - uFlag), i.e. swap one deformation for another. And
+    // scaled rather than switched, so it is a transition and not a cut: about a third of a
+    // second, the same ease that brings the colour up (see HOVER_RATE).
+    const calm = 1 - s.mood.hover;
+    u.uFlagAmp.value = pt.flagAmp * calm;
+    u.uWind.value = pt.wind;
+    u.uRelief.value = pt.relief * calm;
+    u.uWarp.value = pt.warp;
+    (u.uPrint.value as Vector3).set(pt.exposure, pt.sheen, pt.gloss);
+    u.uContrast.value = pt.contrast;
+    u.uShade.value = pt.shade;
+    u.uPhotoOn.value = smoothstep(PHOTO_IN, PHOTO_FULL, s.mood.flat);
+    // The wave's clock and the hover's colour. Both come from the shared clock, so the
+    // picture is never coloured by a wind that has not stopped, or the other way round.
+    u.uWave.value = s.wave;
+    u.uColour.value = s.mood.hover * pt.colour;
+    u.uAber.value = pt.aber;
+    u.uShrink.value = pt.shrink;
+    // The hover's step forward, on the shown slot alone (see slotScale). It used to go through
+    // the form's global scale, which grew the whole gallery.
+    u.uGrow.value = PLATE_GROW * s.mood.hover;
+    // The size ceiling. On a laptop the pictures fit with room to spare and this is 1; on a
+    // phone held upright the camera sees barely more world WIDTH than the widest plate, and
+    // without the cap a photograph would run off both sides of the screen. Local units, hence
+    // the division by the choreography's scale.
+    const halfWorld = tanHalf * aspect * camera.position.z;
+    const halfLocal = halfWorld / Math.max(0.01, s.scale);
+    const asp = u.uPhotoAsp.value as number[];
+    let widest = 0;
+    for (let i = 0; i < asp.length; i++) widest = Math.max(widest, PLATE_H * asp[i]);
+    u.uPlateK.value = Math.min(1, (halfLocal * PLATE_FILL) / widest);
+
+    // The strip is PACKED, not pitched: with a width per photograph there is no single spacing
+    // that works, so each plate is laid down beside the one before it — half of mine, a gap,
+    // half of yours. Cumulative, and it has to happen on this side because the shader cannot
+    // turn a position in plate units into a distance without walking the whole strip.
+    //
+    // Packed on the FULL widths, ignoring the gallery's shrink: the neighbours are drawn smaller
+    // but their slots stay where they are, so the layout does not breathe as the strip moves.
+    const slotX = u.uSlotX.value as number[];
+    const k = u.uPlateK.value;
+    for (let i = 0; i < slotX.length; i++) {
+      const halfI = PLATE_H * asp[i] * k;
+      slotX[i] = i === 0 ? 0 : slotX[i - 1] + PLATE_H * asp[i - 1] * k + PLATE_GAP * k + halfI;
+    }
+    // …and where the reader is along it: between two slots, interpolated by the same fraction
+    // the carousel is between them, so a slide covers the real distance rather than a nominal
+    // one. Both numbers come from mood.car, so they cannot disagree.
+    const car = Math.max(0, Math.min(slotX.length - 1, s.mood.car));
+    const i0 = Math.floor(car);
+    const i1 = Math.min(slotX.length - 1, i0 + 1);
+    u.uCarX.value = slotX[i0] + (slotX[i1] - slotX[i0]) * (car - i0);
+    u.uCar.value = car;
+
+    // The notch frame is DOM, and the picture it marks is not — so the picture's on-screen box
+    // has to be published for the CSS to use (see .plate-frame). Written only when it actually
+    // moves: this is a style write on an element above a full-screen WebGL canvas, and doing it
+    // every frame is the compositor stall this codebase has already been bitten by twice.
+    // Measured at the picture's FACE, not at z = 0: the print sits PLATE_T in front of the
+    // plate's centre, which a perspective camera magnifies by about a percent — some 7px, i.e.
+    // a quarter of the notches' stand-off. Enough to see them sit inside the picture's edge.
+    const pxPerWorld = size.height / (2 * tanHalf * (camera.position.z - PLATE_T * s.scale));
+    const shown = Math.round(car);
+    const h = 2 * PLATE_H * k * s.scale * (1 + PLATE_GROW * s.mood.hover) * pxPerWorld;
+    const w = h * asp[Math.max(0, Math.min(asp.length - 1, shown))];
+    if (Math.abs(w - frameBox.current.w) > 0.75 || Math.abs(h - frameBox.current.h) > 0.75) {
+      frameBox.current = { w, h };
+      const root = document.documentElement.style;
+      root.setProperty("--plate-px-w", `${w.toFixed(1)}px`);
+      root.setProperty("--plate-px-h", `${h.toFixed(1)}px`);
+    }
+    u.uEnv.value = envMap;
   });
 
   return <mesh ref={meshRef} frustumCulled={false} renderOrder={999} geometry={geometry} material={material} visible={false} />;

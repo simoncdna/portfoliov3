@@ -34,6 +34,12 @@ export const DOCK_X_AFTER = 3.6;
  * The piece is not alone on that screen: its name sits under it and the four plate
  * numbers under that. What has to look centred is the whole group, which means the
  * piece itself must sit above the middle by half the height of the text below it.
+ *
+ * Halved (from 1.0) when the photograph doubled in size: the lift is a fixed world offset
+ * while the picture now takes most of the screen's height, and at the old value the top of the
+ * plate ran up under the header. The text below is what it always was, so this is no longer
+ * quite half of it — the group is a few px optically low, which is the error nobody can see,
+ * against a picture clipped by the header, which everybody can.
  * The form is drawn by a fixed, viewport-centred canvas, so the lift has to happen
  * here — the DOM cannot move it.
  *
@@ -44,7 +50,7 @@ export const DOCK_X_AFTER = 3.6;
  * height instead of only at the one it was tuned at. Change this, the camera's z or
  * its fov, and --form-lift has to move with it.
  */
-export const DOCK_Y_WORK = 1.0;
+export const DOCK_Y_WORK = 0.7;
 
 /**
  * How much the form grows once it is back in the middle, as a fraction of its

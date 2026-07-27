@@ -28,6 +28,16 @@ import { workPlate, MOOD_REST, SHAPES, type Shape } from "./workPlate";
 export type FormState = FormChoreo & {
   /** the noise field's phase (advanced by Speed) */
   time: number;
+  /**
+   * The plates' wave phase — a SECOND clock, because the wind has to be able to stop while
+   * the metal keeps breathing.
+   *
+   * Pointing at a project's name holds the picture still, and a freeze must not be a jump:
+   * this integrates at a rate that eases to zero (see `hover`), so the crest that was on
+   * screen stays exactly where it is and starts again from there. Scaling a shared clock
+   * inside the shader would rewind the wave to its origin instead, which is a lurch.
+   */
+  wave: number;
   /** turntable angle, radians — signed by the scroll direction */
   spin: number;
   /**
@@ -43,6 +53,38 @@ export type FormState = FormChoreo & {
     spike: number;
     /** one eased amount per bespoke shape, keyed as in SHAPES */
     shapes: Record<Shape, number>;
+    /**
+     * 0 = the resting sphere, 1 = the flat 16:9 plates. The Work section's whole
+     * premise: the metal is rolled out into photographic plate.
+     *
+     * It rises ONCE, on arriving in the section, and falls once on leaving — changing
+     * plate does not touch it, because a plate change is the strip sliding, not the metal
+     * re-forming. Everything that has to agree about how flat the piece is reads this one
+     * number: the shader's field, the turntable's freeze, and the walk to face the
+     * camera. Two of them disagreeing is a plate presenting itself edge-on.
+     */
+    flat: number;
+    /**
+     * Where the section is along the strip of plates, in plate units: 0 = the first
+     * photograph centred, 1.5 = halfway between the second and the third.
+     *
+     * The plates are not four states of one object — they are four sheets a pitch apart
+     * on one strip, and changing plate slides the strip (see formPhoto). So this single
+     * number is the entire changeover: the picture being read leaves one side of the
+     * screen as the next arrives from the other, both of them real at once. Which also
+     * means it cannot be in an inconsistent state — there is no "between two plates"
+     * for it to be wrong about.
+     */
+    car: number;
+    /**
+     * Eased presence of the reader's attention on the shown plate — the project's name
+     * being pointed at (or keyboard-focused).
+     *
+     * ONE number for the whole gesture: the wind stops, the colour arrives, and the picture
+     * steps forward. Three effects off one signal cannot fall out of step with each other,
+     * and the reverse is free — letting go of the name plays all three backwards.
+     */
+    hover: number;
   };
 };
 
@@ -57,32 +99,60 @@ const SCRUB = Math.PI * 3;
 const STILL = 1e-5;
 
 /**
- * How fast the matter answers the cursor. Slower than a UI hover on purpose: this
- * is a mass being reshaped, and a snap would read as a sprite swap rather than as
- * the same metal finding a new form.
+ * How fast the matter answers the cursor, as the fraction of the crossing still to
+ * go after a second. Slower than a UI hover on purpose: this is a mass being
+ * reshaped, and a snap would read as a sprite swap rather than as the same metal
+ * finding a new form.
+ *
+ * 0.40 → 90% of the melt in ~2.5s. It was 0.56 (~4s), which was longer than DWELL:
+ * a reader moving steadily down the band was handed the next plate before the
+ * previous object had finished arriving, so no plate was ever seen fully formed —
+ * the section read as permanently in transit. At 2.5s the metal settles inside the
+ * 1.4s floor plus the time a name takes to be read, and the change still costs
+ * enough to be felt.
  */
-const MOOD_RATE = 0.56;
+const MOOD_RATE = 0.4;
+
+/*
+ * THERE IS NO SWAY. A ±6° rock was tried here as the flat plate's substitute for the
+ * turntable — the reasoning being that a plate held dead still is a poster rather than a
+ * piece of metal in a room — and it was removed: on a perspective camera any tilt at all
+ * projects the picture as a trapezoid, and the section is a gallery of PHOTOGRAPHS. A
+ * photograph hanging square to the wall is not lifeless, it is hung properly. What carries
+ * the dimension instead is an optic, not a rotation — the chromatic split in formPhoto.
+ *
+ * So at full flatness the whole turntable angle resolves to `faced`, an exact multiple of
+ * 2π, and every plate projects as a true rectangle.
+ */
 
 /**
- * The plate changeover's own 360°, as the fraction of it still to go after a second.
- * 0.68 → about 6s to be 90% through the turn: a heavy object being rolled over on a
- * turntable, and heavy is the whole point — the piece should feel like it takes its
- * time to come back round. The melt above is set a little quicker (~4s) so the new
- * object is finished by the time the turn is rather than still arriving, which is
- * what makes the turn read as carrying the change instead of following it.
+ * How fast the strip slides, as the fraction of the crossing still to go after a second.
  *
- * Both used to be far faster (a 0.6s melt, no turn at all) — right when the change
- * was a hover and had to answer the cursor. The scroll is a much slower instrument.
+ * 0.11 → about 90% of a screen-crossing in a second, and settled inside DWELL (the 1.4s
+ * floor a plate is held for in Work.tsx). Quicker than the melt above on purpose: this is
+ * a sheet being pulled past, not matter changing its mind, and an exponential slide reads
+ * as a whoosh that settles — most of the distance early, the last of it drifting in.
  *
- * Exponential, so neither ever quite lands: on a modular rotation the residual is
- * invisible, and it means a change arriving mid-turn extends the same movement rather
- * than restarting it.
+ * Exponential, so a change arriving mid-slide extends the same movement instead of
+ * restarting it: two flicks of the wheel run the strip on rather than stuttering.
  */
-const PLATE_TURN_RATE = 0.68;
+const CAR_RATE = 0.11;
+
+/**
+ * How fast the hover gesture answers, as the fraction still to go after a second.
+ *
+ * 0.05 → about a third of a second. Quicker than anything else in this file, because this
+ * one is answering a cursor rather than a scroll: past roughly half a second the wind is
+ * still drifting to a stop when the reader has already moved on. Slower than a UI hover all
+ * the same — what is being stopped is a mass of moving metal, and it should be felt slowing
+ * down rather than switched off.
+ */
+const HOVER_RATE = 0.05;
 
 const state: FormState = {
   ...formChoreo(0, 0, 0, 0),
   time: 0,
+  wave: 0,
   spin: 0,
   mood: {
     sx: MOOD_REST.stretch[0],
@@ -92,6 +162,9 @@ const state: FormState = {
     freq: MOOD_REST.freq,
     spike: MOOD_REST.spike,
     shapes: { gavel: 0, camera: 0, burger: 0, vase: 0 },
+    flat: 0,
+    car: 0,
+    hover: 0,
   },
 };
 
@@ -118,9 +191,12 @@ let holdOffset = 0;
 // nothing for a moment before the spin picks it up. Ramping the freeze in lets
 // the ambient turn bleed out exactly as the spin builds, with no gap between.
 let holdEased = 0;
-// Eased plate-changeover turn (radians). Chases workPlate.turns × 2π, so a change
-// that lands mid-turn extends the same movement instead of restarting it.
-let plateTurn = 0;
+// The slot the strip is sliding toward. Held here rather than read off workPlate every
+// frame because it must SURVIVE the section releasing the plate (index -1) — see the
+// slide below.
+let carTarget = 0;
+// The face-on angle the flattening plate is walked to (radians) — latched, see below.
+let faced = 0;
 
 export function advanceFormClock(
   delta: number,
@@ -163,6 +239,49 @@ export function advanceFormClock(
     md.shapes[s] += ((m.shape === s ? 1 : 0) - md.shapes[s]) * mr;
   }
 
+  // The plate. It flattens on the same signal that used to start the metal taking a
+  // project's object — the entrance timeline's forming beat, which is what puts a
+  // title on workPlate — so the sequence the reader gets is unchanged in structure:
+  // the sphere crosses the stage and swells, THEN it is rolled out. `index` rather
+  // than `title` because it is the same number the photographs are addressed by, and
+  // two flags for one state can disagree.
+  //
+  // Reduced motion still gets the plate: it is the section's subject, not an effect.
+  // (mr is 1 there, so it simply snaps.)
+  const onPlate = workPlate.index >= 0 ? 1 : 0;
+  md.flat += (onPlate - md.flat) * mr;
+  // …and the top and bottom of the range SNAP. An exponential ease never lands, and here the
+  // last half percent is not cosmetic — it costs twice over:
+  //
+  //  - the field keeps 0.5% of the BLOB's distance mixed into the plates' (see plateField),
+  //    which is nothing at the centre of the screen and more than the marcher's hit threshold
+  //    several units out. That is why the gallery's neighbours were invisible: the rays reached
+  //    them and never registered an impact.
+  //  - the turntable keeps a few milliradians of the angle it was walking away from, and a
+  //    photograph rotated by a few milliradians on a perspective camera is a trapezoid, not a
+  //    picture.
+  //
+  // Half a percent of flatness is invisible; being EXACTLY flat is load-bearing.
+  if (md.flat > 0.995) md.flat = 1;
+  else if (md.flat < 0.005) md.flat = 0;
+
+  // …and where the strip is. The target is only taken while a plate is actually shown:
+  // on the way out of the section (index -1) the strip STAYS where it was left and the
+  // sheet un-flattens in place, rather than sliding back to the first plate behind the
+  // reader's back.
+  // The reader pointing at the name. Only while a plate is actually shown: a hover left
+  // hanging by the section releasing the plate would hold the wind stopped for good.
+  const wantHover = !reduced && workPlate.hover && workPlate.index >= 0 ? 1 : 0;
+  md.hover += (wantHover - md.hover) * (reduced ? 1 : 1 - Math.pow(HOVER_RATE, delta));
+
+  if (workPlate.index >= 0) carTarget = workPlate.index;
+  md.car += (carTarget - md.car) * (reduced ? 1 : 1 - Math.pow(CAR_RATE, delta));
+  // NOTE there is deliberately no "how far between two slots" pulse here any more. It used
+  // to drive an extra ripple and a return to liquid metal during a changeover, and both
+  // deformed the photograph at the one moment the reader is being handed it. The slide is a
+  // translation: the sheet that leaves and the sheet that arrives are the same material,
+  // waving the same way, as they would be on a real strip.
+
   // Scroll direction decides which way the form turns. Scrolling down winds it,
   // scrolling up unwinds it — the idle drift is the same gesture continued, so it
   // has to carry that gesture's sign instead of always turning the same way.
@@ -177,41 +296,77 @@ export function advanceFormClock(
   if (Math.abs(moved) > STILL) dirTarget = Math.sign(moved);
   dir += (dirTarget - dir) * (reduced ? 1 : 1 - Math.pow(0.02, delta));
 
-  // The plate changeover's turn. Reduced motion gets the shape, not the spin.
-  const turnTarget = reduced ? 0 : workPlate.turns * Math.PI * 2;
-  plateTurn += (turnTarget - plateTurn) * (reduced ? 1 : 1 - Math.pow(PLATE_TURN_RATE, delta));
-
   const holdTarget = reduced ? 0 : aboutReveal.hold;
   holdEased += (holdTarget - holdEased) * (reduced ? 1 : 1 - Math.pow(0.1, delta));
 
-  // While the About pin holds, swallow this frame's scroll movement into the
-  // offset so the ambient turntable freezes (the section owns the rotation).
-  // Eased, not binary — see holdEased: a hard freeze here is what made the skull
-  // hitch as the pin engaged.
-  holdOffset += moved * holdEased;
+  // Two things freeze the turntable, and they freeze it the same way, so they are one
+  // number here: the About pin (which owns its own controlled 360°) and the plate
+  // being flat (which cannot be turned at all — a photograph edge-on is a plank).
+  // max(), not a sum: both are "the ambient turn is not yours right now", and stacking
+  // them would take the factor past 1 and spin the form backwards.
+  const frz = Math.max(holdEased, md.flat);
+
+  // While the turn is frozen, swallow this frame's scroll movement into the offset so
+  // the scroll-scrub term stops advancing. Eased on both counts — see holdEased for
+  // the About pin, and md.flat is itself an easing — which is what keeps the freeze
+  // from HITCHING at either edge: the offset starts at 0 and stops growing on release,
+  // so the turntable carries on from where it was left, permanently but invisibly
+  // offset on a modular spin.
+  holdOffset += moved * frz;
 
   Object.assign(state, c);
+  // NOTE the hover's step forward is NOT here. It used to multiply this scale, which is the
+  // whole form's — so pointing at one project's name grew every picture in the gallery,
+  // neighbours included. It belongs to the slot being read, and it is applied there (uGrow in
+  // formPhoto), the same way the colour is.
+  // NOTE the changeover adds nothing to the docks. The plates move because the STRIP
+  // moves under a still camera (md.car, read by the field itself) — not because the form
+  // is thrown around the stage. That is what lets two photographs be on screen at once,
+  // which a single docked object could never do.
   // The living surface flow does NOT reverse: that is the metal breathing, not the
   // form turning, and running it backwards on the way up would read as a glitch.
   // Speed 0 must still freeze it, hence integrating Speed rather than reading a
   // wall clock.
   state.time += delta * tw.speed * TIME_RATE;
-  // `hold` silences the AMBIENT idle turn, not the whole drift: the exit beat's
-  // spinBoost happens while the section is still pinned and is meant to be heard.
+  // The wave's own clock, which the hover brings to a standstill. Integrated (rather than
+  // scaled at read time) so stopping holds the phase instead of rewinding it.
+  state.wave += delta * tw.speed * TIME_RATE * (1 - md.hover);
+  // The freeze silences the AMBIENT idle turn, not the whole drift: the About exit's
+  // spinBoost happens while that section is still pinned and is meant to be heard.
   // (Holding only the scroll-scrub term left the idle turn running through the
   // pinned 360°, which is the "~1.5 turns" the hold exists to prevent — just a
   // smaller share of it, and one that grows the slower you scroll.)
-  const hold = holdEased;
-  drift += delta * dir * (tw.speed * SPIN_RATE * (1 - hold) + c.spinBoost);
+  drift += delta * dir * (tw.speed * SPIN_RATE * (1 - frz) + c.spinBoost);
   // The scrub is a function of scroll POSITION, so it rewinds exactly; the drift
   // carries the direction of the last gesture. `scroll - holdOffset` freezes the
-  // ambient turn during the About pin, and aboutReveal.spin is the single
-  // controlled turn the pinned sequence scrubs in (the skull's 360° once the text
-  // is drawn). Sum = the whole turntable angle, so no representation keeps a
-  // rotation of its own. `plateTurn` is the Work section's equivalent of that
-  // controlled turn: one full revolution per plate change, laid over the melt.
-  state.spin =
-    drift + (scroll - holdOffset) * SCRUB + (reduced ? 0 : aboutReveal.spin) + plateTurn;
+  // ambient turn during the About pin and again while the plate is flat, and
+  // aboutReveal.spin is the single controlled turn the pinned sequence scrubs in (the
+  // skull's 360° once the text is drawn). Sum = the whole turntable angle, so no
+  // representation keeps a rotation of its own.
+  const free = drift + (scroll - holdOffset) * SCRUB + (reduced ? 0 : aboutReveal.spin);
+
+  // Freezing the turntable is not the same as PRESENTING the plate, and the section
+  // needs both: a sheet held at whatever angle the ambient turn happened to be at when
+  // it flattened is a blade, edge-on, and the photograph is invisible. So the whole
+  // angle is walked to a face-on one — a multiple of 2π, not π, since the back of the
+  // plate carries the picture mirrored — and md.flat is the walk.
+  //
+  // FORWARD, never to the nearest. Rounding to the nearest multiple is the naive reading
+  // and it is wrong half the time: whenever the piece has just passed a face-on angle the
+  // shortest way back is BACKWARDS, and what you see is the metal reversing against the
+  // gesture that is driving it. A mass finishes its turn. Hence ceil/floor by the eased
+  // scroll direction — scrolling down completes the revolution, scrolling back up unwinds
+  // it — which is the rule the ambient turntable already follows everywhere else.
+  //
+  // The target is latched before the flattening starts and not recomputed after: `free`
+  // still creeps while the freeze is only partly in (it is eased), and a target
+  // recomputed each frame could cross a boundary and send the piece all the way round for
+  // a rounding difference.
+  if (md.flat < 0.02) {
+    const turns = free / (Math.PI * 2);
+    faced = (dir >= 0 ? Math.ceil(turns) : Math.floor(turns)) * Math.PI * 2;
+  }
+  state.spin = free + (faced - free) * md.flat;
 }
 
 export const formState = (): Readonly<FormState> => state;
