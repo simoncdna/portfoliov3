@@ -11,6 +11,7 @@ import { ChromeSkull } from "./ChromeSkull";
 import { DnaParticles } from "./DnaParticles";
 import { MeshDna } from "./MeshDna";
 import { useStageLoad } from "@/lib/stageLoad";
+import { ENV_FILE } from "@/lib/formField";
 
 const smoothstep = (e0: number, e1: number, x: number) => {
   const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
@@ -94,18 +95,6 @@ function ChromeClean({ intensity = 1.2 }: { intensity?: number }) {
   );
 }
 
-export type HdriPreset =
-  | "apartment"
-  | "city"
-  | "dawn"
-  | "forest"
-  | "lobby"
-  | "night"
-  | "park"
-  | "studio"
-  | "sunset"
-  | "warehouse";
-
 type Vec3 = [number, number, number];
 type Lamp = { intensity: number; color: string; position: Vec3 };
 export type LightsConfig = {
@@ -130,8 +119,6 @@ type Props = Partial<BlobShape> & {
   lights?: LightsConfig;
   /** reflection environment */
   envMode?: "clean" | "studio";
-  /** which drei HDRI preset to reflect (studio mode) */
-  hdriPreset?: HdriPreset;
   /** rotate the HDRI to spin unwanted features out of view (radians) */
   envRotationY?: number;
 };
@@ -140,7 +127,6 @@ export function ChromeCanvas({
   reactToScroll = true,
   lights = DEFAULT_LIGHTS,
   envMode = "studio",
-  hdriPreset = "studio",
   envRotationY = 2.4,
   ...shape
 }: Props) {
@@ -162,13 +148,6 @@ export function ChromeCanvas({
    *  full-screen curtain is over the page: a canvas repainting at full resolution under a
    *  moving full-screen layer starves the compositor — see stageLoad. */
   const load = useStageLoad();
-  /* dpr IS NEVER TOUCHED. Lowering it while the menu's curtain moved was tried, and it worked
-     on paper — it bought enough compositor headroom for the blob to stay live from the first
-     frame of the lift. It also degraded the render a little more on every open, which is what
-     you get for making three.js reallocate its buffers dozens of times in a session. The
-     canvas's dimensions did come back each cycle, so the resolution was not what accumulated;
-     something downstream of the reallocation was. Not worth chasing — the loop pause below
-     solves the same problem and changes no renderer state at all. */
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -279,7 +258,7 @@ export function ChromeCanvas({
           />
           {envMode === "studio" ? (
             <Environment
-              preset={hdriPreset}
+              files={ENV_FILE}
               environmentIntensity={lights.streaks * 2.4}
               environmentRotation={[0, envRotationY, 0]}
             />

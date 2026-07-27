@@ -71,6 +71,14 @@ export default function RootLayout({
       lang="en"
       className={`${display.variable} ${sans.variable} ${mono.variable} ${monoThin.variable} antialiased`}
     >
+      <head>
+        {/* The two assets the chrome form cannot appear without, fetched from the first byte
+            of HTML rather than after hydration + the three.js chunk. Both are read with
+            fetch() (three's FileLoader), hence as="fetch" + crossOrigin to match its request
+            mode — a mismatch and the browser downloads them twice. */}
+        <link rel="preload" href="/env/studio_small_03_1k.hdr" as="fetch" crossOrigin="anonymous" />
+        <link rel="preload" href="/models/skull.glb" as="fetch" crossOrigin="anonymous" />
+      </head>
       <body>
         {/* Off while the plates are being worked on. In dev the session guard is bypassed on
             purpose, so it replays on every reload — four seconds of floor plus the lift, in

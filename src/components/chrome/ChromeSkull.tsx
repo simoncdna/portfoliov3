@@ -17,7 +17,7 @@ import {
 } from "three";
 import type { Mesh } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
-import { SNOISE, FORM_DISPLACE, CHROME_SHADE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
+import { SNOISE, FORM_DISPLACE, CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { formState } from "@/lib/formClock";
 
 type Props = {
@@ -255,12 +255,13 @@ function buildMorphGeometry(src: Mesh): BufferGeometry {
  */
 export function ChromeSkull({ reduced }: Props) {
   const meshRef = useRef<Mesh>(null);
-  const envMap = useEnvironment({ preset: "studio" });
+  const envMap = useEnvironment({ files: ENV_FILE });
   const appear = useRef(0);
   const modeVis = useRef(0);
   const colScratch = useMemo(() => new Color(), []);
 
-  const { scene } = useGLTF(MODEL);
+  // meshopt-compressed glb (EXT_meshopt_compression) — the decoder ships with drei.
+  const { scene } = useGLTF(MODEL, false, true);
   const source = useMemo<Mesh | null>(() => {
     let found: Mesh | null = null;
     scene.traverse((o) => {
@@ -351,4 +352,4 @@ export function ChromeSkull({ reduced }: Props) {
   );
 }
 
-useGLTF.preload(MODEL);
+useGLTF.preload(MODEL, false, true);

@@ -18,7 +18,7 @@ import {
 } from "three";
 import type { Mesh, Texture } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
-import { CHROME_SHADE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
+import { CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { SHAPE_SDF } from "@/lib/formShapes";
 import { PHOTO_SHADE, PLATE_ASP0, PLATE_GAP, PLATE_H, PLATE_SDF, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
@@ -396,7 +396,7 @@ const smoothstep = (e0: number, e1: number, x: number) => {
 
 export function LiquidDna({ reduced }: Props) {
   const { camera, size } = useThree();
-  const envMap = useEnvironment({ preset: "studio" });
+  const envMap = useEnvironment({ files: ENV_FILE });
   const meshRef = useRef<Mesh>(null);
   const appear = useRef(0); // load-in fade (the liquid is the permanent hero form)
   const modeVis = useRef(1); // eased visibility for the "blob" (liquid) form mode

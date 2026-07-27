@@ -48,10 +48,13 @@ export type Work = {
   /**
    * The plate's photograph — what the Work section's matter flattens into.
    *
-   * A plain colour photograph of any aspect: the shader greyscales it, warps it with
-   * the field the metal is made of, and cover-crops it to the plate's 16:9 (see
-   * formPhoto). Order matters here and nowhere else in this file — the shader carries
-   * one texture slot per entry, in this array's order.
+   * A plain colour photograph, in ITS OWN aspect: the plate is cut to the file's shape
+   * rather than the file cropped to the plate's, so nothing is lost and nothing stretched
+   * (see PLATE_H in formPhoto — the four share a height, not a ratio). The shader does the
+   * rest: greyscale, exposure, contrast, and the colour given back on hover.
+   *
+   * Order matters here and nowhere else in this file — the shader carries one texture slot
+   * per entry, in this array's order.
    *
    * Empty string = no photograph, and the plate stays chrome. That is also what is
    * shown while the file is still decoding, so a slow image costs the section
@@ -96,10 +99,7 @@ export const works: Work[] = [
     // row should point somewhere more specific.
     url: "https://www.pictarine.com/",
     summary: "",
-    // TODO(simon): the four files under public/images/work are PLACEHOLDERS — one
-    // photograph, plus a mirror and two crops of it, so the plate parcours can be
-    // judged before the real images exist. Drop the real ones at these paths.
-    image: "/images/work/pictarine.png",
+    image: "/images/work/pictarine.webp",
     languages: [],
     tools: [],
   },
@@ -110,7 +110,7 @@ export const works: Work[] = [
     url: "https://forma.legal/",
     summary:
       "A SaaS platform for legal and accounting professionals — client messaging, document management and activity scheduling in one workspace.",
-    image: "/images/work/forma.png",
+    image: "/images/work/forma.webp",
     languages: ["Next.js", "TypeScript"],
     tools: ["Tailwind", "Zustand", "React-Query", "Zod", "React-Hook-Form", "Figma"],
   },
@@ -121,7 +121,7 @@ export const works: Work[] = [
     url: "https://crazee-burger-ki3o6okfp-simoncdn.vercel.app/",
     summary:
       "An online restaurant ordering dashboard designed to provide a smooth and enjoyable ordering experience.",
-    image: "/images/work/crazee-b.png",
+    image: "/images/work/crazee-b.webp",
     languages: ["React.js"],
     tools: ["Styled-Components", "Firebase", "Jest", "Context", "Figma"],
   },
@@ -132,7 +132,7 @@ export const works: Work[] = [
     url: "https://klay-craft.netlify.app",
     summary:
       "Klay merges the craft of pottery with a modern touch — selling ceramics and opening workshop registration through an accessible online platform.",
-    image: "/images/work/klay.png",
+    image: "/images/work/klay.webp",
     languages: ["Nuxt.js", "TypeScript"],
     tools: ["Tailwind", "Pinia", "Figma"],
   },

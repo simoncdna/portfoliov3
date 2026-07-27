@@ -1,12 +1,11 @@
 "use client";
 
 import { useMemo, useRef } from "react";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import { Box3, BufferGeometry, BufferAttribute, Color, Euler, Matrix3, Matrix4, Quaternion, ShaderMaterial, Vector3, Vector4 } from "three";
 import type { Mesh, Points } from "three";
 import { MeshSurfaceSampler } from "three/examples/jsm/math/MeshSurfaceSampler.js";
-import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import { blobTweak, useBlobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { formState } from "@/lib/formClock";
 import { SHAPE_SDF } from "@/lib/formShapes";
@@ -182,13 +181,9 @@ export function DnaParticles({ reduced }: Props) {
   const N = Math.max(8000, Math.round(particleDetail * 900));
 
   // head model → the particles form a face (sampled on its surface).
-  // facecap.glb ships KTX2-compressed textures → wire up a KTX2 transcoder so
-  // the loader doesn't choke (we only need the geometry, but it parses the file).
-  const gl = useThree((s) => s.gl);
-  const { scene: headScene } = useGLTF("/models/skull.glb", true, true, (loader) => {
-    const ktx2 = new KTX2Loader().setTranscoderPath("/basis/").detectSupport(gl);
-    (loader as unknown as { setKTX2Loader: (k: unknown) => void }).setKTX2Loader(ktx2);
-  });
+  // skull.glb is meshopt-compressed (EXT_meshopt_compression), hence the third flag —
+  // the decoder ships with drei, so nothing external is fetched.
+  const { scene: headScene } = useGLTF("/models/skull.glb", false, true);
   const headMesh = useMemo<Mesh | null>(() => {
     const meshes: Mesh[] = [];
     headScene.traverse((o) => {

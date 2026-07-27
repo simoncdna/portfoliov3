@@ -91,6 +91,10 @@ float formOffset(vec3 pos){
 /** Reflection environment, shared so every representation reflects the same room. */
 export const ENV_INTENSITY = 3.2;
 export const ENV_ROT_Y = 2.4;
+/** Self-hosted copy of drei's "studio" preset (studio_small_03_1k.hdr). The preset
+ *  fetches the same file from a third-party CDN at runtime — the chrome finish used
+ *  to arrive whenever raw.githack felt like answering (~3.8s cold, see Preloader). */
+export const ENV_FILE = "/env/studio_small_03_1k.hdr";
 
 /**
  * The chrome itself: an equirect environment reflection, a fresnel rim and a flat

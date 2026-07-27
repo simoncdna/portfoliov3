@@ -33,7 +33,6 @@ export function HeroChrome() {
 				style={{ width: "100%", height: DIM }}
 				glow={0}
 				envMode="studio"
-				hdriPreset="studio"
 				envRotationY={2.4}
 				geometry="torusKnot"
 				glbUrl="/models/chrome-blob.glb"
