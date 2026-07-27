@@ -5,7 +5,7 @@ import Lenis from "lenis";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { blobTweak, PANEL_CLOSE_MS } from "@/lib/blobTweak";
-import { setPageScroller } from "@/lib/pageScroll";
+import { isPageLocked, setPageScroller } from "@/lib/pageScroll";
 
 // Keys that would scroll the page natively. Lenis governs wheel and touch but not
 // the keyboard, so these are caught by hand while the panel holds the lock.
@@ -86,8 +86,14 @@ export function SmoothScroll({ children }: { children: React.ReactNode }) {
       clearTimeout(startTimer);
       if (open) lenis.stop();
       // Held closed for the reverse-piano retract, THEN the page is handed back —
-      // whether the panel was dismissed by a scroll, the ✕, or the barcode.
-      else startTimer = window.setTimeout(() => lenis.start(), PANEL_CLOSE_MS);
+      // whether the panel was dismissed by a scroll, the ✕, or the barcode. Unless
+      // something else is holding the page: this start is on a 1.2s delay, so the
+      // section menu can perfectly well open inside that window, and handing the scroll
+      // back under an open overlay would let the page slide about behind it.
+      else
+        startTimer = window.setTimeout(() => {
+          if (!isPageLocked()) lenis.start();
+        }, PANEL_CLOSE_MS);
     };
     const unsubscribePanel = blobTweak.subscribe(onPanel);
 

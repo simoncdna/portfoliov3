@@ -10,6 +10,7 @@ import { LiquidDna } from "./LiquidDna";
 import { ChromeSkull } from "./ChromeSkull";
 import { DnaParticles } from "./DnaParticles";
 import { MeshDna } from "./MeshDna";
+import { useStageLoad } from "@/lib/stageLoad";
 
 const smoothstep = (e0: number, e1: number, x: number) => {
   const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
@@ -157,6 +158,17 @@ export function ChromeCanvas({
   const shapeRef = useRef({ flow: 0, distort: 0.3, freq: 0.4 });
   const [reduced, setReduced] = useState(false);
   const [dpr, setDpr] = useState<[number, number]>([1, 1.75]);
+  /** How hard this stage may work right now. The section menu turns it down while its
+   *  full-screen curtain is over the page: a canvas repainting at full resolution under a
+   *  moving full-screen layer starves the compositor — see stageLoad. */
+  const load = useStageLoad();
+  /* dpr IS NEVER TOUCHED. Lowering it while the menu's curtain moved was tried, and it worked
+     on paper — it bought enough compositor headroom for the blob to stay live from the first
+     frame of the lift. It also degraded the render a little more on every open, which is what
+     you get for making three.js reallocate its buffers dozens of times in a session. The
+     canvas's dimensions did come back each cycle, so the resolution was not what accumulated;
+     something downstream of the reallocation was. Not worth chasing — the loop pause below
+     solves the same problem and changes no renderer state at all. */
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -224,6 +236,9 @@ export function ChromeCanvas({
   return (
     <div aria-hidden style={{ width: "100%", height: "100%" }}>
       <Canvas
+        // "never" stops the loop without unmounting anything: the scene, the geometry and
+        // every uniform survive, and drawing resumes from exactly where it stopped.
+        frameloop={load === "paused" ? "never" : "always"}
         dpr={dpr}
         gl={{ antialias: true, alpha: true, toneMappingExposure: 1.15 }}
         camera={{ position: [0, 0, 10], fov: 42 }}

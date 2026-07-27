@@ -33,3 +33,35 @@ export function scrollPageTo(y: number, smooth = true) {
   }
   window.scrollTo({ top: y, behavior: smooth ? "smooth" : "auto" });
 }
+
+/* ---------------------------------------------------------------------------
+ * The modal lock
+ * ------------------------------------------------------------------------- */
+
+let locked = false;
+
+/**
+ * Hold the page still for a modal (the section menu).
+ *
+ * A stopped Lenis swallows wheel and touch and preventDefaults them, so stopping it IS
+ * the lock — no overflow:hidden, and therefore no scrollbar-width reflow of the whole
+ * document behind the overlay. Under prefers-reduced-motion Lenis never starts, so the
+ * fallback has to be the blunt one.
+ *
+ * The flag is readable because SmoothScroll ALSO drives Lenis for the blob panel, on a
+ * delayed start: without a shared source of truth, that timer could land while a menu
+ * is open and hand the page back underneath it. See isPageLocked's caller.
+ */
+export function lockPageScroll(next: boolean) {
+  locked = next;
+  if (lenis) {
+    if (next) lenis.stop();
+    else lenis.start();
+    return;
+  }
+  document.documentElement.style.overflow = next ? "hidden" : "";
+}
+
+export function isPageLocked() {
+  return locked;
+}

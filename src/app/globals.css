@@ -303,6 +303,11 @@ a {
   flex-direction: column;
   align-items: center;
   gap: 112px;
+  /* How far the notches hang outside the frame. Declared HERE, on the group, and not
+     on .plate-frame where the notches live: the call below overrides it on this
+     element, and a declaration further down the tree would win over the inherited
+     one and swallow the whole effect. */
+  --notch-out: 34px;
 }
 
 /* The field the piece stands in. Its size is --plate-frame, on .plate-screen, since
@@ -323,12 +328,22 @@ a {
   width: 11px;
   height: 11px;
   pointer-events: none;
+  /* The offsets are driven by --notch-out, so the four marks travel together. NOT
+     transform: the entrance and the exit already own each notch's transform (they
+     grow it from its own corner), and GSAP writes that inline — a transform here
+     would either be overridden or fight it. Insets are free. */
+  transition:
+    top var(--dur-med) var(--ease-out),
+    right var(--dur-med) var(--ease-out),
+    bottom var(--dur-med) var(--ease-out),
+    left var(--dur-med) var(--ease-out);
 }
 .plate-notch::before,
 .plate-notch::after {
   content: "";
   position: absolute;
   background: var(--steel-2);
+  transition: background-color var(--dur-med) var(--ease-out);
 }
 .plate-notch::before {
   width: 100%;
@@ -343,8 +358,8 @@ a {
    the angle, the way a press marks a sheet. Scaled from the centre they would
    inflate, which reads as a fade with extra steps. */
 .plate-notch--tl {
-  top: -34px;
-  left: -34px;
+  top: calc(var(--notch-out) * -1);
+  left: calc(var(--notch-out) * -1);
   transform-origin: top left;
 }
 .plate-notch--tl::before,
@@ -353,8 +368,8 @@ a {
   left: 0;
 }
 .plate-notch--tr {
-  top: -34px;
-  right: -34px;
+  top: calc(var(--notch-out) * -1);
+  right: calc(var(--notch-out) * -1);
   transform-origin: top right;
 }
 .plate-notch--tr::before,
@@ -363,8 +378,8 @@ a {
   right: 0;
 }
 .plate-notch--bl {
-  bottom: -34px;
-  left: -34px;
+  bottom: calc(var(--notch-out) * -1);
+  left: calc(var(--notch-out) * -1);
   transform-origin: bottom left;
 }
 .plate-notch--bl::before,
@@ -373,8 +388,8 @@ a {
   left: 0;
 }
 .plate-notch--br {
-  bottom: -34px;
-  right: -34px;
+  bottom: calc(var(--notch-out) * -1);
+  right: calc(var(--notch-out) * -1);
   transform-origin: bottom right;
 }
 .plate-notch--br::before,
@@ -392,19 +407,34 @@ a {
   font-size: clamp(2rem, 4.4vw, 3.2rem);
   line-height: 1;
   color: var(--chrome);
-  /* The word is the piece's only label, so it is also the link to the live site:
-     no extra furniture, and nothing visible until it is asked for. */
+  /* The word is the piece's only label, so it is also the link to the live site.
+     No rule under it — the call is the frame closing on the piece, below. */
   text-decoration: none;
 }
 .plate-name a {
   display: inline-block;
-  border-bottom: 1px solid transparent;
-  transition: border-color var(--dur-med) var(--ease-out);
 }
-@media (hover: hover) {
-  .plate-name a:hover {
-    border-bottom-color: var(--steel-2);
-  }
+
+/* The call.
+   Pointing at the name pulls the four notches in on the piece and lights them. The
+   underline it replaces was furniture borrowed from a document; this is the section's
+   own gesture — the corners of a field, tightening on what they mark — and it answers
+   at the OBJECT rather than at the word, which is where the reader is looking.
+   Reaching the notches from the link means going up and back across the tree, hence
+   :has(). It fires the same on keyboard focus, so the outline is not the only thing
+   that says this word leads somewhere.
+   Note the limit: hover does not exist on touch, so on a phone the name still gives
+   no sign of being a link. The numbers below it remain the only tap target that
+   announces itself. */
+.plate-group:has(.plate-name a:hover),
+.plate-group:has(.plate-name a:focus-visible) {
+  --notch-out: 16px;
+}
+.plate-group:has(.plate-name a:hover) .plate-notch::before,
+.plate-group:has(.plate-name a:hover) .plate-notch::after,
+.plate-group:has(.plate-name a:focus-visible) .plate-notch::before,
+.plate-group:has(.plate-name a:focus-visible) .plate-notch::after {
+  background: var(--silver-bright);
 }
 .plate-name a:focus-visible {
   outline: 1px solid var(--silver-bright);
@@ -591,6 +621,559 @@ a {
   .text-glitch {
     animation: none;
   }
+}
+
+/* ============================================================
+   Section menu — the index mark, and the plane it opens
+   ============================================================
+   Behaviour, focus and the scroll lock are in SectionNav.tsx. This is the look.
+
+   Z-ORDER. The veil is 70: over the header (50), UNDER the paper grain (90). The menu is
+   another sheet of the same document, so the grain has to run across it — a full-screen
+   plane that is the one clean surface on the page would read as browser chrome rather
+   than as part of the thing. The trigger is 72 so it stays clickable above its own veil,
+   which is what lets one control both open and close it. The blob's ControlPanel (120)
+   is deliberately left above everything: it is a dev tool, not part of the document.
+
+   THE VEIL IS FULLY OPAQUE. Flat --void, no transparency and no backdrop-filter. Letting
+   the chrome form read through at 94% was the first take: it keeps the page "present"
+   and it wrecks the list, because the blob is a high-contrast specular object that
+   drifts under the type and takes the contrast of individual words with it as it moves.
+   A menu has one job. (A blur instead would be worse again — a full-frame readback over
+   a live WebGL canvas, every frame, against the smooth scroll's budget.) */
+/* NOTE ON THE HANG THIS MENU USED TO CAUSE. Lifting the curtain off the page froze the
+   browser, and the cure is not in this file: the chrome stage is a full-screen WebGL
+   surface repainting every frame, and it cannot be composited under a full-screen layer
+   that is also moving every frame. Its render loop is held still for the duration instead
+   — see src/lib/stagePause.ts for the bisect, the frame counts, and why hiding the layer
+   (the first attempt) made it worse rather than better. */
+
+.nav-toggle {
+  position: fixed;
+  top: 1rem;
+  right: var(--gutter);
+  z-index: 72;
+  /* Level with the header's own py-4, on the margin its content ends on, so the mark
+     reads as the right-hand end of that line rather than as something near it. */
+  display: grid;
+  place-items: center;
+  /* The rules are 26px of ink in a 44px box — the box is the tap target, not the mark.
+     Anything smaller than this fails the 44px minimum and this is the one control on the
+     page a phone reader actually needs. */
+  width: 44px;
+  height: 44px;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+/* The eye — one eyeball, no lid. Geometry is in SectionNav.tsx; this is its size, its
+   colour and its two gestures. 32px of drawing inside the 44px tap target: the box is the
+   target, the mark is the drawing. */
+.nav-eye {
+  display: block;
+  /* 38 of the 44px target rather than 32. The detail — striations, terminator, catchlight —
+     lives or dies in the last few pixels at this scale, and the six px cost nothing: the
+     button's hit area is unchanged, only the ink inside it grew. */
+  width: 38px;
+  height: 38px;
+  /* IT LIGHTS UP AS YOU APPROACH. --eye-lit is written continuously by the pointer tracker:
+     0 at the edge of its reach, 1 on it. Both the presence and the halo are driven from that
+     one number, so the eye comes up gradually across ~80px rather than switching on at an
+     invisible line.
+     Held well back at its floor on purpose — the sphere's colours are fixed tokens now (a
+     white eyeball does not change hue when you point at it), so its response has to be
+     luminance. A cream ball at full strength in the corner of every screen is a bright spot
+     demanding attention, which is exactly what the ornament it replaced was guilty of.
+     The halo is a drop-shadow rather than the page's --glow-silver box-shadow: box-shadow
+     draws on the element's BOX, and the box here is a square around a circle. */
+  opacity: calc(0.6 + 0.4 * var(--eye-lit, 0));
+  filter: drop-shadow(
+    0 0 calc(var(--eye-lit, 0) * 10px)
+      rgba(214, 216, 222, calc(var(--eye-lit, 0) * 0.5))
+  );
+  /* Short: the value already arrives smoothly, one update per frame, so this only has to
+     soften the snap to 0 when the pointer leaves the reach entirely. */
+  transition:
+    opacity 180ms linear,
+    filter 180ms linear;
+  /* Written by the pointer handler. Declared here so every calc above resolves, including
+     before the first pointer event ever fires. */
+  --eye-x: 0;
+  --eye-y: 0;
+  --eye-rot: 0;
+  --eye-lit: 0;
+  /* Saccade defaults — what the idle uses, and what the page loads in before the first tick.
+     Front-loaded on purpose: a saccade IS fast away and decelerating, so --ease-out's shape is
+     the right one here. (A long symmetric in-out was tried, to make the idle "fluid"; it read
+     as a mechanism panning rather than as an eye looking.) The tracker overwrites all three
+     when the pointer arrives. */
+  --gaze-dur: 190ms;
+  --turn-dur: 520ms;
+  --gaze-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The whole ball turning, on top of the iris sliding inside it. Slower than the gaze on
+   purpose: an eye's iris darts and its head follows, so the sphere lagging behind the pupil
+   is what makes the two read as one movement rather than as two properties animating.
+   The lower and outer group both rotate about the same point, 20/20, which is the sphere's
+   centre in the 40-unit box — not the element's, which would swing it off its own axis. */
+.nav-eye-turn {
+  transform: rotate(calc(var(--eye-rot, 0) * 1deg));
+  transform-origin: 20px 20px;
+  transition: transform var(--turn-dur) var(--gaze-ease);
+}
+
+/* The gaze. Transitioned, so the pupil eases toward the pointer instead of tracking it
+   frame for frame — and so returning to centre on leave settles rather than snaps. */
+/* TWO REGIMES, one transition. Following the pointer has to be quick and front-loaded, and
+   idling has to be a slow continuous drift — the same duration cannot do both, so the timing
+   itself is a variable the tracker writes.
+   Defaults here are the IDLE ones, because that is the state the page loads in. */
+.nav-eye-gaze {
+  transform: translate(calc(var(--eye-x) * 1px), calc(var(--eye-y) * 1px));
+  transition: transform var(--gaze-dur) var(--gaze-ease);
+}
+
+/* The pupil dilates when the eye is pointed at. It is the whole gesture: an eyeball has no
+   lid to open, and dilation is the one thing a pupil actually does — so the mark reacts by
+   behaving like what it depicts rather than by lighting up like a button. */
+.nav-eye-pupil {
+  transform-origin: 20px 20px;
+  transition: transform 420ms var(--ease-out);
+}
+
+/* Breathing — the pupil's own slow dilation, always. Together with the idle saccades in
+   SectionNav.tsx this is what makes the eye read as alive rather than as an icon: a sphere with
+   no lid cannot blink, and the two things a real pupil actually does are wander and dilate.
+   On its OWN group so it multiplies with the hover dilation above instead of one transform
+   overwriting the other, and slow and shallow enough (7% over 6.5s) that it is felt rather than
+   watched. Transform-only, so it lives entirely on the compositor. */
+.nav-eye-breath {
+  transform-origin: 20px 20px;
+  animation: nav-eye-breath 6.5s var(--ease-inout) infinite;
+}
+@keyframes nav-eye-breath {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+/* ---- the value structure ----
+   A SOLID pale sphere with shadow on it, not a transparent one. That distinction decided the
+   whole drawing: a translucent wash with light lines through it reads as a wireframe globe —
+   an object you see THROUGH — and no amount of extra opacity fixes that, because the problem
+   is the direction of the ink, not its strength.
+   So the ball is opaque and every mark on it is DARK, which is how an engraving on a pale
+   sphere actually works. It also happens to be what survives 32px: a mass of value carries at
+   small size where a cage of hairlines dissolves.
+   The ramp runs cream → silver-bright → silver → steel-2, offset toward the light. The
+   darkest note is still the pupil and the brightest is still the catchlight, which is the one
+   thing the reference and this have to agree on for it to read as an eye. */
+.nav-eye-s0 {
+  stop-color: var(--chrome);
+}
+.nav-eye-s1 {
+  stop-color: var(--silver-bright);
+}
+.nav-eye-s2 {
+  stop-color: var(--silver);
+}
+.nav-eye-s3 {
+  stop-color: var(--steel-2);
+}
+/* A fifth stop, and the reason the ball stopped reading as a pearl: with the ramp ending at
+   --steel-2 the shadow only existed in the last few percent of the radius, so there was no
+   dark side — just a bright disc with a grey edge. Ending on --steel, and pulling every stop
+   inward (0.34 / 0.62 / 0.86 against 0.4 / 0.74 / 1), gives the falloff somewhere to happen:
+   a real crescent instead of a rim. */
+.nav-eye-s4 {
+  stop-color: var(--steel);
+}
+
+/* All the ink on the ball. */
+.nav-eye-shade {
+  stroke: var(--void);
+}
+.nav-eye-iris {
+  fill: var(--steel);
+}
+/* Lighter than the iris it sits on, so the striations read against it. */
+.nav-eye-stria {
+  stroke: var(--silver);
+}
+.nav-eye-pupil-fill {
+  fill: var(--void);
+}
+.nav-eye-glint {
+  fill: var(--chrome);
+}
+
+/* Brightness is continuous (see --eye-lit above), so being NEAR needs no rule of its own —
+   by the time the pointer is actually on the control, --eye-lit has already reached 1. What
+   hover adds is the one thing proximity should not: the pupil dilating, which is reserved for
+   arrival so that the click target and the attention target stay the same thing. */
+@media (hover: hover) {
+  .nav-toggle:hover .nav-eye {
+    opacity: 1;
+  }
+  .nav-toggle:hover .nav-eye-pupil {
+    transform: scale(1.32);
+  }
+}
+.nav-toggle:focus-visible {
+  box-shadow: none;
+  outline: 1px solid var(--silver-bright);
+  outline-offset: 4px;
+}
+/* Keyboard focus dilates it too, so the ring is not the only thing saying this is a control. */
+.nav-toggle:focus-visible .nav-eye {
+  opacity: 1;
+}
+.nav-toggle:focus-visible .nav-eye-pupil {
+  transform: scale(1.32);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-eye-pupil,
+  .nav-eye-gaze,
+  .nav-eye-turn {
+    transition-duration: 1ms;
+  }
+  /* The saccades already stand down under reduced motion (the tracker never starts); this is
+     the half of the idle life that lives in CSS. */
+  .nav-eye-breath {
+    animation: none;
+  }
+}
+
+/* Open: the mark leaves. It has handed over to the ✕ at top centre, and two controls
+   for the same door — one in the margin, one in the middle — is one too many. Faded
+   rather than removed so the corner does not collapse and reflow under the veil. */
+.nav-toggle[data-open] {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms linear;
+}
+
+.nav-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: var(--void);
+  pointer-events: none;
+  /* It FALLS. The panel lives one full viewport above the screen and comes down over it,
+     rather than fading up in place: a fade is a layer appearing, a drop is an object
+     arriving, and the letters climbing out of it below only make sense if the thing they
+     climb out of got here by moving.
+     --ease-inout, not the page's --ease-out: --ease-out covers almost all of its distance
+     in the first third, which is right for type snapping into place and wrong for a mass
+     this size — it arrives like a dropped shutter. In-out accelerates and settles.
+     Closing, it retracts upward on a delay, so the letters are gone before it leaves. */
+  transform: translateY(-100%);
+  /* THE EXIT. --ease-out, not the --ease-inout the entrance uses, and this is the whole
+     difference between a lift you can see and one you cannot: --ease-inout is
+     cubic-bezier(0.65, 0, 0.35, 1), whose first third covers almost no distance at all —
+     under a pixel of an 861px lift after 300ms, measured. Behind an 140ms delay that made
+     the first third of a second look like nothing happening, and then the curtain was
+     simply gone. --ease-out is front-loaded: it commits immediately, which is what a
+     dismissal owes the click.
+     The whole exit is ~640ms against the entrance's ~1.7s. That asymmetry is deliberate —
+     an entrance is looked at, a dismissal is obeyed. */
+  transition: transform 980ms var(--ease-out);
+  /* Just enough for the letters to get moving first, so they lead the curtain rather than
+     being dragged out by it. */
+  transition-delay: 120ms;
+}
+
+/* THE ENTRANCE keeps --ease-inout: it is a mass falling into place, and it has to
+   accelerate and settle. --ease-out here read as a dropped shutter. */
+.nav-veil[data-open] {
+  transform: translateY(0);
+  transition: transform 620ms var(--ease-inout);
+  transition-delay: 0ms;
+  pointer-events: auto;
+}
+
+/* Top centre, on the plane's own axis rather than in the page's margin — the reader's
+   eye is in the middle of the screen now, so the way out is put where they are looking.
+   Absolute, so it cannot push the list off centre: the list is centred in the VIEWPORT,
+   not in what is left of it. */
+.nav-close {
+  position: absolute;
+  top: clamp(1.5rem, 4vh, 2.75rem);
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--silver-muted);
+  opacity: 0;
+  transition:
+    color var(--dur-med) var(--ease-out),
+    opacity 280ms linear;
+}
+
+/* LAST IN, but only just. The entrance's longest chain ends at 1688ms — 480ms of base delay,
+   plus 160ms for the third row, plus 228ms for the seventh letter of CONTACT, plus its 820ms
+   of travel. (If any of BASE_MS / STAGGER_MS / CHAR_MS in SectionNav.tsx move, this moves with
+   them.)
+   1050ms puts the fade well INSIDE that tail: all three words are already legible and rising,
+   only the last glyphs are still settling, so the ✕ turns up while the list is completing
+   rather than after it. Both earlier stabs left a hole — 1720ms (the true end) a long one,
+   1450ms a short one — and 280ms of fade instead of 420 gets it there without a lingering
+   half-state.
+   The order is still the point: the way out must not be the FIRST thing offered, or it
+   competes with the list for the opening look. It just does not have to be the last either.
+   No delay on the way out — it IS the way out, so it may not be the last to leave. */
+.nav-veil[data-open] .nav-close {
+  opacity: 1;
+  transition-delay: 0ms, 1050ms;
+}
+
+/* The cross itself: drawn from two hairlines rather than set as a glyph, so scale and
+   WEIGHT are independent. A ✕ at this size in Space Mono has a stroke to match, which
+   read as a button; 1px reads as a mark.
+   Note the arms span the box's width and are rotated about its centre, so the cross's
+   apparent width is width/√2 — about 35px at the top of this clamp. */
+.nav-cross {
+  position: relative;
+  display: block;
+  width: clamp(24px, 3.5vw, 34px);
+  height: clamp(24px, 3.5vw, 34px);
+}
+.nav-cross > span {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  margin-top: -0.5px;
+  background: currentColor;
+}
+.nav-cross > span:nth-child(1) {
+  transform: rotate(45deg);
+}
+.nav-cross > span:nth-child(2) {
+  transform: rotate(-45deg);
+}
+.nav-close:hover,
+.nav-close:focus-visible {
+  color: var(--chrome);
+}
+.nav-close:focus-visible {
+  box-shadow: none;
+  outline: 1px solid var(--silver-bright);
+  outline-offset: 2px;
+}
+
+/* Dead centre of the viewport, each row centred on the same axis. The menu is its own
+   plane, not a layer of the document, so it takes the screen's axis rather than the
+   shell's gutter. */
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding-inline: var(--gutter);
+  /* Air. The display face is set tight (0.95 line-height) so the rows would otherwise
+     stack into one block of texture; the gap is what makes three separate destinations
+     out of them. Scales on vh, not rem, because what has to stay constant is the list's
+     proportion of the screen it is centred in. */
+  gap: clamp(1rem, 4.5vh, 3.25rem);
+}
+
+/* The row no longer animates — its LETTERS do, below. All it keeps is colour, which is
+   the hover, and which must not be staggered. */
+.nav-row {
+  display: block;
+  text-decoration: none;
+  color: var(--silver-muted);
+  transition: color var(--dur-med) var(--ease-out);
+}
+
+/* The invisible boundary. Everything below the mask's bottom edge is simply not drawn,
+   so a letter parked under it does not exist yet — which is what makes the entrance read
+   as coming FROM somewhere rather than fading into being. */
+.nav-mask {
+  display: block;
+  overflow: hidden;
+}
+
+/* One element per letter, each on its own delay: the word climbs out left to right and
+   drops back right to left.
+   102%, not 100%: at exactly 100% a subpixel of the glyph survives at the boundary on
+   fractional device ratios, and a row of grey slivers under a menu is worse than no
+   effect at all. The extra 2% is free — it is behind the mask.
+   And NO opacity. A masked reveal that also fades is two reveals fighting: the point is
+   that the letter is whole the entire time and merely hidden. */
+.nav-char {
+  display: inline-block;
+  transform: translateY(102%);
+  /* Slow. A letter this size travels its own full height, and at anything brisk that
+     is a flick — the eye registers the arrival but not the climb. 820ms lets each one
+     be watched, which is the whole point of doing it letter by letter. */
+  transition: transform 820ms var(--ease-out);
+}
+.nav-veil[data-open] .nav-char {
+  transform: translateY(0);
+}
+
+/* Out through the TOP of the mask, the same way the curtain goes, and at half the speed
+   of the entrance. Sent back down below the line they came from, the letters travelled
+   against the curtain and the exit read as two things separating rather than one thing
+   leaving. Must come after the [data-open] rule to win when a re-open lands mid-close. */
+.nav-veil[data-closing] .nav-char {
+  transform: translateY(-102%);
+  transition-duration: 700ms;
+}
+
+.nav-label {
+  display: block;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(3rem, 9.5vw, 8rem);
+  /* Exactly 1, so the mask's bottom edge is a predictable distance below the baseline.
+     Tighter than 1 and the clip box starts eating the caps of a face this tall. */
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+/* No underline. Colour carries hover on its own here: at 128px of a heavy display face
+   the weight of the word IS the affordance, and a 2px rule under a letterform that tall
+   read as a piece of borrowed document furniture — the same reason the plate name lost
+   its own underline. */
+@media (hover: hover) {
+  .nav-row:hover {
+    color: var(--chrome);
+  }
+}
+.nav-row:focus-visible {
+  box-shadow: none;
+  outline: none;
+  color: var(--chrome);
+}
+
+/* Where you already are. Held between the resting grey and the hover cream, so the three
+   states stay distinguishable without a mark: the current section is a fact, the hover is
+   an offer, and they must not look the same. */
+.nav-row[data-here] {
+  color: var(--silver-bright);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-char,
+  .nav-close,
+  .nav-veil {
+    transition-duration: 1ms;
+    transition-delay: 0ms !important;
+  }
+  .nav-char,
+  .nav-veil {
+    transform: none;
+  }
+  /* The panel still has to be OFF screen when closed, and `transform: none` above just
+     took away the only thing putting it there. */
+  .nav-veil:not([data-open]) {
+    transform: translateY(-100%);
+  }
+}
+
+/* ============================================================
+   Mail dust — the address condensing out of grain, in Contact
+   ============================================================
+   Geometry, sampling and the scroll drive are in MailDust.tsx. This is the box it all
+   has to fit in, and the box is the part that must not depend on the canvas.
+
+   THE SIZE IS SET HERE, NOT MEASURED. The component reads its font-size back off this
+   rule rather than fitting the type to the box itself. Space Mono is monospaced at
+   0.6em per character, and the address is broken after the @ (see addressLines), so
+   the longest line is 11 characters — a flat 6.6em — and the only question is what
+   font-size keeps 6.6em inside the shell. 8.6vw does, from ~400px up. Fitting by
+   measurement instead would mean rasterising, reading the width back, and re-
+   rasterising at a corrected size: two extra passes for a number the grid already
+   knows.
+
+   The break is also what lets the type be this big. On one line the address is 12em
+   and the shell caps it around 100px; on two it is 6.6em and the same shell carries
+   ~118px, with a formed silhouette that is a BLOCK rather than a bar — which is the
+   only shape a cloud can plausibly collapse into.
+
+   And because the size is a clamp rather than a measurement, the HEIGHT is 3.7em of a
+   known font-size: the block occupies its final space on the very first paint, before
+   the webfont resolves and long before the cloud is built. Nothing below it moves. A
+   canvas sized from its own content would have shifted the rest of the section twice.
+
+   Most of that 3.7em is CLOUD, not type — two lines of address only need ~2.3em. The
+   rest is the scattered state's room to be a cloud: the canvas clips, so the box is
+   the hard limit on how far the grain can disperse, and a cloud no bigger than the
+   thing it forms reads as a blur of it rather than as a gathering. */
+.dust {
+  display: block;
+  text-decoration: none;
+  font-family: var(--font-mono), monospace;
+  font-size: clamp(1.7rem, 7.6vw, 6.4rem);
+  line-height: 1;
+  color: var(--silver-bright);
+}
+
+.dust-field {
+  position: relative;
+  display: block;
+  height: 3.7em;
+}
+
+/* The chrome form sits in the right half of the viewport through Contact, and the field
+   is a CANVAS — whatever it is given, the cloud disperses into, so a full-shell box puts
+   grain underneath the blob at every scroll position before the address forms. Bounded
+   to the left column instead, which is also the column "LET'S HAVE A CHAT." occupies, so
+   the two read as one stack rather than as two things that happen to be in one section.
+   Only above 900px: below that the form is small and centred, and the address needs the
+   whole width to clear MIN_FONT_PX at all. */
+@media (min-width: 900px) {
+  .dust-field {
+    max-width: 66%;
+  }
+}
+
+/* The address as real type: what a crawler and a screen reader get, what shows with JS
+   off or reduced motion, and what stays on screen below the width where grain reads.
+   It is not a placeholder to be swapped out — it is the base state, and the canvas is
+   the enhancement lying over it. Faded rather than removed so it holds its box. */
+.dust-type {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  /* Mirrors LINE and the flush-left setting in MailDust.tsx — the fallback and the
+     raster have to break, lead and align identically, or the type visibly jumps at the
+     moment the canvas takes over. */
+  line-height: 1.12;
+  transition: opacity 260ms var(--ease-out);
+}
+.dust-type[data-hidden] {
+  opacity: 0;
+}
+
+.dust-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 /* ============================================================
