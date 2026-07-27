@@ -26,10 +26,18 @@ const TICK = 40;
  * word never looked jammed, only progressively typed. The name has to break up
  * completely first; that is what makes it read as brouillage.
  */
-const LEAD = 620;
+const LEAD = 330;
 
 /** Delay between two consecutive letters locking (ms). */
-const LOCK_STEP = 90;
+const LOCK_STEP = 70;
+
+/*
+ * LEAD and LOCK_STEP move WITH Work's DWELL or not at all. The dwell floor exists so
+ * every plate is held until its own name has finished decoding: at 330 + 8 locks of 70
+ * the longest name settles in ~890ms, inside the 900ms dwell. They were 620/90 against a
+ * 1400ms dwell — same invariant, slower room. Speeding one side up without the other
+ * either churns names over each other or holds plates for a decode already done.
+ */
 
 /**
  * A name that scrambles itself when it changes.

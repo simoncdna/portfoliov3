@@ -42,14 +42,15 @@ const N = works.length;
  * arrived: three of the four are portrait, and a 16:9 cover-crop of a portrait keeps a central
  * band, which cut the ceramics in half and emptied the desk.
  *
- * Set so the picture stands about 460px tall on a 1440x860 window, which leaves the name and
- * the four numbers their room underneath — and leaves the neighbours air of their own, which a
- * gallery needs more than a single picture does.
+ * Set so the picture stands about 490px tall on a 1440x860 window, which leaves the name and
+ * the four numbers their room underneath. It took a step up when the neighbours were pushed
+ * out to the screen's edge (see the sliver packing in LiquidDna): the shown plate no longer
+ * shares the stage, so it gets the air the gallery used to spend on them.
  *
  * (World units: multiply by uScale. On screen: 1 world unit = --form-dim / 7.677 px, the
  * camera's visible height at z = 0 — see --form-lift.)
  */
-export const PLATE_H = 3.2;
+export const PLATE_H = 3.4;
 /** Half-thickness. Never scaled with the picture: it is the edge of a print, not part of it. */
 export const PLATE_T = 0.16;
 /**
@@ -57,12 +58,13 @@ export const PLATE_T = 0.16;
  * uPhotoReady), so this only has to be a sane box for the marcher to bound.
  */
 export const PLATE_ASP0 = 16 / 9;
-/**
- * The gap between two pictures on the strip, in local units — a real distance rather than a
- * multiple of a width, since the widths now differ from one project to the next. ~2.6 reads as
- * about 190px of air on a laptop, which is the spacing a gallery hangs at.
+/*
+ * THERE IS NO PLATE_GAP ANY MORE. The strip used to be packed shoulder to shoulder — half a
+ * width, a fixed gap, half a width — which put the neighbours well inside the frame and read
+ * as a carousel. The spacing is now derived from the VIEWPORT (see the sliver packing in
+ * LiquidDna): a neighbour pierces the edge of the screen by ~12% of its own width, whatever
+ * the window or the photograph's aspect, and the shown plate holds the stage alone.
  */
-export const PLATE_GAP = 2.6;
 /**
  * Corner radius — ZERO. A rounded corner has curved normals, and curved normals catch the
  * light differently from the flat face: that is a bevel, and a bevel is the one thing that
@@ -309,7 +311,8 @@ export const PHOTO_SHADE = /* glsl */ `
 ${Array.from({ length: N }, (_, i) => `uniform sampler2D uPhoto${i};`).join("\n")}
 /** 1 once a file has decoded; a slot at 0 is a sheet that simply stays chrome */
 uniform float uPhotoReady[${N}];
-/** 0 = chrome, 1 = print. Lags uFlat: the metal flattens first, the image surfaces after. */
+/** The developer, 0 = chrome, 1 = print — mood.dev from the clock. Strictly AFTER uFlat:
+    the metal settles flat and still, and only then does the image come up (see photoShade). */
 uniform float uPhotoOn;
 /** the print's exposure / sheen / gloss — see photoShade */
 uniform vec3 uPrint;
@@ -403,8 +406,13 @@ ${Array.from({ length: N }, (_, i) => `  if (i == ${i}) return uPhotoReady[${i}]
  *
  * The contrast is applied AFTER the mix, so a coloured picture gets the same curve and the
  * same modelling as the grey one: what changes on hover is the pigment, not the exposure.
+ *
+ * \`dim\` is the EXTINCTION — the neighbours are hung dark (~40% of emulsion) and light up
+ * as the strip carries them in; it scales the emulsion terms and never the gloss, because
+ * a dark print still reflects the room. Continuous at the call site (a function of
+ * |slot − uCar|), so the handoff is a crossing of lights, not a switch.
  */
-vec3 photoShade(vec3 metal, vec3 nLocal, vec3 rgb){
+vec3 photoShade(vec3 metal, vec3 nLocal, vec2 uv, float dim, vec3 rgb){
   float e = dot(metal, vec3(0.3333));
   vec3 tone = clamp((rgb - 0.5) * uContrast + 0.5, 0.0, 1.0);
   // Matte shading from the sheet's own geometry, and the reason it exists: sheen and gloss
@@ -417,7 +425,19 @@ vec3 photoShade(vec3 metal, vec3 nLocal, vec3 rgb){
   // not mirrored: this is what shows the wind without a single highlight.
   float lam = 0.5 + 0.5 * dot(nLocal, normalize(vec3(-0.35, 0.45, 0.82)));
   float lit = mix(1.0, 0.35 + 1.1 * lam, uShade);
-  vec3 print = tone * (uPrint.x * lit + uPrint.y * e) + metal * uPrint.z;
-  return mix(metal, print, uPhotoOn);
+  // The developer. The print does not fade in, it COMES UP: the exposure rises with uPhotoOn
+  // (a tirage darkening in the bath), and the reveal itself is grain-thresholded — the image
+  // exists where the emulsion has turned, holes of chrome where it has not, and the grain
+  // resorbs as the developer finishes. The whole branch is dead once developed: uPhotoOn is
+  // a uniform, so the steady state pays for none of this.
+  float on = uPhotoOn;
+  vec3 print = tone * ((uPrint.x * (0.55 + 0.45 * on)) * lit + uPrint.y * e) * dim
+             + metal * uPrint.z;
+  float show = on;
+  if (on < 0.999) {
+    float g = snoise(vec3(uv * 140.0, uTime * 0.6)) * 0.5 + 0.5;
+    show = smoothstep(g - 0.35, g + 0.35, on * 1.7 - 0.35);
+  }
+  return mix(metal, print, show);
 }
 `;

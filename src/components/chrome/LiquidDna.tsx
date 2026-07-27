@@ -20,7 +20,7 @@ import type { Mesh, Texture } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { SHAPE_SDF } from "@/lib/formShapes";
-import { PHOTO_SHADE, PLATE_ASP0, PLATE_GAP, PLATE_H, PLATE_SDF, PLATE_T } from "@/lib/formPhoto";
+import { PHOTO_SHADE, PLATE_ASP0, PLATE_H, PLATE_SDF, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
 import { formState } from "@/lib/formClock";
 import { works } from "@/data/site";
@@ -340,8 +340,12 @@ void main(){
       // round(uCar), because between two slots the nearer one is the one on show.
       float shown = floor(uCar + 0.5);
       float mine = step(abs(slot - shown), 0.5);
+      // The extinction: neighbours hang dark, and the light CROSSES with the strip — a
+      // continuous function of the carousel, so the plate arriving lights up as it enters
+      // and the one leaving goes out on its way (see photoShade for what dim touches).
+      float dim = mix(0.4, 1.0, 1.0 - min(1.0, abs(slot - uCar)));
       // The local normal is passed on: it is what shades the print (see photoShade).
-      col = photoShade(col, nl, photoTone(slot, uv, uColour * mine));
+      col = photoShade(col, nl, uv, dim, photoTone(slot, uv, uColour * mine));
     }
   }
 
@@ -375,24 +379,36 @@ const PLATE_FILL = 0.92;
  */
 const PLATE_GROW = 0.1;
 
-/**
- * The window, in flatness, over which the picture surfaces on the metal.
- *
- * It opens EARLY — a fifth of the way out of the ball — because the point is that the
- * blob literally becomes the photograph: the image is already on the mass while it is
- * still being rolled out, stretched over whatever shape the field is holding, and it
- * settles as the sheet does. Opening it late instead gives a piece of metal that
- * flattens and then has a picture switched on, which is two events where there should
- * be one. It closes before flatness reaches 1 because that is an exponential ease and
- * never quite lands: a window ending at 1.0 would never fully open.
+/*
+ * THERE IS NO FLATNESS WINDOW FOR THE PICTURE ANY MORE. It used to open at 20% of
+ * flatness — "the blob literally becomes the photograph" — and that was the confusion the
+ * redesign removed: the image surfaced while the matter was still raging, two events on
+ * top of each other, neither readable. The photograph now rises on the clock's own `dev`
+ * (see formClock), which does not start until the plate is EXACTLY flat: the metal
+ * settles, chrome and still, then the print comes up like a tirage in the developer.
  */
-const PHOTO_IN = 0.2;
-const PHOTO_FULL = 0.8;
 
-const smoothstep = (e0: number, e1: number, x: number) => {
-  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
-};
+/**
+ * How hard the roll-out's peak overloads the silhouette: the pulse (flat·(1−flat)·4, see
+ * formClock) multiplies the project's distort and adds thorns at its crest. The burst
+ * spec's grammar, at entrance scale — enough that the mid-roll is a visible unleashing,
+ * shy of the full burst's ×3, which owns the click.
+ */
+const PULSE_DISTORT = 2.0;
+const PULSE_SPIKE = 0.45;
+
+/**
+ * How deep the wave swings while the strip travels (local units, on top of the resting
+ * flagAmp — which is ZERO by tuning, so this is additive or it is nothing). The changeover
+ * keeps its doctrine (a translation, two real sheets on screen); this is its breath.
+ */
+const SLIDE_AMP = 1.9;
+
+/**
+ * How far a neighbour pierces the edge of the screen, as a fraction of its own width.
+ * The sliver is a promise of a next plate, not a preview of it.
+ */
+const PEEK = 0.12;
 
 export function LiquidDna({ reduced }: Props) {
   const { camera, size } = useThree();
@@ -444,7 +460,7 @@ export function LiquidDna({ reduced }: Props) {
         uSlotX: { value: works.map(() => 0) },
         uPhotoAsp: { value: works.map(() => PLATE_ASP0) },
         uPlateK: { value: 1 },
-        uShrink: { value: 0.32 },
+        uShrink: { value: 0.45 },
         uGrow: { value: 0 },
         uFlag: { value: 0 },
         // These mirror PLATE_LOOK: the frame loop overwrites them immediately,
@@ -558,11 +574,13 @@ export function LiquidDna({ reduced }: Props) {
     // BR itself) like the old blob did. 0 in the panel → perfectly smooth.
     u.uDistort.value = tw.distort * DISTORT_MAX;
     u.uFreq.value = tw.freq;
-    // the shown plate → silhouette (eased in the shared clock, see workPlate)
+    // the shown plate → silhouette (eased in the shared clock, see workPlate), overloaded
+    // by the roll-out's peak: the pulse is composed at READ time, never written back into
+    // the mood (whose fields are the next frame's easing base — see formClock).
     (u.uStretch.value as Vector3).set(s.mood.sx, s.mood.sy, s.mood.sz);
-    u.uMoodD.value = s.mood.distort;
+    u.uMoodD.value = s.mood.distort * (1 + PULSE_DISTORT * s.pulse);
     u.uMoodF.value = s.mood.freq;
-    u.uSpike.value = s.mood.spike;
+    u.uSpike.value = s.mood.spike + PULSE_SPIKE * s.pulse;
     const sh = s.mood.shapes;
     (u.uShape.value as Vector4).set(sh.gavel, sh.camera, sh.burger, sh.vase);
 
@@ -586,14 +604,19 @@ export function LiquidDna({ reduced }: Props) {
     // scaled rather than switched, so it is a transition and not a cut: about a third of a
     // second, the same ease that brings the colour up (see HOVER_RATE).
     const calm = 1 - s.mood.hover;
-    u.uFlagAmp.value = pt.flagAmp * calm;
+    // The slide's breath rides on TOP of the resting amplitude (which is zero by tuning):
+    // the wave swings while the strip travels and settles as the plate arrives. Amplitude
+    // and the wave's clock only — never uWind, which multiplies the accumulated phase.
+    u.uFlagAmp.value = (pt.flagAmp + SLIDE_AMP * s.mood.slide) * calm;
     u.uWind.value = pt.wind;
     u.uRelief.value = pt.relief * calm;
     u.uWarp.value = pt.warp;
     (u.uPrint.value as Vector3).set(pt.exposure, pt.sheen, pt.gloss);
     u.uContrast.value = pt.contrast;
     u.uShade.value = pt.shade;
-    u.uPhotoOn.value = smoothstep(PHOTO_IN, PHOTO_FULL, s.mood.flat);
+    // The developer, straight from the clock: it does not start until the plate is
+    // EXACTLY flat, which is the whole three-beat sequence (see formClock's mood.dev).
+    u.uPhotoOn.value = s.mood.dev;
     // The wave's clock and the hover's colour. Both come from the shared clock, so the
     // picture is never coloured by a wind that has not stopped, or the other way round.
     u.uWave.value = s.wave;
@@ -614,18 +637,27 @@ export function LiquidDna({ reduced }: Props) {
     for (let i = 0; i < asp.length; i++) widest = Math.max(widest, PLATE_H * asp[i]);
     u.uPlateK.value = Math.min(1, (halfLocal * PLATE_FILL) / widest);
 
-    // The strip is PACKED, not pitched: with a width per photograph there is no single spacing
-    // that works, so each plate is laid down beside the one before it — half of mine, a gap,
-    // half of yours. Cumulative, and it has to happen on this side because the shader cannot
-    // turn a position in plate units into a distance without walking the whole strip.
+    // The strip is packed IN SLIVERS: each slot sits so that, with its neighbour on show at
+    // the centre of the screen, it pierces the edge by PEEK of its own (shrunk) width —
+    // whatever the window or the photograph's aspect. Derived: a neighbour at distance D
+    // with shrunk half-width hS has its inner edge at D − hS, and the visible part is
+    // halfLocal − (D − hS); wanting that equal to PEEK·2hS gives D = halfLocal + (1 − 2·PEEK)·hS.
+    // max() of the pair's widths, so the wider of two neighbours peeks exactly and the
+    // narrower a touch less — never more. Cumulative, and on this side because the shader
+    // cannot turn a position in plate units into a distance without walking the whole strip.
     //
-    // Packed on the FULL widths, ignoring the gallery's shrink: the neighbours are drawn smaller
-    // but their slots stay where they are, so the layout does not breathe as the strip moves.
+    // The slots do NOT breathe with the carousel: the shrink used here is the resting scale
+    // of a plate one slot out, a constant — same doctrine as before.
     const slotX = u.uSlotX.value as number[];
     const k = u.uPlateK.value;
+    const S = 1 - pt.shrink;
     for (let i = 0; i < slotX.length; i++) {
-      const halfI = PLATE_H * asp[i] * k;
-      slotX[i] = i === 0 ? 0 : slotX[i - 1] + PLATE_H * asp[i - 1] * k + PLATE_GAP * k + halfI;
+      if (i === 0) {
+        slotX[0] = 0;
+        continue;
+      }
+      const hPair = PLATE_H * Math.max(asp[i - 1], asp[i]) * k;
+      slotX[i] = slotX[i - 1] + halfLocal + (1 - 2 * PEEK) * S * hPair;
     }
     // …and where the reader is along it: between two slots, interpolated by the same fraction
     // the carousel is between them, so a slide covers the real distance rather than a nominal

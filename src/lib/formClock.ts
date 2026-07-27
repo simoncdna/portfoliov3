@@ -29,6 +29,17 @@ export type FormState = FormChoreo & {
   /** the noise field's phase (advanced by Speed) */
   time: number;
   /**
+   * The roll-out's PEAK, 0..1 — the entrance's one violent moment.
+   *
+   * Derived from flatness itself: `flat · (1 − flat) · 4`, zero at both ends and 1 at
+   * mid-roll, the same impulse shape the burst spec uses ("a pulse, not a level").
+   * Derived and not integrated, so it cannot drift or be left on: wherever `flat` goes —
+   * forward, backward, snapped by reduced motion — the pulse follows and dies with it.
+   * Composed by the forms at READ time (uMoodD, uSpike); never written back into `mood`,
+   * whose fields are the next frame's easing base — a pulse fed back compounds itself.
+   */
+  pulse: number;
+  /**
    * The plates' wave phase — a SECOND clock, because the wind has to be able to stop while
    * the metal keeps breathing.
    *
@@ -64,6 +75,27 @@ export type FormState = FormChoreo & {
      * camera. Two of them disagreeing is a plate presenting itself edge-on.
      */
     flat: number;
+    /**
+     * The developer, 0..1 — how far the photograph has COME UP on the settled plate.
+     *
+     * The picture used to surface while the metal was still rolling out (a window on
+     * flatness, open from 20%), and that was two events on top of each other: neither the
+     * metamorphosis nor the photograph could be read. This eases toward 1 only once the
+     * plate is EXACTLY flat (the snap in this file makes "exactly" a real state), so the
+     * sequence is: the metal settles, chrome and still — then the print rises out of it,
+     * like a tirage in the developer bath. Global, not per slot: it is the section's
+     * opening moment, and later plates arrive already developed.
+     */
+    dev: number;
+    /**
+     * How fast the strip is travelling, 0..1 — `min(1, |carTarget − car|)`.
+     *
+     * The changeover stays a translation (that doctrine holds — see the note below the
+     * car easing), but it gets a BREATH: the wave's clock runs faster and its amplitude
+     * lifts while this is up, and both settle as the plate arrives. Derived from numbers
+     * the clock already owns, so it cannot disagree with the slide it describes.
+     */
+    slide: number;
     /**
      * Where the section is along the strip of plates, in plate units: 0 = the first
      * photograph centred, 1.5 = halfway between the second and the third.
@@ -139,6 +171,13 @@ const MOOD_RATE = 0.4;
 const CAR_RATE = 0.11;
 
 /**
+ * How fast the print comes up once the plate is flat, as the fraction still to go after
+ * a second. 0.1 → 90% developed in one second: slow enough to be seen rising (it is the
+ * entrance's payoff, not a switch), fast enough that the section is not kept waiting.
+ */
+const DEV_RATE = 0.1;
+
+/**
  * How fast the hover gesture answers, as the fraction still to go after a second.
  *
  * 0.05 → about a third of a second. Quicker than anything else in this file, because this
@@ -154,6 +193,7 @@ const state: FormState = {
   time: 0,
   wave: 0,
   spin: 0,
+  pulse: 0,
   mood: {
     sx: MOOD_REST.stretch[0],
     sy: MOOD_REST.stretch[1],
@@ -163,6 +203,8 @@ const state: FormState = {
     spike: MOOD_REST.spike,
     shapes: { gavel: 0, camera: 0, burger: 0, vase: 0 },
     flat: 0,
+    dev: 0,
+    slide: 0,
     car: 0,
     hover: 0,
   },
@@ -275,6 +317,18 @@ export function advanceFormClock(
   if (md.flat > 0.995) md.flat = 1;
   else if (md.flat < 0.005) md.flat = 0;
 
+  // The roll-out's peak — see the field's doc. Computed AFTER the snap, so a settled
+  // plate is exactly pulse 0 and the branch-dead steady state stays branch-dead.
+  state.pulse = md.flat * (1 - md.flat) * 4;
+
+  // The developer: the print rises only on a plate that is EXACTLY flat and still shown.
+  // Snapped at both ends like flat itself — the shader gates its grain branch on dev
+  // reaching 1, and an exponential ease never lands on its own.
+  const devTarget = md.flat === 1 && workPlate.index >= 0 ? 1 : 0;
+  md.dev += (devTarget - md.dev) * (reduced ? 1 : 1 - Math.pow(DEV_RATE, delta));
+  if (md.dev > 0.995) md.dev = 1;
+  else if (md.dev < 0.005) md.dev = 0;
+
   // …and where the strip is. The target is only taken while a plate is actually shown:
   // on the way out of the section (index -1) the strip STAYS where it was left and the
   // sheet un-flattens in place, rather than sliding back to the first plate behind the
@@ -286,6 +340,9 @@ export function advanceFormClock(
 
   if (workPlate.index >= 0) carTarget = workPlate.index;
   md.car += (carTarget - md.car) * (reduced ? 1 : 1 - Math.pow(CAR_RATE, delta));
+  // How fast the strip is travelling right now — the changeover's breath (see the field's
+  // doc). After the easing, so a snapped car (reduced motion) reads as standing still.
+  md.slide = Math.min(1, Math.abs(carTarget - md.car));
   // NOTE there is deliberately no "how far between two slots" pulse here any more. It used
   // to drive an extra ripple and a return to liquid metal during a changeover, and both
   // deformed the photograph at the one moment the reader is being handed it. The slide is a
@@ -339,8 +396,11 @@ export function advanceFormClock(
   // wall clock.
   state.time += delta * tw.speed * TIME_RATE;
   // The wave's own clock, which the hover brings to a standstill. Integrated (rather than
-  // scaled at read time) so stopping holds the phase instead of rewinding it.
-  state.wave += delta * tw.speed * TIME_RATE * (1 - md.hover);
+  // scaled at read time) so stopping holds the phase instead of rewinding it. The slide
+  // RUNS it: the wind picks up while the strip travels and settles as the plate arrives —
+  // through the clock and never through uWind, which multiplies the accumulated phase and
+  // would jump the whole wave sideways if it moved mid-flight.
+  state.wave += delta * tw.speed * TIME_RATE * (1 - md.hover) * (1 + 1.5 * md.slide);
   // The freeze silences the AMBIENT idle turn, not the whole drift: the About exit's
   // spinBoost happens while that section is still pinned and is meant to be heard.
   // (Holding only the scroll-scrub term left the idle turn running through the

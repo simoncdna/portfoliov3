@@ -71,7 +71,8 @@ export type PlateLook = {
   /**
    * How much smaller the neighbouring projects are drawn, 0..1 — the gallery's only depth cue
    * now that nothing is tilted or deformed. 0 hangs all four at the same size, which reads as a
-   * filmstrip; 0.32 is a picture hung a step further back.
+   * filmstrip; 0.45 leaves a neighbour at 55% of the shown plate — a sliver at the edge of the
+   * screen (see the packing in LiquidDna), clearly subordinate, clearly a next page.
    */
   shrink: number;
 };
@@ -106,6 +107,6 @@ export const PLATE_LOOK: PlateLook = {
   contrast: 1.03,
   colour: 1,
   aber: 0,
-  shrink: 0.32,
+  shrink: 0.45,
 };
 

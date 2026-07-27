@@ -70,7 +70,11 @@ const LAST = works.length - 1;
  * put away while the next section was reading, and the whole four-beat sequence had
  * to fit in whatever scroll was left, which at wheelMultiplier 0.9 is one flick.
  */
-const ENTER = 0.18;
+// 0.12, down from 0.18: the first payoff was too far away. The blob is already centre
+// stage when the band sticks (About's exit walks it there), so a long arrival was scroll
+// spent watching a thing that had already happened — the entrance now gets to the
+// roll-out, its peak and the developer sooner, and the plates get the travel back.
+const ENTER = 0.12;
 const EXIT = 0.22;
 
 /**
@@ -93,11 +97,13 @@ const BEAT = { name: 0.64, picks: 1.2, tail: 0.25 };
  * flowing all the way through it (see formClock — nothing here touches the form's own
  * animation).
  *
- * 1400 ms because that is what the name's brouillage takes to settle (LEAD 620 plus
- * eight locks at 90 — see ScrambleText): every plate is held at least long enough for
- * its own name to finish decoding before the next one starts breaking up.
+ * 900 ms because that is what the name's brouillage takes to settle (LEAD 330 plus
+ * eight locks at 70 — see ScrambleText, where the pairing is documented from its side):
+ * every plate is held at least long enough for its own name to finish decoding before
+ * the next one starts breaking up. It was 1400, and that read as the section not
+ * answering the wheel; the scramble sped up with it, so the invariant holds.
  */
-const DWELL = 1400;
+const DWELL = 900;
 
 export function Work() {
   const ref = useRef<HTMLElement>(null);

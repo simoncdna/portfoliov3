@@ -323,9 +323,11 @@ export function DnaParticles({ reduced }: Props) {
     u.uRough.value = tw.roughness;
     u.uDistort.value = tw.distort * DISTORT_MAX; // fraction of FORM_R, as the liquid
     u.uFreq.value = tw.freq;
-    // the shown plate → the same silhouette the liquid gets (see workPlate)
+    // the shown plate → the same silhouette the liquid gets (see workPlate), including
+    // the roll-out's peak — composed at read time like the liquid does, so a mid-roll
+    // handover between the two forms wears the same overload (2.0 = PULSE_DISTORT there).
     (u.uStretch.value as Vector3).set(s.mood.sx, s.mood.sy, s.mood.sz);
-    u.uMoodD.value = s.mood.distort;
+    u.uMoodD.value = s.mood.distort * (1 + 2.0 * s.pulse);
     u.uMoodF.value = s.mood.freq;
     const sh = s.mood.shapes;
     (u.uShape.value as Vector4).set(sh.gavel, sh.camera, sh.burger, sh.vase);
