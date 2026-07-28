@@ -565,7 +565,15 @@ export function LiquidDna({ reduced }: Props) {
     u.uRough.value = tw.roughness;
     // panel 0..1 → 0..DISTORT_MAX, a fraction of the radius (sdBlob scales it by
     // BR itself) like the old blob did. 0 in the panel → perfectly smooth.
-    u.uDistort.value = tw.distort * DISTORT_MAX;
+    //
+    // THE DEVELOPER CALMS THE METAL. A photograph sampled off a boiling surface reads
+    // as mud — you cannot even see that it IS distorted. So as the image comes up in
+    // the chrome, the living noise settles (to a quarter of itself, not to zero: dead
+    // still would read as a decal, and the residual swim is what says "in the metal"),
+    // and it boils back up between prints, when the metal is bare and allowed to.
+    // Same grammar as the hover stilling the wave — attention quiets the matter.
+    const still = 1 - 0.75 * s.mood.dev;
+    u.uDistort.value = tw.distort * DISTORT_MAX * still;
     u.uFreq.value = tw.freq;
     // the shown plate → silhouette (eased in the shared clock, see workPlate), overloaded
     // by the roll-out's peak: the pulse is composed at READ time, never written back into
@@ -573,7 +581,9 @@ export function LiquidDna({ reduced }: Props) {
     (u.uStretch.value as Vector3).set(s.mood.sx, s.mood.sy, s.mood.sz);
     u.uMoodD.value = s.mood.distort * (1 + PULSE_DISTORT * s.pulse);
     u.uMoodF.value = s.mood.freq;
-    u.uSpike.value = s.mood.spike + PULSE_SPIKE * s.pulse;
+    // Thorns calm with the developer too — a spike through a photograph is a tear, not
+    // a silhouette — but only by half: the project's identity should survive its print.
+    u.uSpike.value = (s.mood.spike + PULSE_SPIKE * s.pulse) * (1 - 0.5 * s.mood.dev);
     const sh = s.mood.shapes;
     (u.uShape.value as Vector4).set(sh.gavel, sh.camera, sh.burger, sh.vase);
 
