@@ -406,9 +406,16 @@ const SLIDE_AMP = 1.9;
 
 /**
  * How far a neighbour pierces the edge of the screen, as a fraction of its own width.
- * The sliver is a promise of a next plate, not a preview of it.
+ *
+ * TWO numbers, blended by the strip's travel (mood.slide): at rest the neighbour is a
+ * sliver — a promise of a next plate, not a preview, and the shown plate holds the stage
+ * alone. While the strip is MOVING the gallery closes ranks: the neighbours step well
+ * into the frame, so what the reader flips through reads as a wall of pictures, and they
+ * withdraw as the strip settles. The layout still never breathes on hover or selection —
+ * only travel moves it, and travel is exactly when a layout is allowed to move.
  */
-const PEEK = 0.12;
+const PEEK_REST = 0.15;
+const PEEK_SLIDE = 0.35;
 
 export function LiquidDna({ reduced }: Props) {
   const { camera, size } = useThree();
@@ -651,13 +658,14 @@ export function LiquidDna({ reduced }: Props) {
     const slotX = u.uSlotX.value as number[];
     const k = u.uPlateK.value;
     const S = 1 - pt.shrink;
+    const peek = PEEK_REST + (PEEK_SLIDE - PEEK_REST) * s.mood.slide;
     for (let i = 0; i < slotX.length; i++) {
       if (i === 0) {
         slotX[0] = 0;
         continue;
       }
       const hPair = PLATE_H * Math.max(asp[i - 1], asp[i]) * k;
-      slotX[i] = slotX[i - 1] + halfLocal + (1 - 2 * PEEK) * S * hPair;
+      slotX[i] = slotX[i - 1] + halfLocal + (1 - 2 * peek) * S * hPair;
     }
     // …and where the reader is along it: between two slots, interpolated by the same fraction
     // the carousel is between them, so a slide covers the real distance rather than a nominal
