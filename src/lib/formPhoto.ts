@@ -62,8 +62,9 @@ export const PLATE_ASP0 = 16 / 9;
  * THERE IS NO PLATE_GAP ANY MORE. The strip used to be packed shoulder to shoulder — half a
  * width, a fixed gap, half a width — which put the neighbours well inside the frame and read
  * as a carousel. The spacing is now derived from the VIEWPORT (see the sliver packing in
- * LiquidDna): a neighbour pierces the edge of the screen by ~12% of its own width, whatever
- * the window or the photograph's aspect, and the shown plate holds the stage alone.
+ * LiquidDna): a neighbour pierces the edge of the screen by a fraction of its own width —
+ * a sliver at rest, stepping well into the frame while the strip travels — whatever the
+ * window or the photograph's aspect. At rest the shown plate holds the stage alone.
  */
 /**
  * Corner radius — ZERO. A rounded corner has curved normals, and curved normals catch the
@@ -425,18 +426,29 @@ vec3 photoShade(vec3 metal, vec3 nLocal, vec2 uv, float dim, vec3 rgb){
   // not mirrored: this is what shows the wind without a single highlight.
   float lam = 0.5 + 0.5 * dot(nLocal, normalize(vec3(-0.35, 0.45, 0.82)));
   float lit = mix(1.0, 0.35 + 1.1 * lam, uShade);
-  // The developer. The print does not fade in, it COMES UP: the exposure rises with uPhotoOn
-  // (a tirage darkening in the bath), and the reveal itself is grain-thresholded — the image
-  // exists where the emulsion has turned, holes of chrome where it has not, and the grain
-  // resorbs as the developer finishes. The whole branch is dead once developed: uPhotoOn is
-  // a uniform, so the steady state pays for none of this.
+  // The developer. The print does not fade in, it COMES UP, and it comes up the way a
+  // print does — BY TONE. In the bath the shadows are the first thing to exist: density
+  // grows where the exposure was strongest, and the highlights are the last to separate
+  // from the paper. So each pixel's threshold is its own luminance (dark = early),
+  // jittered by a photographic grain that crawls while the developer works. The frontier
+  // is tonal, not spatial: the image surfaces as a latent picture gaining density, not as
+  // a wipe or a dissolve. The whole branch is dead once developed — uPhotoOn is a
+  // uniform, so the settled section pays for none of this.
   float on = uPhotoOn;
-  vec3 print = tone * ((uPrint.x * (0.55 + 0.45 * on)) * lit + uPrint.y * e) * dim
-             + metal * uPrint.z;
+  // Density rises with the developer: exposure climbs and the curve steepens — a young
+  // print is thin and foggy, and the contrast is the last thing it earns.
+  vec3 dTone = clamp((tone - 0.5) * (0.75 + 0.25 * on) + 0.5, 0.0, 1.0);
+  // …and the metal's own reflection lies OVER the young emulsion and drains away as the
+  // density comes up: the picture is developed out of the chrome, not pasted over it.
+  float gloss = mix(0.5, uPrint.z, on);
+  vec3 print = dTone * ((uPrint.x * (0.35 + 0.65 * on)) * lit + uPrint.y * e) * dim
+             + metal * gloss;
   float show = on;
   if (on < 0.999) {
-    float g = snoise(vec3(uv * 140.0, uTime * 0.6)) * 0.5 + 0.5;
-    show = smoothstep(g - 0.35, g + 0.35, on * 1.7 - 0.35);
+    float lum = dot(tone, vec3(0.3333));
+    float g = snoise(vec3(uv * 140.0, uTime * 0.6));
+    float th = lum * 0.85 + g * 0.15;
+    show = smoothstep(th, th + 0.22, on * 1.6 - 0.2);
   }
   return mix(metal, print, show);
 }
