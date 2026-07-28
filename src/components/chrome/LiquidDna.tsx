@@ -20,7 +20,7 @@ import type { Mesh, Texture } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { SHAPE_SDF } from "@/lib/formShapes";
-import { PHOTO_SHADE, PLATE_ASP0, PLATE_H, PLATE_SDF, PLATE_T } from "@/lib/formPhoto";
+import { FRAME_W, PHOTO_SHADE, PLATE_ASP0, PLATE_H, PLATE_SDF, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
 import { formState } from "@/lib/formClock";
 import { works } from "@/data/site";
@@ -324,9 +324,12 @@ void main(){
     // always the one in the middle of the screen.
     vec3 q;
     float slot = plateOwner(pl, q);
-    if (photoHas(slot) > 0.5) {
+    // The photograph belongs to the CANVAS — the moulding around it is bare metal, and a
+    // hit outside the canvas's own extents is the frame (or its bevel) and stays chrome.
+    vec3 ch = slotHalf(slot);
+    if (photoHas(slot) > 0.5 && abs(q.x) <= ch.x && abs(q.y) <= ch.y) {
       vec3 nl = dirToLocal(n);
-      vec2 uv = plateUv(q.xy, slotHalf(slot).xy) + nl.xy * uWarp;
+      vec2 uv = plateUv(q.xy, ch.xy) + nl.xy * uWarp;
       // The colour is given to the plate being READ and to no other: the hover answers on the
       // project whose name is under the cursor, and its neighbours stay in black and white.
       // round(uCar), because between two slots the nearer one is the one on show.
@@ -636,7 +639,9 @@ export function LiquidDna({ reduced }: Props) {
     const roomLocal = Math.max(0.5, halfLocal - dockXl);
     const asp = u.uPhotoAsp.value as number[];
     let widest = 0;
-    for (let i = 0; i < asp.length; i++) widest = Math.max(widest, PLATE_H * asp[i]);
+    // + FRAME_W: the moulding stands outside the canvas, and a frame cropped by the
+    // edge of the screen betrays the work it exists to institute.
+    for (let i = 0; i < asp.length; i++) widest = Math.max(widest, PLATE_H * asp[i] + FRAME_W);
     u.uPlateK.value = Math.min(1, (roomLocal * PLATE_FILL) / widest);
 
     // The strip's slots sit a FULL SCREEN apart: the neighbours are entirely off screen
@@ -669,8 +674,11 @@ export function LiquidDna({ reduced }: Props) {
     const pxPerWorld = size.height / (2 * tanHalf * (camera.position.z - PLATE_T * s.scale));
     const shown = Math.round(car);
     const k = u.uPlateK.value;
-    const h = 2 * PLATE_H * k * s.scale * (1 + PLATE_GROW * s.mood.hover) * pxPerWorld;
-    const w = h * asp[Math.max(0, Math.min(asp.length - 1, shown))];
+    // The hit box takes the WHOLE work, moulding included — the frame is part of what
+    // the visitor is pointing at.
+    const fw = 2 * FRAME_W * k * s.scale * pxPerWorld;
+    const h = 2 * PLATE_H * k * s.scale * (1 + PLATE_GROW * s.mood.hover) * pxPerWorld + fw;
+    const w = (h - fw) * asp[Math.max(0, Math.min(asp.length - 1, shown))] + fw;
     // …and where the picture's CENTRE is, horizontally: the piece is docked now, no longer
     // at the middle of the screen, and the DOM's hit link (.plate-hit) has to land on it.
     const cx = s.dockX * pxPerWorld;

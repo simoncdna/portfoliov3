@@ -54,6 +54,14 @@ export const PLATE_H = 3.4;
 /** Half-thickness. Never scaled with the picture: it is the edge of a print, not part of it. */
 export const PLATE_T = 0.16;
 /**
+ * The moulding — the piece is a FRAMED WORK now (see frameRing). Width of the frame on
+ * each side (local units, ~7% of the canvas height: a gallery moulding, not a baroque
+ * one) and its half-thickness, standing proud of the canvas so the picture reads as
+ * recessed behind it.
+ */
+export const FRAME_W = 0.24;
+export const FRAME_T = 0.34;
+/**
  * The aspect a slot uses until its file has decoded. Nothing is drawn on it before then (see
  * uPhotoReady), so this only has to be a sane box for the marcher to bound.
  */
@@ -77,6 +85,8 @@ const PLATE_ROUND = 0.0;
 export const PLATE_SDF = /* glsl */ `
 const float PLATE_H     = ${PLATE_H.toFixed(3)};
 const float PLATE_T     = ${PLATE_T.toFixed(3)};
+const float FRAME_W     = ${FRAME_W.toFixed(3)};
+const float FRAME_T     = ${FRAME_T.toFixed(3)};
 const float PLATE_ASP0  = ${PLATE_ASP0.toFixed(4)};
 const float PLATE_ROUND = ${PLATE_ROUND.toFixed(2)};
 const float PLATE_LAST  = ${(N - 1).toFixed(1)};
@@ -222,7 +232,22 @@ float plateSheet(vec3 q, vec3 h, float relief){
 }
 
 /**
- * One plate's field, at its place on the strip and at its own size.
+ * The MOULDING — the piece is not a print any more, it is a FRAMED WORK, and the frame
+ * is sculpted in the same metal: a rigid rectangular ring standing proud of the canvas
+ * (FRAME_T > PLATE_T), FRAME_W deep on both axes. CSG subtraction (max with the negated
+ * hole) — the hole is cut a touch deeper than the ring is thick so the two faces never
+ * z-fight. The ring gets no wave and no relief: canvases breathe, frames do not, and
+ * that rigidity against the boiling metal inside is what says "exposed work".
+ */
+float frameRing(vec3 q, vec2 h){
+  float outer = plateBox(q, vec3(h.x + FRAME_W, h.y + FRAME_W, FRAME_T));
+  float hole  = plateBox(q, vec3(h.x, h.y, FRAME_T + 0.1));
+  return max(outer, -hole);
+}
+
+/**
+ * One framed work's field, at its place and at its own size: the canvas (with whatever
+ * is being done to it) unioned with its moulding.
  *
  * Dividing the point by the slot's scale and multiplying the result back is what keeps this a
  * true distance field under a uniform scale — the marcher would punch through a plate that was
@@ -230,7 +255,9 @@ float plateSheet(vec3 q, vec3 h, float relief){
  */
 float slotField(vec3 p, float i, float relief){
   float k = slotScale(i);
-  return plateSheet((p - plateSlot(i)) / k, slotHalf(i), relief) * k;
+  vec3 q = (p - plateSlot(i)) / k;
+  vec3 h = slotHalf(i);
+  return min(plateSheet(q, h, relief), frameRing(q, h.xy)) * k;
 }
 
 /**
