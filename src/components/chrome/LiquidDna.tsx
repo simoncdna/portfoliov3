@@ -314,32 +314,26 @@ void main(){
   vec3 n = calcNormal(p);
   vec3 col = chromeShade(n, rd);
 
-  // The photograph, printed on the sheet the march just hit. The only thing done to the
-  // picture itself is a drag along the surface's own tilt (uWarp), which locks it to the
-  // relief the way a wet print is. Nothing else moves it — a plate changing is a
-  // translation, and a photograph being handed to a reader should not be smeared.
+  // THE MIRROR: the photograph lives IN the metal. No plate — the picture is sampled
+  // off the surface's own normals (matcap mapping, in the camera's frame: the camera
+  // is axis-aligned, so world xy IS view xy), which is what makes it swim with the
+  // living noise and turn with the turntable's light: the blob does not display the
+  // photograph, it REFLECTS it. Held to the form's face and fading to bare chrome at
+  // the rim, where the fresnel belongs — the picture floats in the metal, the metal
+  // keeps its edges.
   if (uPhotoOn > 0.002) {
-    vec3 pl = toLocal(p);
-    // Which of the sheets this pixel belongs to — the strip means the answer is not
-    // always the one in the middle of the screen.
-    vec3 q;
-    float slot = plateOwner(pl, q);
+    float slot = floor(uCar + 0.5);
     if (photoHas(slot) > 0.5) {
-      vec3 nl = dirToLocal(n);
-      vec2 uv = plateUv(q.xy, slotHalf(slot).xy) + nl.xy * uWarp;
-      // The colour is given to the plate being READ and to no other: the hover answers on the
-      // project whose name is under the cursor, and its neighbours stay in black and white.
-      // round(uCar), because between two slots the nearer one is the one on show.
-      float shown = floor(uCar + 0.5);
-      float mine = step(abs(slot - shown), 0.5);
-      // The extinction: neighbours hang dark, and the light CROSSES with the strip — a
-      // continuous function of the carousel, so the plate arriving lights up as it enters
-      // and the one leaving goes out on its way (see photoShade for what dim touches).
-      // 0.55, not lower: with a third of each neighbour in the frame they are part of the
-      // composition now, and a picture too dark to read is a hole, not a neighbour.
-      float dim = mix(0.55, 1.0, 1.0 - min(1.0, abs(slot - uCar)));
-      // The local normal is passed on: it is what shades the print (see photoShade).
-      col = photoShade(col, nl, uv, dim, photoTone(slot, uv, uColour * mine));
+      // Cover-fit into the normal's disc: the shorter axis of the photograph maps the
+      // whole ±1 of the normal, the longer is centre-cropped — no stretch either way.
+      float asp = max(0.01, uAspNow);
+      vec2 fit = asp >= 1.0 ? vec2(1.0 / asp, 1.0) : vec2(1.0, asp);
+      vec2 uv = 0.5 + (n.xy * 0.62) * fit;
+      float facing = smoothstep(0.05, 0.55, n.z);
+      // photoShade brings the whole print pipeline with it — the developer's grain,
+      // the exposure coming up, the hover's colour (uColour is already the hover) —
+      // and the facing term keeps the blend inside the face.
+      col = mix(col, photoShade(col, n, uv, 1.0, photoTone(slot, uv, uColour)), facing);
     }
   }
 
@@ -667,10 +661,10 @@ export function LiquidDna({ reduced }: Props) {
     // plate's centre, which a perspective camera magnifies by about a percent — some 7px, i.e.
     // a quarter of the notches' stand-off. Enough to see them sit inside the picture's edge.
     const pxPerWorld = size.height / (2 * tanHalf * (camera.position.z - PLATE_T * s.scale));
-    const shown = Math.round(car);
-    const k = u.uPlateK.value;
-    const h = 2 * PLATE_H * k * s.scale * (1 + PLATE_GROW * s.mood.hover) * pxPerWorld;
-    const w = h * asp[Math.max(0, Math.min(asp.length - 1, shown))];
+    // The hit box covers the BLOB now — the picture lives in the metal, so the link's
+    // rectangle is the form's face: the radius plus the room its lumps breathe in.
+    const h = 2 * FORM_RADIUS * 1.15 * s.scale * pxPerWorld;
+    const w = h;
     // …and where the picture's CENTRE is, horizontally: the piece is docked now, no longer
     // at the middle of the screen, and the DOM's hit link (.plate-hit) has to land on it.
     const cx = s.dockX * pxPerWorld;

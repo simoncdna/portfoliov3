@@ -313,12 +313,13 @@ export function advanceFormClock(
   // Reduced motion still gets the plate: it is the section's subject, not an effect.
   // (mr is 1 there, so it simply snaps.)
   const onPlate = workPlate.index >= 0 ? 1 : 0;
-  // The roll-out is SCRUBBED, not played: workReveal.form is written by the entrance
-  // timeline, so the metamorphosis advances under the reader's hand — each notch of
-  // the wheel rolls the metal further, backing up melts it back. The clock chases the
-  // scrub tightly (FORM_RATE): enough smoothing for the matter to keep its weight,
-  // not enough to lag the gesture.
-  const flatTarget = onPlate * (reduced ? 1 : Math.max(0, Math.min(1, workReveal.form)));
+  // THE MIRROR VARIANT: the metal never becomes a plate. The photograph lives IN the
+  // blob — sampled off its normals, swimming with the living surface (see LiquidDna) —
+  // so flatness stays at zero for the whole section: the turntable keeps turning, the
+  // project's own silhouette (the camera, the gavel, the burger) expresses fully
+  // instead of being rolled flat, and what the entrance scrub drives is the DEVELOPER
+  // below. (The plate variant lives on feat/work-index.)
+  const flatTarget = 0 * onPlate;
   md.flat += (flatTarget - md.flat) * (reduced ? 1 : 1 - Math.pow(FORM_RATE, delta));
   // …and the top and bottom of the range SNAP. An exponential ease never lands, and here the
   // last half percent is not cosmetic — it costs twice over:
@@ -344,15 +345,21 @@ export function advanceFormClock(
   // plate is exactly pulse 0 and the branch-dead steady state stays branch-dead.
   state.pulse = md.flat * (1 - md.flat) * 4;
 
-  // The developer: the print rises only on a plate that is EXACTLY flat, on the RIGHT
-  // slot, with no change pending — and dissolves FAST the moment one is (the melt waits
-  // on it, see above; a leisurely dissolve would be read as the section hesitating).
-  // Snapped at both ends like flat itself — the shader gates its grain branch on dev
-  // reaching 1, and an exponential ease never lands on its own.
-  const devTarget = !changing && md.flat === 1 && workPlate.index >= 0 ? 1 : 0;
-  const dr = reduced ? 1 : 1 - Math.pow(devTarget === 0 ? DEV_DOWN : DEV_RATE, delta);
+  // The developer — the image coming up IN the metal. Its target is the entrance's
+  // SCRUB (workReveal.form): the picture surfaces under the reader's hand, each notch
+  // of the wheel developing it a little further into the chrome, and backing out of
+  // the section dissolves it the same way. A pending change takes the target to zero
+  // FAST (DEV_DOWN — the swap waits on the bare metal, and a leisurely dissolve reads
+  // as hesitation), and the next print develops back toward the scrub, which is 1 for
+  // the whole middle of the section. Snapped at both ends — the shader gates its grain
+  // branch on dev reaching exactly 1, and an exponential ease never lands on its own.
+  const scrub = reduced ? 1 : Math.max(0, Math.min(1, workReveal.form));
+  const devTarget = !changing && workPlate.index >= 0 ? scrub : 0;
+  // DEV_DOWN only for a page turn — scrubbing back out of the section dissolves at the
+  // developer's own pace, the same ease backwards.
+  const dr = reduced ? 1 : 1 - Math.pow(changing ? DEV_DOWN : DEV_RATE, delta);
   md.dev += (devTarget - md.dev) * dr;
-  if (md.dev > 0.995) md.dev = 1;
+  if (md.dev > 0.995 && devTarget === 1) md.dev = 1;
   else if (md.dev < 0.005) md.dev = 0;
 
   // The reader pointing at the name. Only while a plate is actually shown: a hover left
