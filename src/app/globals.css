@@ -459,11 +459,14 @@ a {
   outline: 1px solid var(--silver-bright);
   outline-offset: 6px;
 }
-/* The photograph's hit box — the print itself is WebGL, so its link is this invisible
-   rectangle the renderer keeps sized and placed over it (the --plate-px vars). The
-   affordance is the read gesture the shader answers (colour, stillness, the step
-   forward), plus the cursor; a border here would frame a photograph that already has
-   its own edges. */
+/* The piece's hit box — the image lives in WebGL, so its link is this rectangle the
+   renderer keeps sized and placed over the form (the --plate-px vars). It also CARRIES
+   THE FRAME: the metal has no edges of its own any more (it is a blob wearing a
+   photograph), so the frame is what says "this is a work on display" — an artwork
+   frame in the page's own weights: one bright rule standing off the piece, one steel
+   rule inside it for the mat. Both on pseudo-elements: zero extra DOM, and they arrive
+   and leave with the link. The frame stays perfectly still while the metal boils
+   inside it between two prints, which is the whole statement. */
 .plate-hit {
   position: absolute;
   left: calc(50% + var(--plate-px-cx, 0px));
@@ -472,6 +475,37 @@ a {
   height: var(--plate-px-h, 0px);
   transform: translate(-50%, -50%);
   z-index: 3;
+  animation: plate-frame-in 600ms var(--ease-out) both;
+}
+/* The frame proper — the outer moulding, chrome-quiet. */
+.plate-hit::before {
+  content: "";
+  position: absolute;
+  inset: -30px;
+  border: 1px solid var(--silver-bright);
+  opacity: 0.6;
+  pointer-events: none;
+}
+/* The mat — a steel hairline between the moulding and the piece. */
+.plate-hit::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border: 1px solid var(--steel);
+  pointer-events: none;
+}
+@keyframes plate-frame-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plate-hit {
+    animation: none;
+  }
 }
 .plate-hit:focus-visible {
   outline: 1px solid var(--silver-bright);
