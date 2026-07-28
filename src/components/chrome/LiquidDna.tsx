@@ -9,7 +9,9 @@ import {
   ClampToEdgeWrapping,
   Color,
   DataTexture,
+  LinearFilter,
   Matrix3,
+  RepeatWrapping,
   ShaderMaterial,
   TextureLoader,
   Vector2,
@@ -485,6 +487,9 @@ export function LiquidDna({ reduced }: Props) {
         // placeholder is never SEEN — uPhotoReady gates each slot — it is only there to
         // keep every texture unit legal while the files are in flight.
         ...Object.fromEntries(works.map((_, i) => [`uPhoto${i}`, { value: blank }])),
+        // the frame's carved trim (height map) — see frameRing in formPhoto
+        uOrn: { value: blank },
+        uOrnOn: { value: 0 },
         uEnv: { value: null },
         uEnvInt: { value: ENV_INTENSITY },
         uEnvRot: { value: ENV_ROT_Y },
@@ -507,6 +512,21 @@ export function LiquidDna({ reduced }: Props) {
   useEffect(() => {
     const loader = new TextureLoader();
     const loaded: Texture[] = [];
+    // The frame's carved trim, sampled INSIDE the march loop — so no mips (implicit
+    // derivatives are undefined in non-uniform control flow, and a mip picked from
+    // garbage derivatives is a stripe of the wrong ornament). Repeats along the run,
+    // clamps across the moulding; flipY off because the v mapping in frameRing reads
+    // the file top-to-bottom (egg-and-dart out, beads in).
+    loader.load("/textures/frame-trim.png", (t) => {
+      t.wrapS = RepeatWrapping;
+      t.wrapT = ClampToEdgeWrapping;
+      t.generateMipmaps = false;
+      t.minFilter = LinearFilter;
+      t.flipY = false;
+      material.uniforms.uOrn.value = t;
+      material.uniforms.uOrnOn.value = 1;
+      loaded.push(t);
+    });
     works.forEach((w, i) => {
       if (!w.image) return;
       loader.load(w.image, (t) => {

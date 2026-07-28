@@ -92,6 +92,17 @@ const float PLATE_T     = ${PLATE_T.toFixed(3)};
 const float FRAME_W     = ${FRAME_W.toFixed(3)};
 const float FRAME_T     = ${FRAME_T.toFixed(3)};
 const float LINER_W     = ${LINER_W.toFixed(3)};
+
+/**
+ * The frame's ORNAMENT, as a height map — real drawn carving (egg-and-dart, an
+ * acanthus scroll run, fillet and beads: see public/textures/frame-trim.png, authored
+ * as SVG and rasterised) instead of a sinusoid pretending. Sampled INSIDE the march,
+ * so the texture must carry no mips (implicit derivatives are undefined in a loop —
+ * see the loader in LiquidDna). uOrnOn gates it while the file is in flight; the
+ * procedural run below is the placeholder it replaces.
+ */
+uniform sampler2D uOrn;
+uniform float uOrnOn;
 const float PLATE_ASP0  = ${PLATE_ASP0.toFixed(4)};
 const float PLATE_ROUND = ${PLATE_ROUND.toFixed(2)};
 const float PLATE_LAST  = ${(N - 1).toFixed(1)};
@@ -272,11 +283,22 @@ float frameProfile(vec2 uv){
 float frameRing(vec3 q, vec2 h){
   float r = sdBox2(q.xy, h + LINER_W);
   float d = frameProfile(vec2(r - FRAME_W, q.z));
-  float run = sin((abs(q.x) + abs(q.y)) * 6.5) * 0.45
-            + snoise(vec3(q.x * 2.3, q.y * 2.3, 5.0)) * 0.55;
+  // The drawn carving: t runs ALONG whichever side of the frame this point is on
+  // (the other axis's coordinate), v across the moulding — r spans [0, 2·FRAME_W]
+  // from liner to outer edge, mapped so the trim's inner bead row lands by the
+  // liner and its egg-and-dart on the outside. 0.2 ≈ a scroll cell every 1.25
+  // local units, big enough to read as sculpture rather than as texture.
+  float t = (abs(q.x) - h.x) > (abs(q.y) - h.y) ? q.y : q.x;
+  float carved = texture2D(uOrn, vec2(t * 0.2, 1.0 - clamp(r / (2.0 * FRAME_W), 0.0, 1.0))).r;
+  // …the procedural run stays as the placeholder while the file is in flight.
+  float run = sin((abs(q.x) + abs(q.y)) * 6.5) * 0.225 + 0.5;
+  float relief = mix(run, carved, uOrnOn);
+  // A whisper of noise on top — hand-cut, not machined — and the corner cartouches,
+  // which also cover the t-parameter's seam where the sides meet.
+  relief += snoise(vec3(q.x * 2.3, q.y * 2.3, 5.0)) * 0.06;
   vec2 cc = abs(q.xy) - (h + LINER_W + FRAME_W);
   float cartouche = exp(-dot(cc, cc) * 2.5);
-  d -= (run * 0.5 + 0.5) * 0.09 + cartouche * 0.10;
+  d -= relief * 0.14 + cartouche * 0.10;
   float liner = plateBox(q, vec3(h.x + LINER_W, h.y + LINER_W, PLATE_T * 0.8));
   return min(d, liner);
 }
