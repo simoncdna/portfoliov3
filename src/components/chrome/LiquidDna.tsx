@@ -415,7 +415,7 @@ export function LiquidDna({ reduced }: Props) {
   const colScratch = useMemo(() => new Color(), []);
   /** Last published on-screen box of the shown picture, so the CSS vars are written on change
    *  rather than every frame — see the write at the end of the frame loop. */
-  const frameBox = useRef({ w: 0, h: 0 });
+  const frameBox = useRef({ w: 0, h: 0, cx: 0 });
 
   const { geometry, material } = useMemo(() => {
     const blank = new DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
@@ -454,7 +454,10 @@ export function LiquidDna({ reduced }: Props) {
         uCar: { value: 0 },
         uCarX: { value: 0 },
         uSlotX: { value: works.map(() => 0) },
+        // JS-side store only — the shader reads the EASED uAspNow below; this array is
+        // where the decoded files' true aspects live (see the loader effect).
         uPhotoAsp: { value: works.map(() => PLATE_ASP0) },
+        uAspNow: { value: PLATE_ASP0 },
         uPlateK: { value: 1 },
         uShrink: { value: 0.45 },
         uGrow: { value: 0 },
@@ -651,6 +654,10 @@ export function LiquidDna({ reduced }: Props) {
     const i1 = Math.min(slotX.length - 1, i0 + 1);
     u.uCarX.value = slotX[i0] + (slotX[i1] - slotX[i0]) * (car - i0);
     u.uCar.value = car;
+    // The sheet's proportions GLIDE to the worn photograph's aspect — the swap happens on
+    // bare chrome (dev 0, see formClock), so the glide never stretches a visible print.
+    const aspTarget = asp[Math.max(0, Math.min(asp.length - 1, Math.round(car)))];
+    u.uAspNow.value += (aspTarget - u.uAspNow.value) * (1 - Math.pow(1e-3, delta));
 
     // The notch frame is DOM, and the picture it marks is not — so the picture's on-screen box
     // has to be published for the CSS to use (see .plate-frame). Written only when it actually
@@ -664,11 +671,19 @@ export function LiquidDna({ reduced }: Props) {
     const k = u.uPlateK.value;
     const h = 2 * PLATE_H * k * s.scale * (1 + PLATE_GROW * s.mood.hover) * pxPerWorld;
     const w = h * asp[Math.max(0, Math.min(asp.length - 1, shown))];
-    if (Math.abs(w - frameBox.current.w) > 0.75 || Math.abs(h - frameBox.current.h) > 0.75) {
-      frameBox.current = { w, h };
+    // …and where the picture's CENTRE is, horizontally: the piece is docked now, no longer
+    // at the middle of the screen, and the DOM's hit link (.plate-hit) has to land on it.
+    const cx = s.dockX * pxPerWorld;
+    if (
+      Math.abs(w - frameBox.current.w) > 0.75 ||
+      Math.abs(h - frameBox.current.h) > 0.75 ||
+      Math.abs(cx - frameBox.current.cx) > 0.75
+    ) {
+      frameBox.current = { w, h, cx };
       const root = document.documentElement.style;
       root.setProperty("--plate-px-w", `${w.toFixed(1)}px`);
       root.setProperty("--plate-px-h", `${h.toFixed(1)}px`);
+      root.setProperty("--plate-px-cx", `${cx.toFixed(1)}px`);
     }
     u.uEnv.value = envMap;
   });

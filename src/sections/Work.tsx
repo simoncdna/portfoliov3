@@ -69,11 +69,11 @@ const LAST = works.length - 1;
  * put away while the next section was reading, and the whole four-beat sequence had
  * to fit in whatever scroll was left, which at wheelMultiplier 0.9 is one flick.
  */
-// 0.12, down from 0.18: the first payoff was too far away. The blob is already centre
-// stage when the band sticks (About's exit walks it there), so a long arrival was scroll
-// spent watching a thing that had already happened — the entrance now gets to the
-// roll-out, its peak and the developer sooner, and the plates get the travel back.
-const ENTER = 0.12;
+// 0.14: enough road for the SCRUBBED roll-out (the metamorphosis advances with the
+// wheel now — see workReveal.form — and needs scroll to advance over), while keeping
+// the first payoff close: at 0.18 the entrance was scroll spent watching an arrival
+// that had already happened.
+const ENTER = 0.14;
 const EXIT = 0.22;
 
 /**
@@ -245,10 +245,21 @@ export function Work() {
           invalidateOnRefresh: true,
         },
       });
+      workReveal.form = 0;
       inTl
         // The index arrives as one gesture: rows top to bottom, a beat apart — the
-        // sommaire being typed out while the metal is rolled into the first picture.
+        // sommaire being typed out while the metal starts to roll out beside it.
         .to(rows, { autoAlpha: 1, ease: "sine.out", duration: 0.5, stagger: 0.09 }, BEAT.name)
+        // The metamorphosis itself, SCRUBBED: form is what the sheet's flatness chases
+        // (see formClock), so the roll-out advances under the reader's hand — each
+        // notch of the wheel rolls the metal further, and backing up melts it back.
+        // ease: none — the scroll IS the curve; the clock adds the matter's own weight.
+        .fromTo(
+          workReveal,
+          { form: 0 },
+          { form: 1, ease: "none", duration: 1.4, immediateRender: false },
+          BEAT.name
+        )
         // A tail so the last beat does not land on the very edge of the range, where
         // a scrub of one pixel would finish it.
         .to({}, { duration: BEAT.tail });
@@ -362,6 +373,8 @@ export function Work() {
     { scope: ref, dependencies: [present, walk] }
   );
 
+  const current = works[plate];
+
   return (
     <section
       ref={ref}
@@ -382,41 +395,51 @@ export function Work() {
             plate (the picks' old contract), and hovering the LIT row answers on the
             picture — colour, stillness, the step forward. */}
         <div className="plate-index" role="group" aria-label="Projects">
-          {works.map((w, i) => {
-            const meta = [...w.languages, ...w.tools.slice(0, 2)].join(" · ");
-            return (
-              <button
-                data-row
-                key={w.title}
-                type="button"
-                className="plate-row"
-                onClick={() => go(i)}
-                aria-current={formed && i === plate ? "true" : "false"}
-                aria-label={`Plate ${w.index} — ${w.title}`}
-                // The hover gesture belongs to the plate being READ: pointing at its
-                // name holds the picture still, colours it, steps it forward (the eased
-                // gesture lives in the form clock; this only reports the fact). Focus
-                // too, so a keyboard is told the same thing.
-                onPointerEnter={() => {
-                  if (i === plate) workPlate.hover = true;
-                }}
-                onPointerLeave={() => {
-                  workPlate.hover = false;
-                }}
-                onFocus={() => {
-                  if (i === plate) workPlate.hover = true;
-                }}
-                onBlur={() => {
-                  workPlate.hover = false;
-                }}
-              >
-                <span className="plate-row-no">N°{w.index}</span>
-                <span className="font-display plate-row-name">{w.title.toUpperCase()}</span>
-                {meta && <span className="plate-row-meta">{meta}</span>}
-              </button>
-            );
-          })}
+          {works.map((w, i) => (
+            <button
+              data-row
+              key={w.title}
+              type="button"
+              className="plate-row"
+              onClick={() => go(i)}
+              aria-current={formed && i === plate ? "true" : "false"}
+              aria-label={`Plate ${w.index} — ${w.title}`}
+            >
+              {/* Three digits and a full stop — the page's own way of numbering things
+                  (the barcode's register): an identification number, not a rank. */}
+              <span className="plate-row-no">{String(i + 1).padStart(3, "0")}.</span>
+              <span className="font-display plate-row-name">{w.title.toUpperCase()}</span>
+            </button>
+          ))}
         </div>
+
+        {/* The photograph is the link now — the print is drawn by the fixed stage, so
+            this is its DOM hit box, sized and placed each frame by the renderer (the
+            --plate-px vars, see LiquidDna): only the shader knows what shape and where
+            the current picture is. Hovering it is the read gesture — the picture takes
+            its colour, holds still, steps forward — and clicking it opens the live
+            site: the affordance sits ON the proof, not on the name that summons it. */}
+        {formed && (
+          <a
+            className="plate-hit"
+            href={current.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`${current.title} — open the live site in a new tab`}
+            onPointerEnter={() => {
+              workPlate.hover = true;
+            }}
+            onPointerLeave={() => {
+              workPlate.hover = false;
+            }}
+            onFocus={() => {
+              workPlate.hover = true;
+            }}
+            onBlur={() => {
+              workPlate.hover = false;
+            }}
+          />
+        )}
       </div>
     </section>
   );

@@ -16,5 +16,12 @@
  *
  * A plain mutable singleton, like aboutReveal: read every frame by the form clock,
  * written by the scrubbed timeline.
+ *
+ * `form` (0..1) is the ENTRANCE's counterpart: how far the blob has been rolled out
+ * into the plate, scrubbed by the entrance timeline. Scrubbed and not time-played,
+ * because the metamorphosis is the section's opening spectacle and a spectacle should
+ * advance under the reader's hand — each notch of the wheel rolls the metal a little
+ * further, backing up melts it back. The clock chases this with a tight ease (see
+ * formClock), so the matter keeps its weight without lagging the gesture.
  */
-export const workReveal = { away: 0 };
+export const workReveal = { away: 0, form: 0 };

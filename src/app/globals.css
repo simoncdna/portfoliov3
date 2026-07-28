@@ -455,22 +455,27 @@ a {
     color: var(--chrome);
   }
 }
-/* The lit row's metadata, in mono — unfolded only for the project being read, the way
-   the colour is only given to the picture being read. */
-.plate-row-meta {
-  font-family: var(--font-mono), monospace;
-  font-size: 0.64rem;
-  letter-spacing: 0.14em;
-  color: var(--silver-bright);
-  opacity: 0;
-  transition: opacity 240ms linear;
-}
-.plate-row[aria-current="true"] .plate-row-meta {
-  opacity: 1;
-}
 .plate-row:focus-visible {
   outline: 1px solid var(--silver-bright);
   outline-offset: 6px;
+}
+/* The photograph's hit box — the print itself is WebGL, so its link is this invisible
+   rectangle the renderer keeps sized and placed over it (the --plate-px vars). The
+   affordance is the read gesture the shader answers (colour, stillness, the step
+   forward), plus the cursor; a border here would frame a photograph that already has
+   its own edges. */
+.plate-hit {
+  position: absolute;
+  left: calc(50% + var(--plate-px-cx, 0px));
+  top: 50%;
+  width: var(--plate-px-w, 0px);
+  height: var(--plate-px-h, 0px);
+  transform: translate(-50%, -50%);
+  z-index: 3;
+}
+.plate-hit:focus-visible {
+  outline: 1px solid var(--silver-bright);
+  outline-offset: 8px;
 }
 
 /* The group hangs BELOW the frame, so on a short window it is the numbers that run

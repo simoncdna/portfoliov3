@@ -91,8 +91,13 @@ uniform float uCar;
 uniform float uCarX;
 /** Each slot's place along the strip, local units — packed on the JS side from the widths. */
 uniform float uSlotX[${N}];
-/** Each photograph's aspect (w/h); PLATE_ASP0 until its file has landed. */
-uniform float uPhotoAsp[${N}];
+/**
+ * The aspect the ONE sheet currently wears (w/h) — eased on the JS side toward the worn
+ * slot's photograph, so a page turn is the bare metal GLIDING from one proportion to the
+ * next rather than a rectangle snapping. Always read while the print is dissolved (the
+ * swap waits on dev = 0), so the glide never stretches a visible picture.
+ */
+uniform float uAspNow;
 /** 0 = the sheet is liquid metal, 1 = it is cloth in the wind. See plateSheet. */
 uniform float uFlag;
 /**
@@ -136,24 +141,18 @@ uniform float uWind;
  */
 uniform float uWave;
 
-/** Slot i's photograph aspect. A literal index per branch, which GLSL ES wants of uniform
-    arrays; the chain is generated, so adding a project cannot leave it behind. */
-float slotAsp(float slot){
-  int i = int(slot + 0.5);
-${Array.from({ length: N }, (_, i) => `  if (i == ${i}) return uPhotoAsp[${i}];`).join("\n")}
-  return PLATE_ASP0;
-}
-/** …and its place along the strip. */
+/** Slot i's place along the strip. */
 float slotX(float slot){
   int i = int(slot + 0.5);
 ${Array.from({ length: N }, (_, i) => `  if (i == ${i}) return uSlotX[${i}];`).join("\n")}
   return 0.0;
 }
 
-/** Slot i's outer half-extents: the shared height, its own width, the same thickness. */
+/** The sheet's outer half-extents: the shared height, the worn aspect's width (eased,
+    see uAspNow), the same thickness. Still takes the slot for signature stability. */
 vec3 slotHalf(float i){
   float h = PLATE_H * uPlateK;
-  return vec3(h * slotAsp(i), h, PLATE_T);
+  return vec3(h * uAspNow, h, PLATE_T);
 }
 /** Slot i's size: smaller the further it is from the one on show, and larger if it IS the one
     on show and the reader is pointing at its name. Clamped at one slot out, so the fourth

@@ -161,26 +161,18 @@ const DEV_RATE = 0.1;
 
 /**
  * …and how fast it dissolves when a change asks for the metal back — near-instant on the
- * ease scale (gone in about a quarter second), because the melt WAITS on it: every
- * millisecond of leisurely dissolve is a millisecond the change reads as hesitation.
+ * ease scale (gone in about a quarter second), because the swap WAITS on it: every
+ * millisecond of leisurely dissolve is a millisecond the page turn reads as hesitation.
  */
 const DEV_DOWN = 2e-7;
 
 /**
- * The flatness the sheet remelts to for a plate change — the bottom of the dip, where
- * the slot is swapped. Deep enough that no rectangle survives to show its proportions
- * changing (the pulse peaks near here: flat·(1−flat)·4 ≈ 1), shy of a full return to
- * the blob, which would read as the section restarting rather than the piece turning
- * a page.
+ * How tightly the sheet's flatness chases the entrance's scrub (workReveal.form), as
+ * the fraction still to go after a second. Tight — the scrub IS the animation and a
+ * lag here is a laggy wheel — but not a hard copy: the smoothing is what keeps the
+ * metamorphosis reading as matter with weight rather than as a slider.
  */
-const MELT_FLAT = 0.45;
-
-/**
- * The dip-and-reform rate, as the fraction still to go after a second. Its own number
- * because the mood's ease (MOOD_RATE) is tuned for silhouettes melting over seconds,
- * and a page turn has to fit inside the dwell: ~0.3s down, ~0.5s back up.
- */
-const SWAP_RATE = 1e-4;
+const FORM_RATE = 0.002;
 
 /**
  * How fast the hover gesture answers, as the fraction still to go after a second.
@@ -244,9 +236,6 @@ let holdEased = 0;
 // slot, and hands it back on the way up. Only the swap (at the bottom of the melt)
 // and reduced motion may write it.
 let shownSlot = 0;
-// True from the swap until the sheet is exactly flat again — it keeps the reform on
-// the swap's own fast rate (see SWAP_RATE) once `changing` has gone false.
-let reforming = false;
 // The face-on angle the flattening plate is walked to (radians) — latched, see below.
 let faced = 0;
 
@@ -301,14 +290,14 @@ export function advanceFormClock(
     md.shapes[s] += ((m.shape === s ? 1 : 0) - md.shapes[s]) * mr;
   }
 
-  // THE CHANGE IS MATERIAL, NOT LATERAL. With the index as the selector and the
-  // neighbours off screen, a photograph flying out sideways said nothing — so the
-  // strip's travel is dead, and changing plate happens ON the docked piece: the print
-  // dissolves back into chrome, the sheet remelts toward MELT_FLAT (the roll-out's
-  // pulse fires by itself — it is derived from flatness), the slot is swapped at the
-  // bottom of the melt where no rectangle is left to see its proportions change, and
-  // the metal reforms carrying the next photograph, which develops. One piece of
-  // metal; four prints developed on it in turn.
+  // THE CHANGE IS A NEW PRINT ON THE SAME SHEET. With the index as the selector and
+  // the neighbours off screen, a photograph flying out sideways said nothing — and a
+  // return to the blob between prints said too much (it was tried: the melt made every
+  // page turn a re-forming, when it is only a page turn). So the sheet stays flat and
+  // docked, and changing plate is the print's own cycle: the picture dissolves back
+  // into chrome, the slot is swapped on the bare metal (the plate's width glides to
+  // the new photograph's aspect meanwhile — see uAspNow in LiquidDna), and the next
+  // print develops. The blob is for arriving and leaving; the prints turn on their own.
   const want = workPlate.index >= 0 ? workPlate.index : shownSlot;
   const changing = want !== shownSlot;
   // Reduced motion: the slot just changes, and plate and print snap with it.
@@ -324,18 +313,13 @@ export function advanceFormClock(
   // Reduced motion still gets the plate: it is the section's subject, not an effect.
   // (mr is 1 there, so it simply snaps.)
   const onPlate = workPlate.index >= 0 ? 1 : 0;
-  // The melt only starts once the print has DISSOLVED: remelting a sheet that still
-  // carries its photograph would deform the picture, the one thing this section never
-  // does. Order on the way in is the mirror: reform fully, then develop.
-  const dissolved = md.dev < 0.02;
-  const flatTarget = changing && dissolved && !reduced ? onPlate * MELT_FLAT : onPlate;
-  // The dip and the reform run on their own rate: the mood's ease is tuned for
-  // silhouettes melting into one another over seconds, and a plate change has to
-  // answer inside the dwell. The ENTRANCE keeps the slow ease — it comes up from the
-  // blob, not from a swap, and its slowness is the point.
-  const swapping = (changing && dissolved) || reforming;
-  const fr = swapping && !reduced ? 1 - Math.pow(SWAP_RATE, delta) : mr;
-  md.flat += (flatTarget - md.flat) * fr;
+  // The roll-out is SCRUBBED, not played: workReveal.form is written by the entrance
+  // timeline, so the metamorphosis advances under the reader's hand — each notch of
+  // the wheel rolls the metal further, backing up melts it back. The clock chases the
+  // scrub tightly (FORM_RATE): enough smoothing for the matter to keep its weight,
+  // not enough to lag the gesture.
+  const flatTarget = onPlate * (reduced ? 1 : Math.max(0, Math.min(1, workReveal.form)));
+  md.flat += (flatTarget - md.flat) * (reduced ? 1 : 1 - Math.pow(FORM_RATE, delta));
   // …and the top and bottom of the range SNAP. An exponential ease never lands, and here the
   // last half percent is not cosmetic — it costs twice over:
   //
@@ -351,13 +335,10 @@ export function advanceFormClock(
   if (md.flat > 0.995) md.flat = 1;
   else if (md.flat < 0.005) md.flat = 0;
 
-  // The swap, at the bottom of the melt: mostly blob here, no readable rectangle, so
-  // the plate's proportions change with nothing on screen to see the cut.
-  if (changing && dissolved && !reduced && md.flat <= MELT_FLAT + 0.03) {
-    shownSlot = want;
-    reforming = true;
-  }
-  if (md.flat === 1) reforming = false;
+  // The swap, on the bare metal: the print has fully dissolved (dev snaps to exactly
+  // 0), so the slot — which addresses the photograph — changes with nothing on the
+  // sheet to see it. The plate's own proportions glide separately (uAspNow).
+  if (changing && !reduced && md.dev === 0) shownSlot = want;
 
   // The roll-out's peak — see the field's doc. Computed AFTER the snap, so a settled
   // plate is exactly pulse 0 and the branch-dead steady state stays branch-dead.
