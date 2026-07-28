@@ -263,21 +263,13 @@ void main(){
   float t = 0.0, tMax = -1.0;
   span(vec3(uDock, 0.0), bRad, ro, rd, t, tMax);
 
-  // Once the metal flattens, the strip's plates get a sphere EACH, and the march runs
-  // from the first entry to the last exit among the ones this ray meets. One sphere
-  // around the whole strip would be a screen-width across — it would swallow the page and
-  // pay full noise cost on nearly every pixel, which is the opposite of what a bound is
-  // for. Two small spheres a long way apart keep the empty middle of the screen free.
+  // Once the metal flattens, the plate gets a sphere of its own — ONE: a single sheet
+  // exists now (see plateStrip), so a single bound covers it, and rays that meet neither
+  // it nor the blob's sphere still discard before a noise fetch.
   if (uFlat > 0.001) {
-    // One sphere per plate on show — the same four slots the field unions, each at its own
-    // size. A single sphere around the gallery would be three screens wide.
-    float base = plateNear();
-    for (int j = -1; j <= 2; j++) {
-      float i = base + float(j);
-      if (i < -0.5 || i > PLATE_LAST + 0.5) continue;
-      float pRad = uScale * uFlat * (length(slotHalf(i)) * slotScale(i) + 0.4);
-      span(slotWorld(i), pRad, ro, rd, t, tMax);
-    }
+    float i = plateNear();
+    float pRad = uScale * uFlat * (length(slotHalf(i)) * slotScale(i) + 0.4);
+    span(slotWorld(i), pRad, ro, rd, t, tMax);
   }
   if (tMax < 0.0) discard;
 

@@ -235,24 +235,14 @@ float slotField(vec3 p, float i, float relief){
 }
 
 /**
- * The strip: FOUR slots around the current position, as a union.
- *
- * Four, not two. It used to evaluate only the pair straddling the carousel, which meant that
- * parked on a plate — the section's whole resting state — exactly one picture existed and the
- * gallery was a single photograph in the void. The neighbours have to be there when nothing is
- * moving, which is the point of a gallery.
- *
- * min(), not a smooth union: separate prints, and the gap between them is what says so.
+ * The "strip" is ONE sheet now. With the index as the selector and the change made
+ * material (the print dissolves, the sheet remelts, the slot is swapped at the bottom
+ * of the melt — see formClock), there is never a second plate to draw: uCar is an
+ * integer at all times, and this evaluates exactly the slot the piece is wearing.
+ * (The four-slot union lives in the git history with the gallery-wall variant.)
  */
 float plateStrip(vec3 p, float relief){
-  float base = plateNear();
-  float d = 1e9;
-  for (int j = -1; j <= 2; j++) {
-    float i = base + float(j);
-    if (i < -0.5 || i > PLATE_LAST + 0.5) continue;
-    d = min(d, slotField(p, i, relief));
-  }
-  return d;
+  return slotField(p, plateNear(), relief);
 }
 
 /**
@@ -273,24 +263,14 @@ float plateField(vec3 p, float flatness, float relief, float base){
 }
 
 /**
- * Which sheet a point belongs to, and where it sits on that sheet.
- *
- * Decided on the in-plane distance rather than the field value: the plates are laid out along x
- * and never overlap, so this is exact, and it stays exact where the field is not.
+ * Which sheet a point belongs to, and where it sits on that sheet. One sheet exists,
+ * so the answer is the worn slot — in its OWN space, so the picture's uv is right
+ * whatever size the plate is.
  */
 float plateOwner(vec3 p, out vec3 local){
-  float base = plateNear();
-  float best = base;
-  float bestX = 1e9;
-  local = vec3(0.0);
-  for (int j = -1; j <= 2; j++) {
-    float i = base + float(j);
-    if (i < -0.5 || i > PLATE_LAST + 0.5) continue;
-    // In the slot's OWN space, so the picture's uv is right whatever size that plate is.
-    vec3 q = (p - plateSlot(i)) / slotScale(i);
-    if (abs(q.x) < bestX) { bestX = abs(q.x); local = q; best = i; }
-  }
-  return best;
+  float i = plateNear();
+  local = (p - plateSlot(i)) / slotScale(i);
+  return i;
 }
 `;
 

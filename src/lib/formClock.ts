@@ -88,24 +88,19 @@ export type FormState = FormChoreo & {
      */
     dev: number;
     /**
-     * How fast the strip is travelling, 0..1 — `min(1, |carTarget − car|)`.
-     *
-     * The changeover stays a translation (that doctrine holds — see the note below the
-     * car easing), but it gets a BREATH: the wave's clock runs faster and its amplitude
-     * lifts while this is up, and both settle as the plate arrives. Derived from numbers
-     * the clock already owns, so it cannot disagree with the slide it describes.
+     * DEAD, held at 0. It measured the strip's travel and drove the wave's breath —
+     * and the strip does not travel any more: with the index as the selector, a plate
+     * change is material (dissolve → melt → swap → reform → develop), not lateral.
+     * The field survives so the wave/extinction plumbing that reads it stays wired
+     * for the day a travelling variant comes back.
      */
     slide: number;
     /**
-     * Where the section is along the strip of plates, in plate units: 0 = the first
-     * photograph centred, 1.5 = halfway between the second and the third.
-     *
-     * The plates are not four states of one object — they are four sheets a pitch apart
-     * on one strip, and changing plate slides the strip (see formPhoto). So this single
-     * number is the entire changeover: the picture being read leaves one side of the
-     * screen as the next arrives from the other, both of them real at once. Which also
-     * means it cannot be in an inconsistent state — there is no "between two plates"
-     * for it to be wrong about.
+     * The slot the one plate is WEARING — which photograph the piece carries, as the
+     * shader addresses it (texture, aspect, owner). An integer at all times now: it
+     * only changes at the bottom of the melt, under cover of the liquid, where a swap
+     * has no rectangle left to be seen on. (It was the strip's continuous position,
+     * back when changing plate was a slide.)
      */
     car: number;
     /**
@@ -158,24 +153,34 @@ const MOOD_RATE = 0.4;
  */
 
 /**
- * How fast the strip slides, as the fraction of the crossing still to go after a second.
- *
- * 0.11 → about 90% of a screen-crossing in a second, and settled inside DWELL (the 1.4s
- * floor a plate is held for in Work.tsx). Quicker than the melt above on purpose: this is
- * a sheet being pulled past, not matter changing its mind, and an exponential slide reads
- * as a whoosh that settles — most of the distance early, the last of it drifting in.
- *
- * Exponential, so a change arriving mid-slide extends the same movement instead of
- * restarting it: two flicks of the wheel run the strip on rather than stuttering.
- */
-const CAR_RATE = 0.11;
-
-/**
  * How fast the print comes up once the plate is flat, as the fraction still to go after
  * a second. 0.1 → 90% developed in one second: slow enough to be seen rising (it is the
  * entrance's payoff, not a switch), fast enough that the section is not kept waiting.
  */
 const DEV_RATE = 0.1;
+
+/**
+ * …and how fast it dissolves when a change asks for the metal back — near-instant on the
+ * ease scale (gone in about a quarter second), because the melt WAITS on it: every
+ * millisecond of leisurely dissolve is a millisecond the change reads as hesitation.
+ */
+const DEV_DOWN = 2e-7;
+
+/**
+ * The flatness the sheet remelts to for a plate change — the bottom of the dip, where
+ * the slot is swapped. Deep enough that no rectangle survives to show its proportions
+ * changing (the pulse peaks near here: flat·(1−flat)·4 ≈ 1), shy of a full return to
+ * the blob, which would read as the section restarting rather than the piece turning
+ * a page.
+ */
+const MELT_FLAT = 0.45;
+
+/**
+ * The dip-and-reform rate, as the fraction still to go after a second. Its own number
+ * because the mood's ease (MOOD_RATE) is tuned for silhouettes melting over seconds,
+ * and a page turn has to fit inside the dwell: ~0.3s down, ~0.5s back up.
+ */
+const SWAP_RATE = 1e-4;
 
 /**
  * How fast the hover gesture answers, as the fraction still to go after a second.
@@ -233,10 +238,15 @@ let holdOffset = 0;
 // nothing for a moment before the spin picks it up. Ramping the freeze in lets
 // the ambient turn bleed out exactly as the spin builds, with no gap between.
 let holdEased = 0;
-// The slot the strip is sliding toward. Held here rather than read off workPlate every
-// frame because it must SURVIVE the section releasing the plate (index -1) — see the
-// slide below.
-let carTarget = 0;
+// The slot the piece is WEARING — which photograph the one plate carries. Held here
+// rather than read off workPlate every frame because it must SURVIVE the section
+// releasing the plate (index -1): the sheet un-forms still wearing the last print's
+// slot, and hands it back on the way up. Only the swap (at the bottom of the melt)
+// and reduced motion may write it.
+let shownSlot = 0;
+// True from the swap until the sheet is exactly flat again — it keeps the reform on
+// the swap's own fast rate (see SWAP_RATE) once `changing` has gone false.
+let reforming = false;
 // The face-on angle the flattening plate is walked to (radians) — latched, see below.
 let faced = 0;
 
@@ -291,6 +301,19 @@ export function advanceFormClock(
     md.shapes[s] += ((m.shape === s ? 1 : 0) - md.shapes[s]) * mr;
   }
 
+  // THE CHANGE IS MATERIAL, NOT LATERAL. With the index as the selector and the
+  // neighbours off screen, a photograph flying out sideways said nothing — so the
+  // strip's travel is dead, and changing plate happens ON the docked piece: the print
+  // dissolves back into chrome, the sheet remelts toward MELT_FLAT (the roll-out's
+  // pulse fires by itself — it is derived from flatness), the slot is swapped at the
+  // bottom of the melt where no rectangle is left to see its proportions change, and
+  // the metal reforms carrying the next photograph, which develops. One piece of
+  // metal; four prints developed on it in turn.
+  const want = workPlate.index >= 0 ? workPlate.index : shownSlot;
+  const changing = want !== shownSlot;
+  // Reduced motion: the slot just changes, and plate and print snap with it.
+  if (reduced) shownSlot = want;
+
   // The plate. It flattens on the same signal that used to start the metal taking a
   // project's object — the entrance timeline's forming beat, which is what puts a
   // title on workPlate — so the sequence the reader gets is unchanged in structure:
@@ -301,7 +324,18 @@ export function advanceFormClock(
   // Reduced motion still gets the plate: it is the section's subject, not an effect.
   // (mr is 1 there, so it simply snaps.)
   const onPlate = workPlate.index >= 0 ? 1 : 0;
-  md.flat += (onPlate - md.flat) * mr;
+  // The melt only starts once the print has DISSOLVED: remelting a sheet that still
+  // carries its photograph would deform the picture, the one thing this section never
+  // does. Order on the way in is the mirror: reform fully, then develop.
+  const dissolved = md.dev < 0.02;
+  const flatTarget = changing && dissolved && !reduced ? onPlate * MELT_FLAT : onPlate;
+  // The dip and the reform run on their own rate: the mood's ease is tuned for
+  // silhouettes melting into one another over seconds, and a plate change has to
+  // answer inside the dwell. The ENTRANCE keeps the slow ease — it comes up from the
+  // blob, not from a swap, and its slowness is the point.
+  const swapping = (changing && dissolved) || reforming;
+  const fr = swapping && !reduced ? 1 - Math.pow(SWAP_RATE, delta) : mr;
+  md.flat += (flatTarget - md.flat) * fr;
   // …and the top and bottom of the range SNAP. An exponential ease never lands, and here the
   // last half percent is not cosmetic — it costs twice over:
   //
@@ -317,37 +351,40 @@ export function advanceFormClock(
   if (md.flat > 0.995) md.flat = 1;
   else if (md.flat < 0.005) md.flat = 0;
 
+  // The swap, at the bottom of the melt: mostly blob here, no readable rectangle, so
+  // the plate's proportions change with nothing on screen to see the cut.
+  if (changing && dissolved && !reduced && md.flat <= MELT_FLAT + 0.03) {
+    shownSlot = want;
+    reforming = true;
+  }
+  if (md.flat === 1) reforming = false;
+
   // The roll-out's peak — see the field's doc. Computed AFTER the snap, so a settled
   // plate is exactly pulse 0 and the branch-dead steady state stays branch-dead.
   state.pulse = md.flat * (1 - md.flat) * 4;
 
-  // The developer: the print rises only on a plate that is EXACTLY flat and still shown.
+  // The developer: the print rises only on a plate that is EXACTLY flat, on the RIGHT
+  // slot, with no change pending — and dissolves FAST the moment one is (the melt waits
+  // on it, see above; a leisurely dissolve would be read as the section hesitating).
   // Snapped at both ends like flat itself — the shader gates its grain branch on dev
   // reaching 1, and an exponential ease never lands on its own.
-  const devTarget = md.flat === 1 && workPlate.index >= 0 ? 1 : 0;
-  md.dev += (devTarget - md.dev) * (reduced ? 1 : 1 - Math.pow(DEV_RATE, delta));
+  const devTarget = !changing && md.flat === 1 && workPlate.index >= 0 ? 1 : 0;
+  const dr = reduced ? 1 : 1 - Math.pow(devTarget === 0 ? DEV_DOWN : DEV_RATE, delta);
+  md.dev += (devTarget - md.dev) * dr;
   if (md.dev > 0.995) md.dev = 1;
   else if (md.dev < 0.005) md.dev = 0;
 
-  // …and where the strip is. The target is only taken while a plate is actually shown:
-  // on the way out of the section (index -1) the strip STAYS where it was left and the
-  // sheet un-flattens in place, rather than sliding back to the first plate behind the
-  // reader's back.
   // The reader pointing at the name. Only while a plate is actually shown: a hover left
   // hanging by the section releasing the plate would hold the wind stopped for good.
   const wantHover = !reduced && workPlate.hover && workPlate.index >= 0 ? 1 : 0;
   md.hover += (wantHover - md.hover) * (reduced ? 1 : 1 - Math.pow(HOVER_RATE, delta));
 
-  if (workPlate.index >= 0) carTarget = workPlate.index;
-  md.car += (carTarget - md.car) * (reduced ? 1 : 1 - Math.pow(CAR_RATE, delta));
-  // How fast the strip is travelling right now — the changeover's breath (see the field's
-  // doc). After the easing, so a snapped car (reduced motion) reads as standing still.
-  md.slide = Math.min(1, Math.abs(carTarget - md.car));
-  // NOTE there is deliberately no "how far between two slots" pulse here any more. It used
-  // to drive an extra ripple and a return to liquid metal during a changeover, and both
-  // deformed the photograph at the one moment the reader is being handed it. The slide is a
-  // translation: the sheet that leaves and the sheet that arrives are the same material,
-  // waving the same way, as they would be on a real strip.
+  // The strip does not travel any more — the shader shows the ONE slot the piece is
+  // wearing (see plateStrip). `car` survives as that slot's number, which is how the
+  // photograph is addressed; `slide` is dead and held at 0 so the wave's breath and
+  // the extinction, both functions of a travel that no longer happens, stay silent.
+  md.car = shownSlot;
+  md.slide = 0;
 
   // Scroll direction decides which way the form turns. Scrolling down winds it,
   // scrolling up unwinds it — the idle drift is the same gesture continued, so it
