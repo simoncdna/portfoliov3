@@ -20,7 +20,7 @@ import type { Mesh, Texture } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { SHAPE_SDF } from "@/lib/formShapes";
-import { FRAME_W, PHOTO_SHADE, PLATE_ASP0, PLATE_H, PLATE_SDF, PLATE_T } from "@/lib/formPhoto";
+import { FRAME_OUT, PHOTO_SHADE, PLATE_ASP0, PLATE_H, PLATE_SDF, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
 import { formState } from "@/lib/formClock";
 import { works } from "@/data/site";
@@ -268,7 +268,8 @@ void main(){
   // it nor the blob's sphere still discard before a noise fetch.
   if (uFlat > 0.001) {
     float i = plateNear();
-    float pRad = uScale * uFlat * (length(slotHalf(i)) * slotScale(i) + 0.4);
+    // + 1.3: the ornate moulding reaches LINER_W + 2·FRAME_W past the canvas, carving on top.
+    float pRad = uScale * uFlat * (length(slotHalf(i)) * slotScale(i) + 1.3);
     span(slotWorld(i), pRad, ro, rd, t, tMax);
   }
   if (tMax < 0.0) discard;
@@ -297,9 +298,12 @@ void main(){
   // proportional to the wave's amplitude, hence uFlagAmp in the bound rather than a constant:
   // a sheet that has been calmed flat (the hover) marches in full strides again, and the
   // figure follows the dev panel's dial instead of having to be kept in sync with it.
+  // …and the frame's CARVING enters the bound on its own terms: amplitude (~0.2 with
+  // the cartouche) times the scroll-run's frequency (6.5) ≈ 1.2, constant because the
+  // ornament's numbers are constants — see frameRing.
   float stepK = 1.0 / (1.0 + uDistort * uMoodD * (7.5 * uFreq * uMoodF + 1.1) + uSpike * 9.0
                            + uFlat * (uRelief * (12.0 * uFreq + 1.2) * (1.0 - uFlag)
-                                      + uFlag * uFlagAmp * 4.0));
+                                      + uFlag * uFlagAmp * 4.0 + 1.2));
   float d = 0.0;
   bool hit = false;
   for (int i = 0; i < 96; i++){
@@ -639,9 +643,9 @@ export function LiquidDna({ reduced }: Props) {
     const roomLocal = Math.max(0.5, halfLocal - dockXl);
     const asp = u.uPhotoAsp.value as number[];
     let widest = 0;
-    // + FRAME_W: the moulding stands outside the canvas, and a frame cropped by the
+    // + FRAME_OUT: the moulding stands outside the canvas, and a frame cropped by the
     // edge of the screen betrays the work it exists to institute.
-    for (let i = 0; i < asp.length; i++) widest = Math.max(widest, PLATE_H * asp[i] + FRAME_W);
+    for (let i = 0; i < asp.length; i++) widest = Math.max(widest, PLATE_H * asp[i] + FRAME_OUT);
     u.uPlateK.value = Math.min(1, (roomLocal * PLATE_FILL) / widest);
 
     // The strip's slots sit a FULL SCREEN apart: the neighbours are entirely off screen
@@ -676,7 +680,7 @@ export function LiquidDna({ reduced }: Props) {
     const k = u.uPlateK.value;
     // The hit box takes the WHOLE work, moulding included — the frame is part of what
     // the visitor is pointing at.
-    const fw = 2 * FRAME_W * k * s.scale * pxPerWorld;
+    const fw = 2 * FRAME_OUT * k * s.scale * pxPerWorld;
     const h = 2 * PLATE_H * k * s.scale * (1 + PLATE_GROW * s.mood.hover) * pxPerWorld + fw;
     const w = (h - fw) * asp[Math.max(0, Math.min(asp.length - 1, shown))] + fw;
     // …and where the picture's CENTRE is, horizontally: the piece is docked now, no longer

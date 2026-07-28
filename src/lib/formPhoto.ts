@@ -54,13 +54,17 @@ export const PLATE_H = 3.4;
 /** Half-thickness. Never scaled with the picture: it is the edge of a print, not part of it. */
 export const PLATE_T = 0.16;
 /**
- * The moulding — the piece is a FRAMED WORK now (see frameRing). Width of the frame on
- * each side (local units, ~7% of the canvas height: a gallery moulding, not a baroque
- * one) and its half-thickness, standing proud of the canvas so the picture reads as
- * recessed behind it.
+ * The moulding — the piece is a FRAMED WORK now (see frameRing), and the frame is an
+ * ORNATE one: a museum moulding with a profile (plinth and beads), a carved run of
+ * scrollwork, corner cartouches, and a flat liner between the carving and the canvas —
+ * all sculpted in the same chrome. FRAME_W is the HALF-width of the moulding band per
+ * side, FRAME_T its base half-thickness (the carving stands on top of both), LINER_W
+ * the flat band inside it. The work's total reach past the canvas is FRAME_OUT.
  */
-export const FRAME_W = 0.24;
+export const FRAME_W = 0.42;
 export const FRAME_T = 0.34;
+export const LINER_W = 0.14;
+export const FRAME_OUT = LINER_W + 2 * FRAME_W;
 /**
  * The aspect a slot uses until its file has decoded. Nothing is drawn on it before then (see
  * uPhotoReady), so this only has to be a sane box for the marcher to bound.
@@ -87,6 +91,7 @@ const float PLATE_H     = ${PLATE_H.toFixed(3)};
 const float PLATE_T     = ${PLATE_T.toFixed(3)};
 const float FRAME_W     = ${FRAME_W.toFixed(3)};
 const float FRAME_T     = ${FRAME_T.toFixed(3)};
+const float LINER_W     = ${LINER_W.toFixed(3)};
 const float PLATE_ASP0  = ${PLATE_ASP0.toFixed(4)};
 const float PLATE_ROUND = ${PLATE_ROUND.toFixed(2)};
 const float PLATE_LAST  = ${(N - 1).toFixed(1)};
@@ -231,18 +236,49 @@ float plateSheet(vec3 q, vec3 h, float relief){
   return d - plateRelief(q) * liquid;
 }
 
+/** 2D box, exact — the frame's in-plane skeleton. */
+float sdBox2(vec2 p, vec2 b){
+  vec2 d = abs(p) - b;
+  return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+
 /**
- * The MOULDING — the piece is not a print any more, it is a FRAMED WORK, and the frame
- * is sculpted in the same metal: a rigid rectangular ring standing proud of the canvas
- * (FRAME_T > PLATE_T), FRAME_W deep on both axes. CSG subtraction (max with the negated
- * hole) — the hole is cut a touch deeper than the ring is thick so the two faces never
- * z-fight. The ring gets no wave and no relief: canvases breathe, frames do not, and
- * that rigidity against the boiling metal inside is what says "exposed work".
+ * The MOULDING'S CROSS-SECTION — an ornate museum profile, not a flat batten: a plinth
+ * with a big outer bead and a smaller inner one (ogee-by-committee: three primitives
+ * union into the classic stepped silhouette). uv.x runs across the moulding (0 at its
+ * centreline, negative toward the canvas), uv.y is depth. Extruded along the frame's
+ * rectangle by frameRing below.
+ */
+float frameProfile(vec2 uv){
+  float d = sdBox2(uv, vec2(FRAME_W, FRAME_T * 0.55));
+  d = min(d, length(uv - vec2(FRAME_W * 0.30, 0.05)) - FRAME_T * 0.62);
+  d = min(d, length(uv - vec2(-FRAME_W * 0.60, 0.10)) - FRAME_T * 0.34);
+  return d;
+}
+
+/**
+ * The FRAME — ornate, carved in the same chrome as the work it holds.
+ *
+ * Three layers. The PROFILE: frameProfile's section extruded along the canvas's
+ * rectangle (the in-plane distance \`r\` is exact, so (r − FRAME_W, z) is a valid 2D
+ * domain and the extrusion marches safely). The CARVING: a periodic run of scrollwork
+ * (the sin — |x|+|y| makes it climb toward the corners) crossed with an organic grain
+ * (the snoise — hand-cut, not machined), subtracted from the profile; plus a bump at
+ * each corner for the CARTOUCHE, where this kind of frame masses its ornament. And the
+ * LINER: the flat band between the carving and the canvas, which is what lets the
+ * picture breathe against all that chrome. The carving is displacement, so it is not a
+ * true distance — the marcher's stride bound carries a term for it (see stepK).
  */
 float frameRing(vec3 q, vec2 h){
-  float outer = plateBox(q, vec3(h.x + FRAME_W, h.y + FRAME_W, FRAME_T));
-  float hole  = plateBox(q, vec3(h.x, h.y, FRAME_T + 0.1));
-  return max(outer, -hole);
+  float r = sdBox2(q.xy, h + LINER_W);
+  float d = frameProfile(vec2(r - FRAME_W, q.z));
+  float run = sin((abs(q.x) + abs(q.y)) * 6.5) * 0.45
+            + snoise(vec3(q.x * 2.3, q.y * 2.3, 5.0)) * 0.55;
+  vec2 cc = abs(q.xy) - (h + LINER_W + FRAME_W);
+  float cartouche = exp(-dot(cc, cc) * 2.5);
+  d -= (run * 0.5 + 0.5) * 0.09 + cartouche * 0.10;
+  float liner = plateBox(q, vec3(h.x + LINER_W, h.y + LINER_W, PLATE_T * 0.8));
+  return min(d, liner);
 }
 
 /**

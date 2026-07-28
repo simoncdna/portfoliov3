@@ -160,11 +160,12 @@ const MOOD_RATE = 0.4;
 const DEV_RATE = 0.1;
 
 /**
- * …and how fast it dissolves when a change asks for the metal back — near-instant on the
- * ease scale (gone in about a quarter second), because the swap WAITS on it: every
- * millisecond of leisurely dissolve is a millisecond the page turn reads as hesitation.
+ * The page turn's rate — how fast the framed work spins its revolution, as the
+ * fraction still to go after a second. 0.02 → most of the turn in half a second, the
+ * settle inside the dwell: an exponential revolution reads as a work being turned by
+ * a hand — committed at once, gentle on the landing.
  */
-const DEV_DOWN = 2e-7;
+const TURN_RATE = 0.02;
 
 /**
  * How tightly the sheet's flatness chases the entrance's scrub (workReveal.form), as
@@ -236,6 +237,13 @@ let holdEased = 0;
 // slot, and hands it back on the way up. Only the swap (at the bottom of the melt)
 // and reduced motion may write it.
 let shownSlot = 0;
+// The page turn: an extra, controlled revolution of the turntable per canvas change.
+// `turn` eases toward `turnTarget` (multiples of 2π, so a settled work is face-on by
+// construction); the swap fires as the turn crosses edge-on (see swapAtAngle).
+let turn = 0;
+let turnTarget = 0;
+let swapAtAngle = 0;
+let swapPending = false;
 // The face-on angle the flattening plate is walked to (radians) — latched, see below.
 let faced = 0;
 
@@ -335,23 +343,41 @@ export function advanceFormClock(
   if (md.flat > 0.995) md.flat = 1;
   else if (md.flat < 0.005) md.flat = 0;
 
-  // The swap, on the bare metal: the print has fully dissolved (dev snaps to exactly
-  // 0), so the slot — which addresses the photograph — changes with nothing on the
-  // sheet to see it. The plate's own proportions glide separately (uAspNow).
-  if (changing && !reduced && md.dev === 0) shownSlot = want;
+  // THE PAGE TURN IS A TURN. Changing canvas spins the framed work one full
+  // revolution on the turntable — the site's own gesture for matter presenting
+  // itself — and the swap happens at the first EDGE-ON crossing (a quarter in),
+  // where the work is a line on screen and neither picture exists to be seen
+  // cutting to the other. The canvas's proportions glide meanwhile (uAspNow), so
+  // the frame resizes in flight. Chained changes queue another revolution.
+  if (changing && !reduced && md.flat === 1 && !swapPending) {
+    turnTarget += Math.PI * 2;
+    swapAtAngle = turnTarget - Math.PI * 1.5;
+    swapPending = true;
+  }
+  // …a change arriving while the metal is not a plate (the entrance, the exit) needs
+  // no ceremony: the blob is not carrying a readable picture.
+  if (changing && !reduced && md.flat < 1) shownSlot = want;
+  turn += (turnTarget - turn) * (reduced ? 1 : 1 - Math.pow(TURN_RATE, delta));
+  // The snap, for the same reason flat snaps: a work face-on save a few milliradians
+  // is a trapezoid. And the swap, at the edge-on crossing.
+  if (turnTarget - turn < 0.002) turn = turnTarget;
+  if (swapPending && turn >= swapAtAngle) {
+    shownSlot = want;
+    swapPending = false;
+  }
 
   // The roll-out's peak — see the field's doc. Computed AFTER the snap, so a settled
   // plate is exactly pulse 0 and the branch-dead steady state stays branch-dead.
   state.pulse = md.flat * (1 - md.flat) * 4;
 
-  // The developer: the print rises only on a plate that is EXACTLY flat, on the RIGHT
-  // slot, with no change pending — and dissolves FAST the moment one is (the melt waits
-  // on it, see above; a leisurely dissolve would be read as the section hesitating).
-  // Snapped at both ends like flat itself — the shader gates its grain branch on dev
-  // reaching 1, and an exponential ease never lands on its own.
-  const devTarget = !changing && md.flat === 1 && workPlate.index >= 0 ? 1 : 0;
-  const dr = reduced ? 1 : 1 - Math.pow(devTarget === 0 ? DEV_DOWN : DEV_RATE, delta);
-  md.dev += (devTarget - md.dev) * dr;
+  // The developer: the print rises once the work is EXACTLY flat — the section's
+  // OPENING moment only. A canvas change keeps its picture through the whole turn
+  // (the swap happens edge-on, where there is nothing to see): a painting being
+  // turned around does not fade, it turns. Snapped at both ends like flat itself —
+  // the shader gates its grain branch on dev reaching 1, and an exponential ease
+  // never lands on its own.
+  const devTarget = md.flat === 1 && workPlate.index >= 0 ? 1 : 0;
+  md.dev += (devTarget - md.dev) * (reduced ? 1 : 1 - Math.pow(DEV_RATE, delta));
   if (md.dev > 0.995) md.dev = 1;
   else if (md.dev < 0.005) md.dev = 0;
 
@@ -454,7 +480,10 @@ export function advanceFormClock(
     const turns = free / (Math.PI * 2);
     faced = (dir >= 0 ? Math.ceil(turns) : Math.floor(turns)) * Math.PI * 2;
   }
-  state.spin = free + (faced - free) * md.flat;
+  // …plus the page turn's own revolution, which only a flat work performs — `turn`
+  // rests on multiples of 2π (and snaps there), so the settled work is exactly
+  // face-on and the picture a true rectangle.
+  state.spin = free + (faced - free) * md.flat + turn * md.flat;
 }
 
 export const formState = (): Readonly<FormState> => state;
