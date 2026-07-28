@@ -415,7 +415,9 @@ const SLIDE_AMP = 1.9;
  * only travel moves it, and travel is exactly when a layout is allowed to move.
  */
 const PEEK_REST = 0.15;
-const PEEK_SLIDE = 0.35;
+// 0.5 = the neighbour's CENTRE sits on the screen's edge: half of each side picture is in
+// the frame while the strip travels — a wall of pictures, unambiguously.
+const PEEK_SLIDE = 0.5;
 
 export function LiquidDna({ reduced }: Props) {
   const { camera, size } = useThree();
