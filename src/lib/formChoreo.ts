@@ -10,15 +10,16 @@
 
 /**
  * Where the form parks per section (world x). About keeps its text on the right
- * and the form on the left; Work brings it back to the middle — it is the piece on
- * display there, framed by four corner notches with its name underneath, so it is
- * dead centre and the DOM is arranged around it rather than beside it.
+ * and the form on the left; Work is the MIRROR of About — the index of project
+ * names reads on the left in display type, and the piece holds the right margin,
+ * developing each row's photograph. Same reading layout, sides swapped.
  *
- * DOCK_X_WORK is kept (rather than dropped) because the exit sums the two docks to
- * make one continuous crossing; 0 is a real value in that sum, not an absence.
+ * 2.6 and not About's 3.6: the plates are wider than the skull, and at 3.6 a
+ * landscape photograph ran off the right edge of the screen before the size cap
+ * (uPlateK, which knows about this dock) had anything sane left to give it.
  */
 export const DOCK_X = -3.6;
-export const DOCK_X_WORK = 0;
+export const DOCK_X_WORK = 2.6;
 
 /**
  * …and where it goes once Work is over. Contact's text is left-aligned across the
@@ -31,26 +32,12 @@ export const DOCK_X_AFTER = 3.6;
 /**
  * How far the form rides ABOVE the viewport's centre in Work (world y).
  *
- * The piece is not alone on that screen: its name sits under it and the four plate
- * numbers under that. What has to look centred is the whole group, which means the
- * piece itself must sit above the middle by half the height of the text below it.
- *
- * Halved (from 1.0) when the photograph doubled in size: the lift is a fixed world offset
- * while the picture now takes most of the screen's height, and at the old value the top of the
- * plate ran up under the header. The text below is what it always was, so this is no longer
- * quite half of it — the group is a few px optically low, which is the error nobody can see,
- * against a picture clipped by the header, which everybody can.
- * The form is drawn by a fixed, viewport-centred canvas, so the lift has to happen
- * here — the DOM cannot move it.
- *
- * In world units rather than pixels, so it is one number for every representation.
- * The DOM side converts it back: --form-lift in globals.css is this value divided by
- * the world height the camera sees (2 · 10 · tan(21°) ≈ 7.677 for the stage's z = 10
- * and fov 42), which is what lets the notch frame land on the form at ANY window
- * height instead of only at the one it was tuned at. Change this, the camera's z or
- * its fov, and --form-lift has to move with it.
+ * ZERO since the index: the piece no longer carries its name and the numbers under
+ * it — the type lives in the left column now — so there is nothing to optically
+ * re-centre against and the photograph sits plumb on the middle of the screen.
+ * (It was 0.7, half the height of the text block that used to hang below.)
  */
-export const DOCK_Y_WORK = 0.7;
+export const DOCK_Y_WORK = 0;
 
 /**
  * How much the form grows once it is back in the middle, as a fraction of its

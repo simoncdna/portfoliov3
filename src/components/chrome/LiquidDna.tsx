@@ -406,17 +406,13 @@ const PULSE_SPIKE = 0.45;
  */
 const SLIDE_AMP = 1.9;
 
-/**
- * How much of a neighbour is inside the frame, as the visible fraction of its own width.
- *
- * ONE number, constant. A travel-only closing of ranks was tried (slivers at rest, half
- * a picture while the strip moved) and it was invisible: during a slide the whole strip
- * is crossing the screen anyway, so an extra hundred pixels of packing is noise — and at
- * rest the gallery effect it was supposed to give was gone. The wall of pictures is a
- * COMPOSITION, not an event: the neighbours are simply there, a good third of each in
- * the frame, dimmer and smaller than the plate being read (see shrink and the extinction).
+/*
+ * THE NEIGHBOURS ARE OFF SCREEN — the index (the left column of names) is what says
+ * "there are four", so the strip no longer shows slivers of the next plate: the slots
+ * sit a full screen apart, and a changeover is one photograph leaving the right margin
+ * while the next crosses into it. (The gallery-wall variant — a third of each neighbour
+ * in the frame — lives in the git history if the index does not survive the tryout.)
  */
-const PEEK = 0.38;
 
 export function LiquidDna({ reduced }: Props) {
   const { camera, size } = useThree();
@@ -634,38 +630,26 @@ export function LiquidDna({ reduced }: Props) {
     // The hover's step forward, on the shown slot alone (see slotScale). It used to go through
     // the form's global scale, which grew the whole gallery.
     u.uGrow.value = PLATE_GROW * s.mood.hover;
-    // The size ceiling. On a laptop the pictures fit with room to spare and this is 1; on a
-    // phone held upright the camera sees barely more world WIDTH than the widest plate, and
-    // without the cap a photograph would run off both sides of the screen. Local units, hence
-    // the division by the choreography's scale.
+    // The size ceiling. The plate no longer sits at the middle of the screen — the form is
+    // DOCKED (right margin, beside the index) — so the room a photograph actually has is
+    // the distance from the dock to the NEARER screen edge, not the full half-width. The
+    // cap reads the dock off the same clock the dock comes from, so moving DOCK_X_WORK
+    // cannot strand it. Local units, hence the division by the choreography's scale.
     const halfWorld = tanHalf * aspect * camera.position.z;
     const halfLocal = halfWorld / Math.max(0.01, s.scale);
+    const dockXl = Math.abs(s.dockX) / Math.max(0.01, s.scale);
+    const roomLocal = Math.max(0.5, halfLocal - dockXl);
     const asp = u.uPhotoAsp.value as number[];
     let widest = 0;
     for (let i = 0; i < asp.length; i++) widest = Math.max(widest, PLATE_H * asp[i]);
-    u.uPlateK.value = Math.min(1, (halfLocal * PLATE_FILL) / widest);
+    u.uPlateK.value = Math.min(1, (roomLocal * PLATE_FILL) / widest);
 
-    // The strip is packed IN SLIVERS: each slot sits so that, with its neighbour on show at
-    // the centre of the screen, it pierces the edge by PEEK of its own (shrunk) width —
-    // whatever the window or the photograph's aspect. Derived: a neighbour at distance D
-    // with shrunk half-width hS has its inner edge at D − hS, and the visible part is
-    // halfLocal − (D − hS); wanting that equal to PEEK·2hS gives D = halfLocal + (1 − 2·PEEK)·hS.
-    // max() of the pair's widths, so the wider of two neighbours peeks exactly and the
-    // narrower a touch less — never more. Cumulative, and on this side because the shader
-    // cannot turn a position in plate units into a distance without walking the whole strip.
-    //
-    // The slots do NOT breathe with the carousel: the shrink used here is the resting scale
-    // of a plate one slot out, a constant — same doctrine as before.
+    // The strip's slots sit a FULL SCREEN apart: the neighbours are entirely off screen
+    // (the index is what says "there are four"), and a changeover is one photograph
+    // leaving the margin while the next crosses into it.
     const slotX = u.uSlotX.value as number[];
-    const k = u.uPlateK.value;
-    const S = 1 - pt.shrink;
     for (let i = 0; i < slotX.length; i++) {
-      if (i === 0) {
-        slotX[0] = 0;
-        continue;
-      }
-      const hPair = PLATE_H * Math.max(asp[i - 1], asp[i]) * k;
-      slotX[i] = slotX[i - 1] + halfLocal + (1 - 2 * PEEK) * S * hPair;
+      slotX[i] = i === 0 ? 0 : slotX[i - 1] + 2 * halfLocal;
     }
     // …and where the reader is along it: between two slots, interpolated by the same fraction
     // the carousel is between them, so a slide covers the real distance rather than a nominal
@@ -685,6 +669,7 @@ export function LiquidDna({ reduced }: Props) {
     // a quarter of the notches' stand-off. Enough to see them sit inside the picture's edge.
     const pxPerWorld = size.height / (2 * tanHalf * (camera.position.z - PLATE_T * s.scale));
     const shown = Math.round(car);
+    const k = u.uPlateK.value;
     const h = 2 * PLATE_H * k * s.scale * (1 + PLATE_GROW * s.mood.hover) * pxPerWorld;
     const w = h * asp[Math.max(0, Math.min(asp.length - 1, shown))];
     if (Math.abs(w - frameBox.current.w) > 0.75 || Math.abs(h - frameBox.current.h) > 0.75) {

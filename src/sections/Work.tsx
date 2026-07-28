@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
-import { ScrambleText } from "@/components/ScrambleText";
 import { works } from "@/data/site";
 import { workPlate } from "@/lib/workPlate";
 import { workReveal } from "@/lib/workReveal";
@@ -83,7 +82,7 @@ const EXIT = 0.22;
  * FORMS below): with `>`-relative placement, inserting a beat would silently move the
  * moment the metal starts to change.
  */
-const BEAT = { name: 0.64, picks: 1.2, tail: 0.25 };
+const BEAT = { name: 0.64, tail: 0.25 };
 
 /**
  * The shortest time a plate is allowed to hold the screen (ms).
@@ -123,22 +122,6 @@ export function Work() {
   const timer = useRef(0);
   /** is a plate presented at all — false through the entrance and past the exit */
   const live = useRef(false);
-
-  // The churn only rolls through letters that appear in the four names, so a glyph
-  // passing through a slot always has a plausible width for that slot — on a
-  // condensed display face a `W` rolling through an `I` is a lurch, not a decode.
-  const pool = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          works
-            .map((w) => w.title.toUpperCase())
-            .join("")
-            .replace(/[^A-Z0-9]/g, "")
-        )
-      ).join(""),
-    []
-  );
 
   /** The band's document position and the scroll distance the whole band spans. */
   const geometry = useCallback(() => {
@@ -237,9 +220,8 @@ export function Work() {
     () => {
       const el = ref.current;
       if (!el) return;
-      const name = el.querySelector<HTMLElement>("[data-name]");
-      const picks = gsap.utils.toArray<HTMLElement>(el.querySelectorAll("[data-pick]"));
-      const type = [name, ...picks].filter(Boolean) as HTMLElement[];
+      const rows = gsap.utils.toArray<HTMLElement>(el.querySelectorAll("[data-row]"));
+      const type = rows;
 
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         gsap.set(type, { clearProps: "all" });
@@ -264,8 +246,9 @@ export function Work() {
         },
       });
       inTl
-        .to(name, { autoAlpha: 1, ease: "sine.out", duration: 0.5 }, BEAT.name)
-        .to(picks, { autoAlpha: 1, ease: "sine.out", duration: 0.4, stagger: 0.06 }, BEAT.picks)
+        // The index arrives as one gesture: rows top to bottom, a beat apart — the
+        // sommaire being typed out while the metal is rolled into the first picture.
+        .to(rows, { autoAlpha: 1, ease: "sine.out", duration: 0.5, stagger: 0.09 }, BEAT.name)
         // A tail so the last beat does not land on the very edge of the range, where
         // a scrub of one pixel would finish it.
         .to({}, { duration: BEAT.tail });
@@ -379,8 +362,6 @@ export function Work() {
     { scope: ref, dependencies: [present, walk] }
   );
 
-  const current = works[plate];
-
   return (
     <section
       ref={ref}
@@ -393,65 +374,48 @@ export function Work() {
           frame competing with the notches. The plate numbers already say where you
           are. */}
       <div className="plate-screen">
-        <div className="plate-group">
-          {/* The picture's own box. Empty, and invisible: the photograph is drawn behind it
-              by the fixed stage, and this only reserves its height so the name hangs UNDER
-              the picture rather than over it. Its size is published by the renderer (see
-              --plate-px-h in globals.css), because only the shader knows what shape the
-              current photograph is.
-
-              It used to carry four corner notches — the field marks this section was built
-              around. They went with the 16:9 plate: once every project keeps its own aspect
-              and the box is cut to the picture, four marks tight around a photograph mark
-              nothing. */}
-          <div className="plate-frame" aria-hidden />
-
-          <div>
-            <h3 data-name className="font-display plate-name">
-              <a
-                href={current.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`${current.title} — open the live site in a new tab`}
-                // Pointing at the name holds the picture still, brings its colour up and
-                // steps it forward — the answer happens on the PIECE, which is where the
-                // reader is looking. The
-                // eased gesture lives in the form clock; this only reports the fact.
-                //
-                // Focus as well as hover, so the same thing is said to a keyboard rather
-                // than to a mouse alone.
+        {/* THE INDEX — the section as a table of contents. The four names are all on
+            screen, stacked in display type on the left margin like a magazine sommaire;
+            the photograph is developed by the fixed stage at the RIGHT margin (the form
+            is docked there, see DOCK_X_WORK). The scroll remains the single source of
+            truth for the selection: it lights a row up, a click scrolls to that row's
+            plate (the picks' old contract), and hovering the LIT row answers on the
+            picture — colour, stillness, the step forward. */}
+        <div className="plate-index" role="group" aria-label="Projects">
+          {works.map((w, i) => {
+            const meta = [...w.languages, ...w.tools.slice(0, 2)].join(" · ");
+            return (
+              <button
+                data-row
+                key={w.title}
+                type="button"
+                className="plate-row"
+                onClick={() => go(i)}
+                aria-current={formed && i === plate ? "true" : "false"}
+                aria-label={`Plate ${w.index} — ${w.title}`}
+                // The hover gesture belongs to the plate being READ: pointing at its
+                // name holds the picture still, colours it, steps it forward (the eased
+                // gesture lives in the form clock; this only reports the fact). Focus
+                // too, so a keyboard is told the same thing.
                 onPointerEnter={() => {
-                  workPlate.hover = true;
+                  if (i === plate) workPlate.hover = true;
                 }}
                 onPointerLeave={() => {
                   workPlate.hover = false;
                 }}
                 onFocus={() => {
-                  workPlate.hover = true;
+                  if (i === plate) workPlate.hover = true;
                 }}
                 onBlur={() => {
                   workPlate.hover = false;
                 }}
               >
-                <ScrambleText text={current.title.toUpperCase()} pool={pool} />
-              </a>
-            </h3>
-
-            <div className="plate-picks" role="group" aria-label="Choose a plate">
-              {works.map((w, i) => (
-                <button
-                  data-pick
-                  key={w.title}
-                  type="button"
-                  onClick={() => go(i)}
-                  aria-current={formed && i === plate ? "true" : "false"}
-                  aria-label={`Plate ${w.index} — ${w.title}`}
-                >
-                  {w.index}
-                </button>
-              ))}
-            </div>
-          </div>
+                <span className="plate-row-no">N°{w.index}</span>
+                <span className="font-display plate-row-name">{w.title.toUpperCase()}</span>
+                {meta && <span className="plate-row-meta">{meta}</span>}
+              </button>
+            );
+          })}
         </div>
       </div>
     </section>

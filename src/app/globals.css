@@ -397,6 +397,82 @@ a {
   outline-offset: 2px;
 }
 
+/* ------------------------------------------------------------------
+   The index — Work as a table of contents (the tryout on feat/work-index).
+   ------------------------------------------------------------------
+   The four names stacked in display type on the left margin, the way About mirrors
+   it with its text on the right: the reading layout of the site, sides swapped. The
+   lit row is the plate the scroll is on; the photograph it names is developed by the
+   fixed stage at the right margin (DOCK_X_WORK). Clicking a row scrolls to its plate
+   — the picks' old contract, one gesture instead of two controls. */
+.plate-index {
+  position: absolute;
+  left: var(--gutter);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: clamp(12px, 2.6vh, 26px);
+  z-index: 2;
+}
+.plate-row {
+  background: none;
+  border: 0;
+  padding: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+.plate-row-no {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  color: var(--steel-2);
+  transition: color var(--dur-fast) linear;
+}
+/* Steel at rest, chrome when lit: the row IS the selector, so the value scale does the
+   whole job — no rules, no arrows, no boxes. */
+.plate-row-name {
+  font-size: clamp(2.2rem, 5.2vw, 4.4rem);
+  line-height: 0.95;
+  color: var(--steel-2);
+  transition: color 240ms linear;
+}
+.plate-row[aria-current="true"] .plate-row-name {
+  color: var(--chrome);
+}
+.plate-row[aria-current="true"] .plate-row-no {
+  color: var(--silver-bright);
+}
+@media (hover: hover) {
+  .plate-row:hover .plate-row-name {
+    color: var(--silver-bright);
+  }
+  .plate-row[aria-current="true"]:hover .plate-row-name {
+    color: var(--chrome);
+  }
+}
+/* The lit row's metadata, in mono — unfolded only for the project being read, the way
+   the colour is only given to the picture being read. */
+.plate-row-meta {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.64rem;
+  letter-spacing: 0.14em;
+  color: var(--silver-bright);
+  opacity: 0;
+  transition: opacity 240ms linear;
+}
+.plate-row[aria-current="true"] .plate-row-meta {
+  opacity: 1;
+}
+.plate-row:focus-visible {
+  outline: 1px solid var(--silver-bright);
+  outline-offset: 6px;
+}
+
 /* The group hangs BELOW the frame, so on a short window it is the numbers that run
    out of room first (frame + 228px against ~62% of the height). The air comes down
    with the type. */
