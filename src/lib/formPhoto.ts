@@ -289,18 +289,21 @@ float frameRing(vec3 q, vec2 h, float relief, float grown){
   // liner and its egg-and-dart on the outside. 0.2 ≈ a scroll cell every 1.25
   // local units, big enough to read as sculpture rather than as texture.
   float t = (abs(q.x) - h.x) > (abs(q.y) - h.y) ? q.y : q.x;
-  float carvedTex = texture2D(uOrn, vec2(t * 0.2, 1.0 - clamp(r / (2.0 * FRAME_W), 0.0, 1.0))).r;
-  // …the procedural run stays as the placeholder while the file is in flight.
-  float run = sin((abs(q.x) + abs(q.y)) * 6.5) * 0.225 + 0.5;
-  float carve = mix(run, carvedTex, uOrnOn);
-  // A whisper of noise on top — hand-cut, not machined — and the corner cartouches,
-  // which also cover the t-parameter's seam where the sides meet.
-  carve += snoise(vec3(q.x * 2.3, q.y * 2.3, 5.0)) * 0.06;
+  // The carving arrives LAST (gated and scaled by \`grown\`): ornament popping into
+  // existence on a half-born moulding was the clunk in the metamorphosis — and its
+  // texture fetch + noise are also SKIPPED until then (grown derives from a uniform,
+  // so the branch is coherent): the morph does not pay to resolve detail it is not
+  // yet showing.
+  float carve = 0.0;
+  if (grown > 0.001) {
+    float carvedTex = texture2D(uOrn, vec2(t * 0.2, 1.0 - clamp(r / (2.0 * FRAME_W), 0.0, 1.0))).r;
+    // …the procedural run stays as the placeholder while the file is in flight.
+    float run = sin((abs(q.x) + abs(q.y)) * 6.5) * 0.225 + 0.5;
+    // A whisper of noise on top — hand-cut, not machined.
+    carve = mix(run, carvedTex, uOrnOn) + snoise(vec3(q.x * 2.3, q.y * 2.3, 5.0)) * 0.06;
+  }
   vec2 cc = abs(q.xy) - (h + LINER_W + FRAME_W);
   float cartouche = exp(-dot(cc, cc) * 2.5);
-  // The carving arrives LAST (scaled by \`grown\`): ornament popping into existence on a
-  // half-born moulding was the clunk in the metamorphosis — the moulding grows out of
-  // the sheet first, then takes its detail.
   d -= (carve * 0.14 + cartouche * 0.10) * grown;
   // …and the same LIVING relief the canvas breathes with (the blob's own dial —
   // \`relief\` is the very uRelief plateSheet gets): the ornament is not a rigid
@@ -331,8 +334,14 @@ float slotField(vec3 p, float i, float relief, float flatness){
   // away (the + offset) and eases to exact, which reads as the frame being raised
   // out of the same metal rather than fading in over it.
   float grown = smoothstep(0.55, 1.0, flatness);
-  float ring = frameRing(q, h.xy, relief, grown) + (1.0 - grown) * 1.2;
-  return min(plateSheet(q, h, relief), ring) * k;
+  // The LIVING relief only breathes on a settled work. Mid-morph the field is already
+  // paying for the blob's own noise AND the plate — stacking the sheet's relief on top
+  // (ten more noise fetches per step, and a shortened stride to resolve them) was the
+  // transition's lag. The blob carries the life while it travels; the work takes over
+  // breathing once it is nearly itself.
+  float breathe = relief * smoothstep(0.7, 1.0, flatness);
+  float ring = frameRing(q, h.xy, breathe, grown) + (1.0 - grown) * 1.2;
+  return min(plateSheet(q, h, breathe), ring) * k;
 }
 
 /**

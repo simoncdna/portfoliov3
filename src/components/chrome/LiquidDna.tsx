@@ -305,8 +305,11 @@ void main(){
   // window that grows the ornament (see slotField), so the whole metamorphosis is NOT
   // taxed with the carving's short stride: the march only creeps once there is
   // actually carving to resolve. That tax was half the transition's clunk.
+  // The relief's term wears the same window that fades the relief in (see \`breathe\`
+  // in slotField): a morph that is not yet breathing must not march at breathing pace.
   float stepK = 1.0 / (1.0 + uDistort * uMoodD * (7.5 * uFreq * uMoodF + 1.1) + uSpike * 9.0
                            + uFlat * (uRelief * (12.0 * uFreq + 1.2) * (1.0 - uFlag)
+                                        * smoothstep(0.7, 1.0, uFlat)
                                       + uFlag * uFlagAmp * 4.0)
                            + smoothstep(0.55, 1.0, uFlat) * 1.2);
   float d = 0.0;
