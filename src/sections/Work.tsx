@@ -274,11 +274,13 @@ export function Work() {
           immediateRender: false,
           scrollTrigger: {
             trigger: el,
-            // 78%, not 55%: the switch begins WHILE THE SPHERE IS STILL GROWING into
-            // its arrival — the roll-out overlaps the swell instead of queueing after
-            // it. The mesh baton (tableauOn) passes early in the same stretch, so the
-            // sphere that starts flattening is already the tableau's.
-            start: "top 78%",
+            // 92%: the roll-out begins the moment the section shows — overlapping the
+            // END OF THE SKULL'S MELT, so About→Work reads as ONE metamorphosis
+            // (skull melting *into* a sheet) instead of two queued ones with a
+            // resting sphere between. The mesh baton (tableauOn) passes even
+            // earlier, so the sphere that starts flattening is already the
+            // tableau's, and the liquid never carries it in between.
+            start: "top 92%",
             end: "top top",
             scrub: 1,
             invalidateOnRefresh: true,

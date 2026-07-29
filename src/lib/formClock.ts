@@ -436,8 +436,12 @@ export function advanceFormClock(
   // park), falls with the putting-away so the liquid can carry the blob on to
   // Contact's dock. Smooth at both ends: this drives a crossfade of two
   // sphere-wearing forms, and any step in it would flash.
+  // …and EARLY enough (0.12→0.45) that the tableau's sphere is on stage while the
+  // skull is still melting: the baton passes skull → tableau with no liquid interlude
+  // — a third carrier taking the sphere for a beat between the two meshes read as one
+  // more transition in a stretch that should read as ONE.
   {
-    const tIn = Math.max(0, Math.min(1, (easedWork - 0.28) / 0.32));
+    const tIn = Math.max(0, Math.min(1, (easedWork - 0.12) / 0.33));
     state.tableauOn = tIn * tIn * (3 - 2 * tIn) * (1 - easedAfter);
   }
   // NOTE the hover's step forward is NOT here. It used to multiply this scale, which is the
