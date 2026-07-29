@@ -60,6 +60,12 @@ export type PlateLook = {
    */
   colour: number;
   /**
+   * The PAINT: a static two-scale grain worked into the print's values (tooth +
+   * clumping — see uGrain in formPhoto), 0 = a clean photograph. Still, not animated:
+   * a painting does not flicker.
+   */
+  grain: number;
+  /**
    * Chromatic aberration: how far the three channels are pulled apart at the picture's
    * corners, in uv. This is the plate's "glass" now that the sheet is flat — a red edge on one
    * side of a contour, a cyan one on the other, growing from nothing at the centre.
@@ -114,6 +120,7 @@ export const PLATE_LOOK: PlateLook = {
   shade: 0,
   contrast: 1.03,
   colour: 1,
+  grain: 0.14,
   aber: 0,
   shrink: 0.45,
 };

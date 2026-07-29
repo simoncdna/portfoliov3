@@ -336,6 +336,13 @@ uniform float uShade;
 uniform float uColour;
 /** how far the sheet's relief drags the picture (uv) */
 uniform float uWarp;
+/**
+ * The PAINT — a static grain worked into the settled print, 0 = a clean photograph.
+ * Two scales, both still: a fine TOOTH (the weave of a canvas catching the pigment)
+ * and a broader CLUMPING (the masses a brush leaves). Still, not animated: film grain
+ * flickers, a painting does not — the same doctrine as the page's paper grain.
+ */
+uniform float uGrain;
 
 /** Plate-local point → picture UV, with that plate's own half-extents. No cover-crop: the
     plate is cut to the photograph's shape, so the picture fills it exactly. Y is NOT flipped: three.js uploads with flipY, so
@@ -426,6 +433,13 @@ ${Array.from({ length: N }, (_, i) => `  if (i == ${i}) return uPhotoReady[${i}]
 vec3 photoShade(vec3 metal, vec3 nLocal, vec2 uv, float dim, vec3 rgb){
   float e = dot(metal, vec3(0.3333));
   vec3 tone = clamp((rgb - 0.5) * uContrast + 0.5, 0.0, 1.0);
+  // The paint (see uGrain): tooth and clumping, multiplied into the tone so the grain
+  // lives IN the picture's values — an overlay would sit on the print like dust.
+  if (uGrain > 0.001) {
+    float tooth = snoise(vec3(uv * 420.0, 3.7));
+    float clump = snoise(vec3(uv * 60.0, 8.2));
+    tone = clamp(tone * (1.0 + (tooth * 0.6 + clump * 0.4) * uGrain), 0.0, 1.0);
+  }
   // Matte shading from the sheet's own geometry, and the reason it exists: sheen and gloss
   // are the only OTHER terms that depend on the surface, so with both at zero — a print
   // with no reflection in it at all, which is a perfectly reasonable thing to want — the

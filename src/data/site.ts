@@ -46,6 +46,15 @@ export type Work = {
   url: string;
   summary: string;
   /**
+   * How large this work HANGS, as a fraction of the shared gabarit (default 1).
+   *
+   * A gallery does not hang everything at one size: a landscape piece at the common
+   * height reads a third wider than everyone else and eats the wall. The tableau's
+   * seats wear this (eased at each page turn, alongside the aspect); the sphere
+   * disguise never does.
+   */
+  plateScale?: number;
+  /**
    * The plate's photograph — what the Work section's matter flattens into.
    *
    * A plain colour photograph, in ITS OWN aspect: the plate is cut to the file's shape
@@ -100,6 +109,8 @@ export const works: Work[] = [
     url: "https://www.pictarine.com/",
     summary: "",
     image: "/images/work/pictarine.webp",
+    // Landscape at the shared height reads enormous next to the three portraits.
+    plateScale: 0.8,
     languages: [],
     tools: [],
   },
