@@ -36,6 +36,16 @@ export type FormState = FormChoreo & {
    * belongs to the click (the rafale spec), where it answers a deliberate gesture.
    */
   /**
+   * The WORK MESH's turn on stage, 0..1 — the corridor from About's exit to Work's
+   * departure, eased. The tableau is a mesh now (ChromeTableau), and the baton passes
+   * MESH TO MESH: the skull reforms its sphere at About's end and crossfades with the
+   * tableau wearing ITS sphere disguise — the raymarched blob is bypassed for the
+   * whole corridor (it only serves the Hero, and comes back when this falls so the
+   * Contact dock has its blob again). Both meshes sample the same field, so the
+   * sphere they exchange is the same object twice.
+   */
+  tableauOn: number;
+  /**
    * The plates' wave phase — a SECOND clock, because the wind has to be able to stop while
    * the metal keeps breathing.
    *
@@ -189,6 +199,7 @@ const state: FormState = {
   time: 0,
   wave: 0,
   spin: 0,
+  tableauOn: 0,
   mood: {
     sx: MOOD_REST.stretch[0],
     sy: MOOD_REST.stretch[1],
@@ -419,6 +430,14 @@ export function advanceFormClock(
   holdOffset += moved * frz;
 
   Object.assign(state, c);
+  // The work mesh's corridor — rises as Work's presence does (the skull is back to a
+  // sphere by then, About's exit melts it), falls with the putting-away so the liquid
+  // can carry the blob on to Contact's dock. Smooth at both ends: this drives a
+  // crossfade of two sphere-wearing forms, and any step in it would flash.
+  {
+    const tIn = Math.max(0, Math.min(1, (easedWork - 0.45) / 0.4));
+    state.tableauOn = tIn * tIn * (3 - 2 * tIn) * (1 - easedAfter);
+  }
   // NOTE the hover's step forward is NOT here. It used to multiply this scale, which is the
   // whole form's — so pointing at one project's name grew every picture in the gallery,
   // neighbours included. It belongs to the slot being read, and it is applied there (uGrow in

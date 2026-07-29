@@ -22,7 +22,6 @@ import { CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formFiel
 import { SHAPE_SDF } from "@/lib/formShapes";
 import { FRAME_OUT, PHOTO_SHADE, PLATE_ASP0, PLATE_H, PLATE_SDF, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
-import { plateView } from "@/lib/plateView";
 import { formState } from "@/lib/formClock";
 import { works } from "@/data/site";
 
@@ -419,9 +418,6 @@ export function LiquidDna({ reduced }: Props) {
   const appear = useRef(0); // load-in fade (the liquid is the permanent hero form)
   const modeVis = useRef(1); // eased visibility for the "blob" (liquid) form mode
   const colScratch = useMemo(() => new Color(), []);
-  /** Last published on-screen box of the shown picture, so the CSS vars are written on change
-   *  rather than every frame — see the write at the end of the frame loop. */
-  const frameBox = useRef({ w: 0, h: 0, cx: 0 });
 
   const { geometry, material } = useMemo(() => {
     const blank = new DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
@@ -551,7 +547,11 @@ export function LiquidDna({ reduced }: Props) {
     // ChromeSkull (which is still drawing this same sphere at that point) and
     // fades out. It comes back when About recedes, or when the exit choreography
     // dips the form back to a sphere on the way to Work.
-    const fade = (reduced ? 1 : appear.current) * modeVis.current * (1 - s.handover);
+    // …and (1 − tableauOn): the Work corridor belongs to the MESHES now — the skull
+    // hands its reformed sphere straight to the tableau's disguised one, and this
+    // raymarcher is bypassed until the putting-away brings the blob back for Contact.
+    const fade =
+      (reduced ? 1 : appear.current) * modeVis.current * (1 - s.handover) * (1 - s.tableauOn);
     u.uFade.value = fade;
     if (meshRef.current) meshRef.current.visible = fade > 0.004;
     if (fade <= 0.004) return;
@@ -587,9 +587,10 @@ export function LiquidDna({ reduced }: Props) {
     const sh = s.mood.shapes;
     (u.uShape.value as Vector4).set(sh.gavel, sh.camera, sh.burger, sh.vase);
 
-    // …and the strip. Two numbers out of the clock: how flat the metal is, and where the
-    // strip has slid to.
-    u.uFlat.value = s.mood.flat;
+    // THE FIELD NEVER FLATTENS ANY MORE — the work is a mesh (ChromeTableau) and this
+    // raymarcher is dark for the whole corridor (see the fade above), so its plate
+    // path is pinned off: the liquid is the Hero's blob and Contact's, nothing else.
+    u.uFlat.value = 0;
     u.uCar.value = s.mood.car;
     // Liquid → cloth happens ONCE, as the ball is rolled out (hence the flatness factor).
     // It is deliberately NOT undone while a plate crosses the screen: a sheet that
@@ -623,9 +624,8 @@ export function LiquidDna({ reduced }: Props) {
     (u.uPrint.value as Vector3).set(pt.exposure, pt.sheen, pt.gloss);
     u.uContrast.value = pt.contrast;
     u.uShade.value = pt.shade;
-    // The developer, straight from the clock: it does not start until the plate is
-    // EXACTLY flat, which is the whole three-beat sequence (see formClock's mood.dev).
-    u.uPhotoOn.value = s.mood.dev;
+    // The photograph belongs to the mesh canvas now — this material never prints.
+    u.uPhotoOn.value = 0;
     // The wave's clock and the hover's colour. Both come from the shared clock, so the
     // picture is never coloured by a wind that has not stopped, or the other way round.
     u.uWave.value = s.wave;
@@ -666,44 +666,9 @@ export function LiquidDna({ reduced }: Props) {
     const i1 = Math.min(slotX.length - 1, i0 + 1);
     u.uCarX.value = slotX[i0] + (slotX[i1] - slotX[i0]) * (car - i0);
     u.uCar.value = car;
-    // The sheet's proportions GLIDE to the worn photograph's aspect — the swap happens on
-    // bare chrome (dev 0, see formClock), so the glide never stretches a visible print.
-    const aspTarget = asp[Math.max(0, Math.min(asp.length - 1, Math.round(car)))];
-    u.uAspNow.value += (aspTarget - u.uAspNow.value) * (1 - Math.pow(1e-3, delta));
-    // …published for the followers that stand ON the work without being drawn by this
-    // shader — the mesh frame reads its seat from here (see plateView / ChromeFrame).
-    plateView.k = u.uPlateK.value;
-    plateView.asp = u.uAspNow.value;
-
-    // The notch frame is DOM, and the picture it marks is not — so the picture's on-screen box
-    // has to be published for the CSS to use (see .plate-frame). Written only when it actually
-    // moves: this is a style write on an element above a full-screen WebGL canvas, and doing it
-    // every frame is the compositor stall this codebase has already been bitten by twice.
-    // Measured at the picture's FACE, not at z = 0: the print sits PLATE_T in front of the
-    // plate's centre, which a perspective camera magnifies by about a percent — some 7px, i.e.
-    // a quarter of the notches' stand-off. Enough to see them sit inside the picture's edge.
-    const pxPerWorld = size.height / (2 * tanHalf * (camera.position.z - PLATE_T * s.scale));
-    const shown = Math.round(car);
-    const k = u.uPlateK.value;
-    // The hit box takes the WHOLE work, moulding included — the frame is part of what
-    // the visitor is pointing at.
-    const fw = 2 * FRAME_OUT * k * s.scale * pxPerWorld;
-    const h = 2 * PLATE_H * k * s.scale * (1 + PLATE_GROW * s.mood.hover) * pxPerWorld + fw;
-    const w = (h - fw) * asp[Math.max(0, Math.min(asp.length - 1, shown))] + fw;
-    // …and where the picture's CENTRE is, horizontally: the piece is docked now, no longer
-    // at the middle of the screen, and the DOM's hit link (.plate-hit) has to land on it.
-    const cx = s.dockX * pxPerWorld;
-    if (
-      Math.abs(w - frameBox.current.w) > 0.75 ||
-      Math.abs(h - frameBox.current.h) > 0.75 ||
-      Math.abs(cx - frameBox.current.cx) > 0.75
-    ) {
-      frameBox.current = { w, h, cx };
-      const root = document.documentElement.style;
-      root.setProperty("--plate-px-w", `${w.toFixed(1)}px`);
-      root.setProperty("--plate-px-h", `${h.toFixed(1)}px`);
-      root.setProperty("--plate-px-cx", `${cx.toFixed(1)}px`);
-    }
+    // (The worn aspect, the size cap's publication and the DOM hit box all moved to
+    // ChromeTableau with the work itself — this material goes dark in the corridor,
+    // and stale numbers from here would park the link on the wrong rectangle.)
     u.uEnv.value = envMap;
   });
 
