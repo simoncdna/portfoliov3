@@ -28,17 +28,13 @@ import { workPlate, MOOD_REST, SHAPES, type Shape } from "./workPlate";
 export type FormState = FormChoreo & {
   /** the noise field's phase (advanced by Speed) */
   time: number;
-  /**
-   * The roll-out's PEAK, 0..1 — the entrance's one violent moment.
-   *
-   * Derived from flatness itself: `flat · (1 − flat) · 4`, zero at both ends and 1 at
-   * mid-roll, the same impulse shape the burst spec uses ("a pulse, not a level").
-   * Derived and not integrated, so it cannot drift or be left on: wherever `flat` goes —
-   * forward, backward, snapped by reduced motion — the pulse follows and dies with it.
-   * Composed by the forms at READ time (uMoodD, uSpike); never written back into `mood`,
-   * whose fields are the next frame's easing base — a pulse fed back compounds itself.
+  /*
+   * THERE IS NO ROLL-OUT PEAK. A pulse (flat·(1−flat)·4, the burst spec's impulse)
+   * overloading distort/spike at mid-roll was tried and removed: with the roll-out
+   * riding the arrival — the metal flattening WHILE it crosses the stage — a fit of
+   * rage in the middle of that trajectory added noise, not drama. The burst grammar
+   * belongs to the click (the rafale spec), where it answers a deliberate gesture.
    */
-  pulse: number;
   /**
    * The plates' wave phase — a SECOND clock, because the wind has to be able to stop while
    * the metal keeps breathing.
@@ -193,7 +189,6 @@ const state: FormState = {
   time: 0,
   wave: 0,
   spin: 0,
-  pulse: 0,
   mood: {
     sx: MOOD_REST.stretch[0],
     sy: MOOD_REST.stretch[1],
@@ -367,10 +362,6 @@ export function advanceFormClock(
     shownSlot = want;
     swapPending = false;
   }
-
-  // The roll-out's peak — see the field's doc. Computed AFTER the snap, so a settled
-  // plate is exactly pulse 0 and the branch-dead steady state stays branch-dead.
-  state.pulse = md.flat * (1 - md.flat) * 4;
 
   // The developer: the print rises once the work is EXACTLY flat — the section's
   // OPENING moment only. A canvas change keeps its picture through the whole turn

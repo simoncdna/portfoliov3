@@ -395,15 +395,6 @@ const PLATE_GROW = 0.1;
  */
 
 /**
- * How hard the roll-out's peak overloads the silhouette: the pulse (flat·(1−flat)·4, see
- * formClock) multiplies the project's distort and adds thorns at its crest. The burst
- * spec's grammar, at entrance scale — enough that the mid-roll is a visible unleashing,
- * shy of the full burst's ×3, which owns the click.
- */
-const PULSE_DISTORT = 2.0;
-const PULSE_SPIKE = 0.45;
-
-/**
  * How deep the wave swings while the strip travels (local units, on top of the resting
  * flagAmp — which is ZERO by tuning, so this is additive or it is nothing). The changeover
  * keeps its doctrine (a translation, two real sheets on screen); this is its breath.
@@ -603,13 +594,11 @@ export function LiquidDna({ reduced }: Props) {
     // BR itself) like the old blob did. 0 in the panel → perfectly smooth.
     u.uDistort.value = tw.distort * DISTORT_MAX;
     u.uFreq.value = tw.freq;
-    // the shown plate → silhouette (eased in the shared clock, see workPlate), overloaded
-    // by the roll-out's peak: the pulse is composed at READ time, never written back into
-    // the mood (whose fields are the next frame's easing base — see formClock).
+    // the shown plate → silhouette (eased in the shared clock, see workPlate)
     (u.uStretch.value as Vector3).set(s.mood.sx, s.mood.sy, s.mood.sz);
-    u.uMoodD.value = s.mood.distort * (1 + PULSE_DISTORT * s.pulse);
+    u.uMoodD.value = s.mood.distort;
     u.uMoodF.value = s.mood.freq;
-    u.uSpike.value = s.mood.spike + PULSE_SPIKE * s.pulse;
+    u.uSpike.value = s.mood.spike;
     const sh = s.mood.shapes;
     (u.uShape.value as Vector4).set(sh.gavel, sh.camera, sh.burger, sh.vase);
 
