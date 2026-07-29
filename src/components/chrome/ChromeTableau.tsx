@@ -237,9 +237,10 @@ function buildCanvas(): BufferGeometry {
 }
 
 /**
- * The moulding is a DOWNLOADED SCULPTURE now — "Ornate Gold Vintage Frame"
- * (Sketchfab), 574k triangles of real carved ornament, meshopt-compressed to 3.5 MB
- * with its gold textures neutralised: the chrome is ours. Normalised the way the
+ * The moulding is a DOWNLOADED SCULPTURE now — "Ornate Gold Vintage Frame" by
+ * journeyk (Sketchfab, CC Attribution 4.0 — see ATTRIBUTIONS.md), 574k triangles of
+ * real carved ornament, meshopt-compressed to 3.5 MB with its gold textures
+ * neutralised: the chrome is ours. Normalised the way the
  * skull is (centre, fit, bake node transforms into the vertices), non-uniformly to
  * the REFERENCE SQUARE — the model is landscape, the reference is aspect 1, and
  * uAspX then wears each photograph's aspect on top. A carved frame stretched off its
@@ -306,6 +307,7 @@ export function ChromeTableau({ reduced }: Props) {
   const modeVis = useRef(0);
   const colScratch = useMemo(() => new Color(), []);
   const aspNow = useRef(PLATE_ASP0);
+  const sizeNow = useRef(1);
   const frameBox = useRef({ w: 0, h: 0, cx: 0 });
 
   const canvasGeo = useMemo(() => buildCanvas(), []);
@@ -351,6 +353,7 @@ export function ChromeTableau({ reduced }: Props) {
         uContrast: { value: PLATE_LOOK.contrast },
         uShade: { value: PLATE_LOOK.shade },
         uColour: { value: 0 },
+        uGrain: { value: PLATE_LOOK.grain },
         uAber: { value: PLATE_LOOK.aber },
         uWarp: { value: 0 },
         uPhotoReady: { value: works.map(() => 0) },
@@ -422,10 +425,13 @@ export function ChromeTableau({ reduced }: Props) {
     for (const a of asps.current) widest = Math.max(widest, PLATE_H * a + FRAME_OUT);
     const k = Math.min(1, (roomLocal * FILL) / widest);
 
-    // The worn aspect glides to the worn slot's photograph — the swap happens either
-    // on bare chrome or edge-on (see formClock), never under a readable print.
+    // The worn aspect AND the worn hanging size glide to the worn slot's — the swap
+    // happens edge-on (see formClock), never under a readable print. Size is per-work
+    // (plateScale in the data): a gallery does not hang everything at one gabarit.
     const slot = Math.max(0, Math.min(asps.current.length - 1, Math.round(s.mood.car)));
-    aspNow.current += (asps.current[slot] - aspNow.current) * (1 - Math.pow(1e-3, delta));
+    const ease = 1 - Math.pow(1e-3, delta);
+    aspNow.current += (asps.current[slot] - aspNow.current) * ease;
+    sizeNow.current += ((works[slot].plateScale ?? 1) - sizeNow.current) * ease;
 
     const setShared = (m: ShaderMaterial) => {
       const u = m.uniforms;
@@ -436,7 +442,7 @@ export function ChromeTableau({ reduced }: Props) {
       u.uRough.value = tw.roughness;
       u.uFly.value = reduced ? 0 : FLY;
       u.uAspX.value = aspNow.current;
-      u.uSeatK.value = k;
+      u.uSeatK.value = k * sizeNow.current;
       u.uFade.value = fade;
       u.uEnv.value = envMap;
       (u.uCamPos.value as Vector3).copy(camera.position);
@@ -459,8 +465,9 @@ export function ChromeTableau({ reduced }: Props) {
     // The DOM's hit link, published from here now — the field goes dark in Work and
     // stale numbers would park the link on the wrong rectangle.
     const pxPerWorld = size.height / (2 * tanHalf * (camera.position.z - PLATE_T * s.scale));
-    const h = 2 * (PLATE_H + FRAME_OUT) * k * s.scale * grow * pxPerWorld;
-    const w = 2 * (PLATE_H * aspNow.current + FRAME_OUT) * k * s.scale * grow * pxPerWorld;
+    const kk = k * sizeNow.current;
+    const h = 2 * (PLATE_H + FRAME_OUT) * kk * s.scale * grow * pxPerWorld;
+    const w = 2 * (PLATE_H * aspNow.current + FRAME_OUT) * kk * s.scale * grow * pxPerWorld;
     const cx = s.dockX * pxPerWorld;
     if (
       Math.abs(w - frameBox.current.w) > 0.75 ||
