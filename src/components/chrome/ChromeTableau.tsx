@@ -22,7 +22,6 @@ import {
 } from "three";
 import type { Texture } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
-import { plateView } from "@/lib/plateView";
 import { SNOISE, FORM_DISPLACE, CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { FRAME_OUT, FRAME_T, FRAME_W, LINER_W, PHOTO_SHADE, PLATE_ASP0, PLATE_H, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
@@ -405,11 +404,17 @@ export function ChromeTableau({ reduced }: Props) {
     const modeTarget = tw.mode === "blob" ? 1 : 0;
     modeVis.current += (modeTarget - modeVis.current) * (1 - Math.pow(0.06, delta));
 
-    // The size cap — the room the dock leaves the work — the worn aspect and the worn
-    // hanging size (per-work plateScale: a gallery does not hang everything at one
-    // gabarit), all eased BEFORE the visibility gate: the SKULL flies onto this very
-    // slab (plateView, read by ChromeSkull) while this mesh is still invisible, so the
-    // measures must be live even when nothing here draws.
+    // On for the whole corridor (see tableauOn in formClock): the baton passes MESH TO
+    // MESH — the skull reforms its sphere at About's end and this mesh, wearing its own
+    // sphere disguise, takes the stage from there. It TRAVELS as that sphere (the dock
+    // below is the clock's), and only unrolls where the roll-out scrub says so.
+    const workOn = reduced ? (s.tableauOn > 0.5 ? 1 : 0) : s.tableauOn;
+    const fade = (reduced ? 1 : appear.current) * modeVis.current * workOn;
+    const on = fade > 0.004;
+    g.visible = on;
+    if (!on) return;
+
+    // The size cap — the room the dock leaves the work, the same sum the field used.
     const fov = (camera as { fov?: number }).fov ?? 42;
     const tanHalf = Math.tan((fov * Math.PI) / 180 / 2);
     const halfWorld = tanHalf * (size.width / size.height) * camera.position.z;
@@ -419,24 +424,14 @@ export function ChromeTableau({ reduced }: Props) {
     let widest = 0;
     for (const a of asps.current) widest = Math.max(widest, PLATE_H * a + FRAME_OUT);
     const k = Math.min(1, (roomLocal * FILL) / widest);
+
+    // The worn aspect AND the worn hanging size glide to the worn slot's — the swap
+    // happens edge-on (see formClock), never under a readable print. Size is per-work
+    // (plateScale in the data): a gallery does not hang everything at one gabarit.
     const slot = Math.max(0, Math.min(asps.current.length - 1, Math.round(s.mood.car)));
     const ease = 1 - Math.pow(1e-3, delta);
     aspNow.current += (asps.current[slot] - aspNow.current) * ease;
     sizeNow.current += ((works[slot].plateScale ?? 1) - sizeNow.current) * ease;
-    plateView.k = k * sizeNow.current;
-    plateView.asp = aspNow.current;
-
-    // SKULL TO TABLEAU: this mesh no longer wears the sphere through the corridor —
-    // the SKULL flies straight onto the slab (its third seat), and the real sculpture
-    // only crossfades in at the landing, over the slab's last stretch. Its morph (w =
-    // flat) is ≈1 by then, so what fades in is the formed work taking its detail.
-    const reveal =
-      s.mood.flat <= 0.85 ? 0 : Math.min(1, (s.mood.flat - 0.85) / 0.15);
-    const workOn = reduced ? (reveal > 0.5 ? 1 : 0) : reveal * s.tableauOn;
-    const fade = (reduced ? 1 : appear.current) * modeVis.current * workOn;
-    const on = fade > 0.004;
-    g.visible = on;
-    if (!on) return;
 
     const setShared = (m: ShaderMaterial) => {
       const u = m.uniforms;
