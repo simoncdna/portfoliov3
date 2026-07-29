@@ -316,7 +316,14 @@ export function ChromeSkull({ reduced }: Props) {
     const modeTarget = tw.mode === "blob" ? 1 : 0;
     modeVis.current += (modeTarget - modeVis.current) * (1 - Math.pow(0.06, delta));
 
-    const fade = (reduced ? 1 : appear.current) * modeVis.current * s.skullOn;
+    // The skull carries the WHOLE first half of the About→Work metamorphosis: the
+    // corridor holds it on stage past About's own window (tableauOn), the scrub melts
+    // it (the pres override in formClock), and the baton hands it off mid-motion —
+    // both meshes passing through the sphere — never a held ball.
+    const fade =
+      (reduced ? 1 : appear.current) *
+      modeVis.current *
+      Math.max(s.skullOn, s.tableauOn * (1 - s.baton));
     u.uFade.value = fade;
     const on = fade > 0.004;
     m.visible = on;
