@@ -77,10 +77,10 @@ const ENTER = 0.14;
 const EXIT = 0.22;
 
 /**
- * The entrance's beats, in timeline units. Absolute positions rather than the usual
- * relative ones because the forming is pinned to the same instant as the name (see
- * FORMS below): with `>`-relative placement, inserting a beat would silently move the
- * moment the metal starts to change.
+ * The entrance's beats, in timeline units — just the index's arrival now: the
+ * metamorphosis no longer lives in this timeline, it rides the section's ARRIVAL
+ * (see the roll-out trigger below), so the rows type in beside a work that is
+ * already on its easel.
  */
 const BEAT = { name: 0.64, tail: 0.25 };
 
@@ -245,58 +245,63 @@ export function Work() {
           invalidateOnRefresh: true,
         },
       });
-      workReveal.form = 0;
       inTl
-        // The index arrives as one gesture: rows top to bottom, a beat apart — the
-        // sommaire being typed out while the metal starts to roll out beside it.
+        // The index arrives as one gesture: rows top to bottom, a beat apart — typed
+        // in beside a work that is already (or almost) on its easel: the roll-out no
+        // longer waits for the stick, see the arrival trigger below.
         .to(rows, { autoAlpha: 1, ease: "sine.out", duration: 0.5, stagger: 0.09 }, BEAT.name)
-        // The metamorphosis itself, SCRUBBED: form is what the sheet's flatness chases
-        // (see formClock), so the roll-out advances under the reader's hand — each
-        // notch of the wheel rolls the metal further, and backing up melts it back.
-        // ease: none — the scroll IS the curve; the clock adds the matter's own weight.
-        .fromTo(
-          workReveal,
-          { form: 0 },
-          // 0.9, down from 1.4: the metamorphosis was asking for too much wheel — at
-          // multiplier 0.5 it read as slow rather than as scrubbed. The staged morph
-          // (sheet first, moulding grown out of it — see slotField) carries the drama
-          // now; the scroll span only has to carry the gesture.
-          { form: 1, ease: "none", duration: 0.9, immediateRender: false },
-          BEAT.name
-        )
         // A tail so the last beat does not land on the very edge of the range, where
         // a scrub of one pixel would finish it.
         .to({}, { duration: BEAT.tail });
 
-      // The forming, as a fraction of the entrance's progress: the same instant the
-      // name starts to arrive. Derived from the timeline's own duration rather than
-      // written down, so re-timing the beats above cannot leave it behind.
-      const FORMS = BEAT.name / inTl.duration();
-      // Edge-triggered: onUpdate fires on every scrubbed frame, and setState (plus
-      // workPlate's own turn accounting) has no business running 60 times a second.
-      let on = false;
-      inTl.eventCallback("onUpdate", () => {
-        const want = inTl.progress() >= FORMS;
-        if (want === on) return;
-        on = want;
-        setFormed(want);
-        if (want) {
-          // The first plate starts its dwell here, so scrolling straight on cannot
-          // switch away from it before it has been seen.
-          live.current = true;
-          present(shown.current);
-        } else {
-          // Backing out of the section rewinds it: the metal is released AND the
-          // selection is wound back to the first plate, so coming down again plays
-          // the sequence from the top rather than resuming where it was left.
-          live.current = false;
-          window.clearTimeout(timer.current);
-          workPlate.clear();
-          setPlate(0);
-          shown.current = 0;
-          target.current = 0;
+      // THE ROLL-OUT RIDES THE TRAVEL. It used to start after the screen stuck — so
+      // the reader got the full chain in single file: the skull melts, the blob
+      // crosses the stage, arrives, and only THEN becomes the work. That queue was
+      // the "slow" in the entrance. Scrubbed over the ARRIVAL instead (the band's top
+      // crossing the lower half of the viewport — the same stretch the choreography
+      // spends carrying the piece to its dock), the metal is already rolling out
+      // while it travels and lands as the framed work: the blob stops being a felt
+      // stopover and becomes a trajectory. Starts at 55% and not earlier, because the
+      // skull → liquid handover is still finishing above that and expects to be
+      // crossfading over a SPHERE, not over a half-born plate.
+      workReveal.form = 0;
+      gsap.fromTo(
+        workReveal,
+        { form: 0 },
+        {
+          form: 1,
+          ease: "none",
+          immediateRender: false,
+          scrollTrigger: {
+            trigger: el,
+            start: "top 55%",
+            end: "top top",
+            scrub: 1,
+            invalidateOnRefresh: true,
+            // The plate must exist for the flatness to have anything to form INTO
+            // (flat's target is gated on workPlate.index — see formClock), so the
+            // first plate is presented the moment the arrival begins, and released
+            // when the reader backs all the way out.
+            onEnter: () => {
+              setFormed(true);
+              live.current = true;
+              present(shown.current);
+            },
+            onLeaveBack: () => {
+              // Backing out of the section rewinds it: the metal is released AND the
+              // selection is wound back to the first plate, so coming down again
+              // plays the sequence from the top rather than resuming where it was.
+              setFormed(false);
+              live.current = false;
+              window.clearTimeout(timer.current);
+              workPlate.clear();
+              setPlate(0);
+              shown.current = 0;
+              target.current = 0;
+            },
+          },
         }
-      });
+      );
 
       // --- 3. putting away -----------------------------------------------------
       // The entrance backwards, in four beats and strictly in this order:
