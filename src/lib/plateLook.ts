@@ -82,13 +82,14 @@ export type PlateLook = {
  * photographic print, not a mirror — no liquid relief either, and the modelling left
  * entirely to `shade`, kept low: the picture is the subject, not the metal.
  *
- * THE CANVAS LIVES, THE FRAME DOES NOT. The flat-print doctrine ("nothing is done to the
- * picture") gave way when the work became a framed tableau: the canvas keeps the blob's
- * own breathing — a liquid relief driven by the panel's Distort dial (see LiquidDna),
- * with `warp` dragging the image along the surface's tilt — while the sculpted moulding
- * around it stays rigid. The wave (`flagAmp`), the chromatic split (`aber`), `sheen` and
- * `gloss` stay at zero; the sway stayed dead too (see formClock), so the settled work
- * still projects as a true rectangle.
+ * THE WHOLE WORK LIVES. The flat-print doctrine ("nothing is done to the picture") gave
+ * way when the work became a framed tableau: canvas AND moulding keep the blob's own
+ * breathing — one liquid relief driven by the panel's Distort dial (see LiquidDna and
+ * frameRing), with `warp` dragging the image along the surface's tilt. It is one metal:
+ * a rigid casting around a living sheet was tried and read as two objects. The wave
+ * (`flagAmp`), the chromatic split (`aber`), `sheen` and `gloss` stay at zero; the sway
+ * stayed dead too (see formClock), so the settled work still projects as a true
+ * rectangle — breathing, not tilting.
  *
  * All of it is still wired and tuned, and each is one number away from coming back: the wave
  * (with `cloth` and `wind` as the settings it had, ~0.45 local units of depth — it read as

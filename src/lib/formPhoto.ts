@@ -280,7 +280,7 @@ float frameProfile(vec2 uv){
  * picture breathe against all that chrome. The carving is displacement, so it is not a
  * true distance — the marcher's stride bound carries a term for it (see stepK).
  */
-float frameRing(vec3 q, vec2 h){
+float frameRing(vec3 q, vec2 h, float relief){
   float r = sdBox2(q.xy, h + LINER_W);
   float d = frameProfile(vec2(r - FRAME_W, q.z));
   // The drawn carving: t runs ALONG whichever side of the frame this point is on
@@ -289,16 +289,22 @@ float frameRing(vec3 q, vec2 h){
   // liner and its egg-and-dart on the outside. 0.2 ≈ a scroll cell every 1.25
   // local units, big enough to read as sculpture rather than as texture.
   float t = (abs(q.x) - h.x) > (abs(q.y) - h.y) ? q.y : q.x;
-  float carved = texture2D(uOrn, vec2(t * 0.2, 1.0 - clamp(r / (2.0 * FRAME_W), 0.0, 1.0))).r;
+  float carvedTex = texture2D(uOrn, vec2(t * 0.2, 1.0 - clamp(r / (2.0 * FRAME_W), 0.0, 1.0))).r;
   // …the procedural run stays as the placeholder while the file is in flight.
   float run = sin((abs(q.x) + abs(q.y)) * 6.5) * 0.225 + 0.5;
-  float relief = mix(run, carved, uOrnOn);
+  float carve = mix(run, carvedTex, uOrnOn);
   // A whisper of noise on top — hand-cut, not machined — and the corner cartouches,
   // which also cover the t-parameter's seam where the sides meet.
-  relief += snoise(vec3(q.x * 2.3, q.y * 2.3, 5.0)) * 0.06;
+  carve += snoise(vec3(q.x * 2.3, q.y * 2.3, 5.0)) * 0.06;
   vec2 cc = abs(q.xy) - (h + LINER_W + FRAME_W);
   float cartouche = exp(-dot(cc, cc) * 2.5);
-  d -= relief * 0.14 + cartouche * 0.10;
+  d -= carve * 0.14 + cartouche * 0.10;
+  // …and the same LIVING relief the canvas breathes with (the blob's own dial —
+  // \`relief\` is the very uRelief plateSheet gets): the ornament is not a rigid
+  // casting around a living sheet, the whole work is ONE metal, and the carving
+  // wobbles with it.
+  float liquid = relief * (1.0 - uFlag);
+  if (liquid >= 0.001) d -= plateRelief(q) * liquid;
   float liner = plateBox(q, vec3(h.x + LINER_W, h.y + LINER_W, PLATE_T * 0.8));
   return min(d, liner);
 }
@@ -315,7 +321,7 @@ float slotField(vec3 p, float i, float relief){
   float k = slotScale(i);
   vec3 q = (p - plateSlot(i)) / k;
   vec3 h = slotHalf(i);
-  return min(plateSheet(q, h, relief), frameRing(q, h.xy)) * k;
+  return min(plateSheet(q, h, relief), frameRing(q, h.xy, relief)) * k;
 }
 
 /**
