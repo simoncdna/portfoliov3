@@ -212,7 +212,7 @@ float map(vec3 wp){
   // and it was still being evaluated, at five noise fetches a step, for a contribution of
   // zero. That is the whole steady state of the Work section, which is where the section
   // spends nearly all of its time.
-  if (uFlat > 0.999) return plateStrip(p, uRelief) * uScale;
+  if (uFlat > 0.999) return plateStrip(p, uRelief, 1.0) * uScale;
 
   // The blob, with the hovered project's object mixed into it — see shapeField…
   float d = shapeField(p, uShape, sdBlob(p));
@@ -301,11 +301,14 @@ void main(){
   // a sheet that has been calmed flat (the hover) marches in full strides again, and the
   // figure follows the dev panel's dial instead of having to be kept in sync with it.
   // …and the frame's CARVING enters the bound on its own terms: amplitude (~0.2 with
-  // the cartouche) times the scroll-run's frequency (6.5) ≈ 1.2, constant because the
-  // ornament's numbers are constants — see frameRing.
+  // the cartouche) times the scroll-run's frequency (6.5) ≈ 1.2 — scaled by the same
+  // window that grows the ornament (see slotField), so the whole metamorphosis is NOT
+  // taxed with the carving's short stride: the march only creeps once there is
+  // actually carving to resolve. That tax was half the transition's clunk.
   float stepK = 1.0 / (1.0 + uDistort * uMoodD * (7.5 * uFreq * uMoodF + 1.1) + uSpike * 9.0
                            + uFlat * (uRelief * (12.0 * uFreq + 1.2) * (1.0 - uFlag)
-                                      + uFlag * uFlagAmp * 4.0 + 1.2));
+                                      + uFlag * uFlagAmp * 4.0)
+                           + smoothstep(0.55, 1.0, uFlat) * 1.2);
   float d = 0.0;
   bool hit = false;
   for (int i = 0; i < 96; i++){

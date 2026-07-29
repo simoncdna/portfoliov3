@@ -280,7 +280,7 @@ float frameProfile(vec2 uv){
  * picture breathe against all that chrome. The carving is displacement, so it is not a
  * true distance — the marcher's stride bound carries a term for it (see stepK).
  */
-float frameRing(vec3 q, vec2 h, float relief){
+float frameRing(vec3 q, vec2 h, float relief, float grown){
   float r = sdBox2(q.xy, h + LINER_W);
   float d = frameProfile(vec2(r - FRAME_W, q.z));
   // The drawn carving: t runs ALONG whichever side of the frame this point is on
@@ -298,7 +298,10 @@ float frameRing(vec3 q, vec2 h, float relief){
   carve += snoise(vec3(q.x * 2.3, q.y * 2.3, 5.0)) * 0.06;
   vec2 cc = abs(q.xy) - (h + LINER_W + FRAME_W);
   float cartouche = exp(-dot(cc, cc) * 2.5);
-  d -= carve * 0.14 + cartouche * 0.10;
+  // The carving arrives LAST (scaled by \`grown\`): ornament popping into existence on a
+  // half-born moulding was the clunk in the metamorphosis — the moulding grows out of
+  // the sheet first, then takes its detail.
+  d -= (carve * 0.14 + cartouche * 0.10) * grown;
   // …and the same LIVING relief the canvas breathes with (the blob's own dial —
   // \`relief\` is the very uRelief plateSheet gets): the ornament is not a rigid
   // casting around a living sheet, the whole work is ONE metal, and the carving
@@ -317,11 +320,19 @@ float frameRing(vec3 q, vec2 h, float relief){
  * true distance field under a uniform scale — the marcher would punch through a plate that was
  * merely evaluated smaller.
  */
-float slotField(vec3 p, float i, float relief){
+float slotField(vec3 p, float i, float relief, float flatness){
   float k = slotScale(i);
   vec3 q = (p - plateSlot(i)) / k;
   vec3 h = slotHalf(i);
-  return min(plateSheet(q, h, relief), frameRing(q, h.xy, relief)) * k;
+  // THE MORPH IS STAGED. A straight crossfade of the blob's field with the whole
+  // framed work was the clunk: the moulding's thin features barely exist at half
+  // weight and then POP. So the blob flattens into the bare sheet first, and the
+  // moulding GROWS out of its rim on the last stretch — its distance starts pushed
+  // away (the + offset) and eases to exact, which reads as the frame being raised
+  // out of the same metal rather than fading in over it.
+  float grown = smoothstep(0.55, 1.0, flatness);
+  float ring = frameRing(q, h.xy, relief, grown) + (1.0 - grown) * 1.2;
+  return min(plateSheet(q, h, relief), ring) * k;
 }
 
 /**
@@ -331,8 +342,8 @@ float slotField(vec3 p, float i, float relief){
  * integer at all times, and this evaluates exactly the slot the piece is wearing.
  * (The four-slot union lives in the git history with the gallery-wall variant.)
  */
-float plateStrip(vec3 p, float relief){
-  return slotField(p, plateNear(), relief);
+float plateStrip(vec3 p, float relief, float flatness){
+  return slotField(p, plateNear(), relief, flatness);
 }
 
 /**
@@ -349,7 +360,7 @@ float plateStrip(vec3 p, float relief){
  */
 float plateField(vec3 p, float flatness, float relief, float base){
   if (flatness < 0.001) return base;
-  return mix(base, plateStrip(p, relief), flatness);
+  return mix(base, plateStrip(p, relief, flatness), flatness);
 }
 
 /**

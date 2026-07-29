@@ -171,9 +171,11 @@ const TURN_RATE = 0.02;
  * How tightly the sheet's flatness chases the entrance's scrub (workReveal.form), as
  * the fraction still to go after a second. Tight — the scrub IS the animation and a
  * lag here is a laggy wheel — but not a hard copy: the smoothing is what keeps the
- * metamorphosis reading as matter with weight rather than as a slider.
+ * metamorphosis reading as matter with weight rather than as a slider. 0.0005 (from
+ * 0.002): the old value left ~15% of the gesture arriving after the hand had stopped,
+ * which read as the metal dragging its feet rather than as weight.
  */
-const FORM_RATE = 0.002;
+const FORM_RATE = 0.0005;
 
 /**
  * How fast the hover gesture answers, as the fraction still to go after a second.

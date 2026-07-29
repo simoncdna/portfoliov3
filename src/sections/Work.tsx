@@ -257,7 +257,11 @@ export function Work() {
         .fromTo(
           workReveal,
           { form: 0 },
-          { form: 1, ease: "none", duration: 1.4, immediateRender: false },
+          // 0.9, down from 1.4: the metamorphosis was asking for too much wheel — at
+          // multiplier 0.5 it read as slow rather than as scrubbed. The staged morph
+          // (sheet first, moulding grown out of it — see slotField) carries the drama
+          // now; the scroll span only has to carry the gesture.
+          { form: 1, ease: "none", duration: 0.9, immediateRender: false },
           BEAT.name
         )
         // A tail so the last beat does not land on the very edge of the range, where
