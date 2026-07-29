@@ -274,7 +274,11 @@ export function Work() {
           immediateRender: false,
           scrollTrigger: {
             trigger: el,
-            start: "top 55%",
+            // 78%, not 55%: the switch begins WHILE THE SPHERE IS STILL GROWING into
+            // its arrival — the roll-out overlaps the swell instead of queueing after
+            // it. The mesh baton (tableauOn) passes early in the same stretch, so the
+            // sphere that starts flattening is already the tableau's.
+            start: "top 78%",
             end: "top top",
             scrub: 1,
             invalidateOnRefresh: true,

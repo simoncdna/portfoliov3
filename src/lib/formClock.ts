@@ -430,12 +430,14 @@ export function advanceFormClock(
   holdOffset += moved * frz;
 
   Object.assign(state, c);
-  // The work mesh's corridor — rises as Work's presence does (the skull is back to a
-  // sphere by then, About's exit melts it), falls with the putting-away so the liquid
-  // can carry the blob on to Contact's dock. Smooth at both ends: this drives a
-  // crossfade of two sphere-wearing forms, and any step in it would flash.
+  // The work mesh's corridor — rises EARLY in Work's arrival (0.28→0.6 of the eased
+  // presence: the switch happens while the sphere is still crossing and swelling, so
+  // the roll-out can begin under the reader's hand without waiting for the piece to
+  // park), falls with the putting-away so the liquid can carry the blob on to
+  // Contact's dock. Smooth at both ends: this drives a crossfade of two
+  // sphere-wearing forms, and any step in it would flash.
   {
-    const tIn = Math.max(0, Math.min(1, (easedWork - 0.45) / 0.4));
+    const tIn = Math.max(0, Math.min(1, (easedWork - 0.28) / 0.32));
     state.tableauOn = tIn * tIn * (3 - 2 * tIn) * (1 - easedAfter);
   }
   // NOTE the hover's step forward is NOT here. It used to multiply this scale, which is the
