@@ -6,6 +6,7 @@ import { Environment, Lightformer } from "@react-three/drei";
 import type { Group } from "three";
 import type { BlobShape } from "./ChromeBlob";
 import { FormDriver } from "./FormDriver";
+import { ChromeFrame } from "./ChromeFrame";
 import { LiquidDna } from "./LiquidDna";
 import { ChromeSkull } from "./ChromeSkull";
 import { DnaParticles } from "./DnaParticles";
@@ -277,6 +278,9 @@ export function ChromeCanvas({
               integrated ONCE, here, and only read by the forms: see formClock. */}
           <FormDriver about={about} work={work} scroll={scroll} reduced={reduced} />
           <LiquidDna reduced={reduced} />
+          {/* The work's moulding — a MESH, the skull's technique: the field carries
+              what deforms (the canvas), the sculpture is rasterised around it. */}
+          <ChromeFrame />
           <MeshDna reduced={reduced} />
           {/* The two skull-sampling forms wait on an 8.9 MB glb, so they get their
               own boundary — inside the outer one they would hold the liquid (which

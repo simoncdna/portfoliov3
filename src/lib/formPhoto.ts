@@ -54,12 +54,13 @@ export const PLATE_H = 3.4;
 /** Half-thickness. Never scaled with the picture: it is the edge of a print, not part of it. */
 export const PLATE_T = 0.16;
 /**
- * The moulding — the piece is a FRAMED WORK now (see frameRing), and the frame is an
- * ORNATE one: a museum moulding with a profile (plinth and beads), a carved run of
- * scrollwork, corner cartouches, and a flat liner between the carving and the canvas —
- * all sculpted in the same chrome. FRAME_W is the HALF-width of the moulding band per
- * side, FRAME_T its base half-thickness (the carving stands on top of both), LINER_W
- * the flat band inside it. The work's total reach past the canvas is FRAME_OUT.
+ * The moulding's measures — the piece is a FRAMED WORK, and the frame is a MESH now
+ * (see ChromeFrame, which owns the sculpture); these numbers stay here because the
+ * field still lays the work out around them: the size cap and the DOM hit box count
+ * the frame's reach, and the mesh builds itself from the same values, so the two
+ * sides cannot disagree about where the moulding sits. FRAME_W is the HALF-width of
+ * the moulding band per side, FRAME_T its base half-thickness, LINER_W the flat band
+ * between it and the canvas. The work's total reach past the canvas is FRAME_OUT.
  */
 export const FRAME_W = 0.42;
 export const FRAME_T = 0.34;
@@ -89,20 +90,6 @@ const PLATE_ROUND = 0.0;
 export const PLATE_SDF = /* glsl */ `
 const float PLATE_H     = ${PLATE_H.toFixed(3)};
 const float PLATE_T     = ${PLATE_T.toFixed(3)};
-const float FRAME_W     = ${FRAME_W.toFixed(3)};
-const float FRAME_T     = ${FRAME_T.toFixed(3)};
-const float LINER_W     = ${LINER_W.toFixed(3)};
-
-/**
- * The frame's ORNAMENT, as a height map — real drawn carving (egg-and-dart, an
- * acanthus scroll run, fillet and beads: see public/textures/frame-trim.png, authored
- * as SVG and rasterised) instead of a sinusoid pretending. Sampled INSIDE the march,
- * so the texture must carry no mips (implicit derivatives are undefined in a loop —
- * see the loader in LiquidDna). uOrnOn gates it while the file is in flight; the
- * procedural run below is the placeholder it replaces.
- */
-uniform sampler2D uOrn;
-uniform float uOrnOn;
 const float PLATE_ASP0  = ${PLATE_ASP0.toFixed(4)};
 const float PLATE_ROUND = ${PLATE_ROUND.toFixed(2)};
 const float PLATE_LAST  = ${(N - 1).toFixed(1)};
@@ -247,77 +234,18 @@ float plateSheet(vec3 q, vec3 h, float relief){
   return d - plateRelief(q) * liquid;
 }
 
-/** 2D box, exact — the frame's in-plane skeleton. */
-float sdBox2(vec2 p, vec2 b){
-  vec2 d = abs(p) - b;
-  return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
-}
-
-/**
- * The MOULDING'S CROSS-SECTION — an ornate museum profile, not a flat batten: a plinth
- * with a big outer bead and a smaller inner one (ogee-by-committee: three primitives
- * union into the classic stepped silhouette). uv.x runs across the moulding (0 at its
- * centreline, negative toward the canvas), uv.y is depth. Extruded along the frame's
- * rectangle by frameRing below.
+/*
+ * THE MOULDING LEFT THE FIELD. It was a profiled, carved ring raymarched around the
+ * sheet, and it was the field's most expensive tenant — ornament resolved by marching
+ * costs per pixel per step, and the entrance morph paid it across the whole screen.
+ * It is a MESH now (see ChromeFrame): the skull's technique — the field only carries
+ * what deforms, and the sculpture is rasterised around it for free.
  */
-float frameProfile(vec2 uv){
-  float d = sdBox2(uv, vec2(FRAME_W, FRAME_T * 0.55));
-  d = min(d, length(uv - vec2(FRAME_W * 0.30, 0.05)) - FRAME_T * 0.62);
-  d = min(d, length(uv - vec2(-FRAME_W * 0.60, 0.10)) - FRAME_T * 0.34);
-  return d;
-}
 
 /**
- * The FRAME — ornate, carved in the same chrome as the work it holds.
- *
- * Three layers. The PROFILE: frameProfile's section extruded along the canvas's
- * rectangle (the in-plane distance \`r\` is exact, so (r − FRAME_W, z) is a valid 2D
- * domain and the extrusion marches safely). The CARVING: a periodic run of scrollwork
- * (the sin — |x|+|y| makes it climb toward the corners) crossed with an organic grain
- * (the snoise — hand-cut, not machined), subtracted from the profile; plus a bump at
- * each corner for the CARTOUCHE, where this kind of frame masses its ornament. And the
- * LINER: the flat band between the carving and the canvas, which is what lets the
- * picture breathe against all that chrome. The carving is displacement, so it is not a
- * true distance — the marcher's stride bound carries a term for it (see stepK).
- */
-float frameRing(vec3 q, vec2 h, float relief, float grown){
-  float r = sdBox2(q.xy, h + LINER_W);
-  float d = frameProfile(vec2(r - FRAME_W, q.z));
-  // The drawn carving: t runs ALONG whichever side of the frame this point is on
-  // (the other axis's coordinate), v across the moulding — r spans [0, 2·FRAME_W]
-  // from liner to outer edge, mapped so the trim's inner bead row lands by the
-  // liner and its egg-and-dart on the outside. 0.2 ≈ a scroll cell every 1.25
-  // local units, big enough to read as sculpture rather than as texture.
-  float t = (abs(q.x) - h.x) > (abs(q.y) - h.y) ? q.y : q.x;
-  // The carving arrives LAST (gated and scaled by \`grown\`): ornament popping into
-  // existence on a half-born moulding was the clunk in the metamorphosis — and its
-  // texture fetch + noise are also SKIPPED until then (grown derives from a uniform,
-  // so the branch is coherent): the morph does not pay to resolve detail it is not
-  // yet showing.
-  float carve = 0.0;
-  if (grown > 0.001) {
-    float carvedTex = texture2D(uOrn, vec2(t * 0.2, 1.0 - clamp(r / (2.0 * FRAME_W), 0.0, 1.0))).r;
-    // …the procedural run stays as the placeholder while the file is in flight.
-    float run = sin((abs(q.x) + abs(q.y)) * 6.5) * 0.225 + 0.5;
-    // A whisper of noise on top — hand-cut, not machined.
-    carve = mix(run, carvedTex, uOrnOn) + snoise(vec3(q.x * 2.3, q.y * 2.3, 5.0)) * 0.06;
-  }
-  vec2 cc = abs(q.xy) - (h + LINER_W + FRAME_W);
-  float cartouche = exp(-dot(cc, cc) * 2.5);
-  d -= (carve * 0.14 + cartouche * 0.10) * grown;
-  // …and the same LIVING relief the canvas breathes with (the blob's own dial —
-  // \`relief\` is the very uRelief plateSheet gets): the ornament is not a rigid
-  // casting around a living sheet, the whole work is ONE metal, and the carving
-  // wobbles with it.
-  float liquid = relief * (1.0 - uFlag);
-  if (liquid >= 0.001) d -= plateRelief(q) * liquid;
-  float liner = plateBox(q, vec3(h.x + LINER_W, h.y + LINER_W, PLATE_T * 0.8));
-  return min(d, liner);
-}
-
-/**
- * One framed work's field, at its place and at its own size: the canvas (with whatever
- * is being done to it) unioned with its moulding.
+ * One work's CANVAS, at its place and at its own size — the moulding around it is the
+ * mesh's business (ChromeFrame), which grows in over the same last stretch of the
+ * roll-out the field used to raise its ring in.
  *
  * Dividing the point by the slot's scale and multiplying the result back is what keeps this a
  * true distance field under a uniform scale — the marcher would punch through a plate that was
@@ -327,21 +255,13 @@ float slotField(vec3 p, float i, float relief, float flatness){
   float k = slotScale(i);
   vec3 q = (p - plateSlot(i)) / k;
   vec3 h = slotHalf(i);
-  // THE MORPH IS STAGED. A straight crossfade of the blob's field with the whole
-  // framed work was the clunk: the moulding's thin features barely exist at half
-  // weight and then POP. So the blob flattens into the bare sheet first, and the
-  // moulding GROWS out of its rim on the last stretch — its distance starts pushed
-  // away (the + offset) and eases to exact, which reads as the frame being raised
-  // out of the same metal rather than fading in over it.
-  float grown = smoothstep(0.55, 1.0, flatness);
   // The LIVING relief only breathes on a settled work. Mid-morph the field is already
   // paying for the blob's own noise AND the plate — stacking the sheet's relief on top
   // (ten more noise fetches per step, and a shortened stride to resolve them) was the
   // transition's lag. The blob carries the life while it travels; the work takes over
   // breathing once it is nearly itself.
   float breathe = relief * smoothstep(0.7, 1.0, flatness);
-  float ring = frameRing(q, h.xy, breathe, grown) + (1.0 - grown) * 1.2;
-  return min(plateSheet(q, h, breathe), ring) * k;
+  return plateSheet(q, h, breathe) * k;
 }
 
 /**

@@ -9,9 +9,7 @@ import {
   ClampToEdgeWrapping,
   Color,
   DataTexture,
-  LinearFilter,
   Matrix3,
-  RepeatWrapping,
   ShaderMaterial,
   TextureLoader,
   Vector2,
@@ -24,6 +22,7 @@ import { CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formFiel
 import { SHAPE_SDF } from "@/lib/formShapes";
 import { FRAME_OUT, PHOTO_SHADE, PLATE_ASP0, PLATE_H, PLATE_SDF, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
+import { plateView } from "@/lib/plateView";
 import { formState } from "@/lib/formClock";
 import { works } from "@/data/site";
 
@@ -270,8 +269,9 @@ void main(){
   // it nor the blob's sphere still discard before a noise fetch.
   if (uFlat > 0.001) {
     float i = plateNear();
-    // + 1.3: the ornate moulding reaches LINER_W + 2·FRAME_W past the canvas, carving on top.
-    float pRad = uScale * uFlat * (length(slotHalf(i)) * slotScale(i) + 1.3);
+    // + 0.4: the sheet alone — the moulding around it is a mesh (ChromeFrame), not
+    // this field's problem to bound.
+    float pRad = uScale * uFlat * (length(slotHalf(i)) * slotScale(i) + 0.4);
     span(slotWorld(i), pRad, ro, rd, t, tMax);
   }
   if (tMax < 0.0) discard;
@@ -307,11 +307,11 @@ void main(){
   // actually carving to resolve. That tax was half the transition's clunk.
   // The relief's term wears the same window that fades the relief in (see \`breathe\`
   // in slotField): a morph that is not yet breathing must not march at breathing pace.
+  // (No carving term any more — the moulding is a MESH, see ChromeFrame.)
   float stepK = 1.0 / (1.0 + uDistort * uMoodD * (7.5 * uFreq * uMoodF + 1.1) + uSpike * 9.0
                            + uFlat * (uRelief * (12.0 * uFreq + 1.2) * (1.0 - uFlag)
                                         * smoothstep(0.7, 1.0, uFlat)
-                                      + uFlag * uFlagAmp * 4.0)
-                           + smoothstep(0.55, 1.0, uFlat) * 1.2);
+                                      + uFlag * uFlagAmp * 4.0));
   float d = 0.0;
   bool hit = false;
   for (int i = 0; i < 96; i++){
@@ -484,9 +484,6 @@ export function LiquidDna({ reduced }: Props) {
         // placeholder is never SEEN — uPhotoReady gates each slot — it is only there to
         // keep every texture unit legal while the files are in flight.
         ...Object.fromEntries(works.map((_, i) => [`uPhoto${i}`, { value: blank }])),
-        // the frame's carved trim (height map) — see frameRing in formPhoto
-        uOrn: { value: blank },
-        uOrnOn: { value: 0 },
         uEnv: { value: null },
         uEnvInt: { value: ENV_INTENSITY },
         uEnvRot: { value: ENV_ROT_Y },
@@ -509,21 +506,6 @@ export function LiquidDna({ reduced }: Props) {
   useEffect(() => {
     const loader = new TextureLoader();
     const loaded: Texture[] = [];
-    // The frame's carved trim, sampled INSIDE the march loop — so no mips (implicit
-    // derivatives are undefined in non-uniform control flow, and a mip picked from
-    // garbage derivatives is a stripe of the wrong ornament). Repeats along the run,
-    // clamps across the moulding; flipY off because the v mapping in frameRing reads
-    // the file top-to-bottom (egg-and-dart out, beads in).
-    loader.load("/textures/frame-trim.png", (t) => {
-      t.wrapS = RepeatWrapping;
-      t.wrapT = ClampToEdgeWrapping;
-      t.generateMipmaps = false;
-      t.minFilter = LinearFilter;
-      t.flipY = false;
-      material.uniforms.uOrn.value = t;
-      material.uniforms.uOrnOn.value = 1;
-      loaded.push(t);
-    });
     works.forEach((w, i) => {
       if (!w.image) return;
       loader.load(w.image, (t) => {
@@ -688,6 +670,10 @@ export function LiquidDna({ reduced }: Props) {
     // bare chrome (dev 0, see formClock), so the glide never stretches a visible print.
     const aspTarget = asp[Math.max(0, Math.min(asp.length - 1, Math.round(car)))];
     u.uAspNow.value += (aspTarget - u.uAspNow.value) * (1 - Math.pow(1e-3, delta));
+    // …published for the followers that stand ON the work without being drawn by this
+    // shader — the mesh frame reads its seat from here (see plateView / ChromeFrame).
+    plateView.k = u.uPlateK.value;
+    plateView.asp = u.uAspNow.value;
 
     // The notch frame is DOM, and the picture it marks is not — so the picture's on-screen box
     // has to be published for the CSS to use (see .plate-frame). Written only when it actually
