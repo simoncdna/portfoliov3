@@ -78,6 +78,7 @@ export default function RootLayout({
             mode — a mismatch and the browser downloads them twice. */}
         <link rel="preload" href="/env/studio_small_03_1k.hdr" as="fetch" crossOrigin="anonymous" />
         <link rel="preload" href="/models/skull.glb" as="fetch" crossOrigin="anonymous" />
+        <link rel="preload" href="/models/frame.glb" as="fetch" crossOrigin="anonymous" />
       </head>
       <body>
         {/* Off while the plates are being worked on. In dev the session guard is bypassed on

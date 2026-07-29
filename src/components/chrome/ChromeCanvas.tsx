@@ -280,8 +280,12 @@ export function ChromeCanvas({
           <LiquidDna reduced={reduced} />
           {/* The WORK — canvas and moulding as one morphing mesh (the skull's
               technique, applied whole): it takes the baton from the skull's reformed
-              sphere and the raymarcher goes dark for the corridor. */}
-          <ChromeTableau reduced={reduced} />
+              sphere and the raymarcher goes dark for the corridor. Its own boundary,
+              like the skull's: it suspends on the frame's 3.5 MB glb, and inside the
+              outer one it would hold the liquid off the screen until the file lands. */}
+          <Suspense fallback={null}>
+            <ChromeTableau reduced={reduced} />
+          </Suspense>
           <MeshDna reduced={reduced} />
           {/* The two skull-sampling forms wait on an 8.9 MB glb, so they get their
               own boundary — inside the outer one they would hold the liquid (which

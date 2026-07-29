@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEnvironment } from "@react-three/drei";
+import { useEnvironment, useGLTF } from "@react-three/drei";
 import {
+  Box3,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
@@ -12,6 +13,9 @@ import {
   DataTexture,
   DoubleSide,
   Group,
+  Matrix3,
+  Matrix4,
+  Mesh,
   ShaderMaterial,
   TextureLoader,
   Vector3,
@@ -233,173 +237,63 @@ function buildCanvas(): BufferGeometry {
 }
 
 /**
- * The moulding's cross-section — a REAL museum profile as a polyline: (u across the
- * band, z height). It rises from the liner's step, over an ogee to the crown just
- * outside the centreline, and falls to the outer edge — the silhouette a raking light
- * actually models. Sweeping THIS is what buried the box-bar look: chrome flows along
- * a profile, it only glints on arrises.
+ * The moulding is a DOWNLOADED SCULPTURE now — "Ornate Gold Vintage Frame"
+ * (Sketchfab), 574k triangles of real carved ornament, meshopt-compressed to 3.5 MB
+ * with its gold textures neutralised: the chrome is ours. Normalised the way the
+ * skull is (centre, fit, bake node transforms into the vertices), non-uniformly to
+ * the REFERENCE SQUARE — the model is landscape, the reference is aspect 1, and
+ * uAspX then wears each photograph's aspect on top. A carved frame stretched off its
+ * native proportions distorts its ornament; between our photos' aspects it stays
+ * within what a gallery eye forgives, and real frames do not resize at all.
  */
-const PROFILE: [number, number][] = [
-  [-FRAME_W, -0.06],
-  [-FRAME_W, 0.1],
-  [-FRAME_W * 0.72, 0.14],
-  [-FRAME_W * 0.5, 0.3],
-  [-FRAME_W * 0.28, 0.24],
-  [-FRAME_W * 0.02, 0.36],
-  [FRAME_W * 0.26, 0.38],
-  [FRAME_W * 0.52, 0.28],
-  [FRAME_W * 0.74, 0.32],
-  [FRAME_W * 0.9, 0.16],
-  [FRAME_W, 0.08],
-  [FRAME_W, -0.06],
-];
+const FRAME_SRC = "/models/frame.glb";
+/** The work's outer size at the reference aspect: canvas + liner + the band. */
+const FRAME_REF = 2 * (PLATE_H + LINER_W + 2 * FRAME_W);
 
-/** Path samples around the ring, and the trim cells laid along it. */
-const SWEEP_N = 480;
-const TRIM_CELL = 1.3;
+function buildFrameFrom(src: Mesh): BufferGeometry {
+  src.updateWorldMatrix(true, false);
+  const srcPos = src.geometry.getAttribute("position") as BufferAttribute;
+  const srcNrm = src.geometry.getAttribute("normal") as BufferAttribute;
+  const wb = new Box3().setFromBufferAttribute(srcPos).applyMatrix4(src.matrixWorld);
+  const centre = wb.getCenter(new Vector3());
+  const span = wb.getSize(new Vector3());
+  const sx = FRAME_REF / (span.x || 1);
+  const sy = FRAME_REF / (span.y || 1);
+  // Depth follows the HEIGHT's scale: squashing z with x would pancake the relief
+  // exactly on the photographs that stretch the least.
+  const toForm = new Matrix4()
+    .makeScale(sx, sy, sy)
+    .multiply(new Matrix4().makeTranslation(-centre.x, -centre.y, -centre.z))
+    .multiply(src.matrixWorld);
+  const toFormNrm = new Matrix3().getNormalMatrix(toForm);
 
-/** The rounded-rectangle centreline the profile sweeps along, plus arc-length. */
-function sweepPath(): { pts: [number, number][]; nrm: [number, number][]; len: number[] } {
-  const inr = PLATE_H + LINER_W + FRAME_W;
-  const r = FRAME_W * 0.9;
-  const seg = (a: number) => {
-    // rounded-rect param: four straights and four arcs, walked by angle bookkeeping
-    const straight = 2 * (inr - r);
-    const arc = (Math.PI / 2) * r;
-    const P = 4 * (straight + arc);
-    let d = ((a % 1) + 1) % 1 * P;
-    const sides: Array<[number, number, number, number, number, number]> = [
-      // [dirX, dirY, startX, startY, cornerCX, cornerCY] — top, right, bottom, left
-      [1, 0, -(inr - r), inr, inr - r, inr - r],
-      [0, -1, inr, inr - r, inr - r, -(inr - r)],
-      [-1, 0, inr - r, -inr, -(inr - r), -(inr - r)],
-      [0, 1, -inr, -(inr - r), -(inr - r), inr - r],
-    ];
-    for (let sIdx = 0; sIdx < 4; sIdx++) {
-      const [dx, dy, sx, sy, cx, cy] = sides[sIdx];
-      if (d <= straight) {
-        const px = sx + dx * d;
-        const py = sy + dy * d;
-        // outward normal of each side: top→+y, right→+x, bottom→−y, left→−x
-        const nx = sIdx === 1 ? 1 : sIdx === 3 ? -1 : 0;
-        const ny = sIdx === 0 ? 1 : sIdx === 2 ? -1 : 0;
-        return { px, py, nx, ny };
-      }
-      d -= straight;
-      if (d <= arc) {
-        const a0 = [Math.PI / 2, 0, -Math.PI / 2, Math.PI][sIdx];
-        const ang = a0 - d / r;
-        return {
-          px: cx + Math.cos(ang) * r,
-          py: cy + Math.sin(ang) * r,
-          nx: Math.cos(ang),
-          ny: Math.sin(ang),
-        };
-      }
-      d -= arc;
-    }
-    return { px: 0, py: 0, nx: 0, ny: 1 };
-  };
-  const pts: [number, number][] = [];
-  const nrm: [number, number][] = [];
-  const len: number[] = [];
-  const straight = 2 * (inr - r);
-  const P = 4 * (straight + (Math.PI / 2) * r);
-  for (let i = 0; i < SWEEP_N; i++) {
-    const { px, py, nx, ny } = seg(i / SWEEP_N);
-    pts.push([px, py]);
-    nrm.push([nx, ny]);
-    len.push((i / SWEEP_N) * P);
-  }
-  return { pts, nrm, len };
-}
-
-/**
- * The moulding — the PROFILE swept along the rounded rectangle: one continuous
- * surface, mitre-free (the corners are arcs the profile flows around), which is what
- * a frame IS. Built smooth; the drawn trim carves it when its pixels land (carveFrame
- * displaces the crest along z, keyed by arc-length so the pattern closes seamlessly —
- * a whole number of cells around the ring).
- */
-function buildFrame(): { geo: BufferGeometry; arc: Float32Array } {
-  const { pts, nrm, len } = sweepPath();
-  const M = PROFILE.length;
-  const count = SWEEP_N * M;
-  const pos = new Float32Array(count * 3);
-  const uv = new Float32Array(count * 2);
-  const arc = new Float32Array(count);
-  for (let i = 0; i < SWEEP_N; i++) {
-    const [px, py] = pts[i];
-    const [nx, ny] = nrm[i];
-    for (let j = 0; j < M; j++) {
-      const [u, z] = PROFILE[j];
-      const idx = i * M + j;
-      pos[idx * 3] = px + nx * u;
-      pos[idx * 3 + 1] = py + ny * u;
-      pos[idx * 3 + 2] = z * (FRAME_T / 0.34);
-      uv[idx * 2] = len[i];
-      uv[idx * 2 + 1] = j / (M - 1);
-      arc[idx] = len[i];
-    }
-  }
-  const index: number[] = [];
-  for (let i = 0; i < SWEEP_N; i++) {
-    const i2 = (i + 1) % SWEEP_N;
-    for (let j = 0; j < M - 1; j++) {
-      const a = i * M + j;
-      const b = i2 * M + j;
-      index.push(a, b, a + 1, b, b + 1, a + 1);
-    }
+  const n = srcPos.count;
+  const pos = new Float32Array(n * 3);
+  const nrm = new Float32Array(n * 3);
+  const p = new Vector3();
+  const v = new Vector3();
+  for (let i = 0; i < n; i++) {
+    p.fromBufferAttribute(srcPos, i).applyMatrix4(toForm);
+    pos[i * 3] = p.x;
+    pos[i * 3 + 1] = p.y;
+    pos[i * 3 + 2] = p.z;
+    v.fromBufferAttribute(srcNrm, i).applyMatrix3(toFormNrm).normalize();
+    nrm[i * 3] = v.x;
+    nrm[i * 3 + 1] = v.y;
+    nrm[i * 3 + 2] = v.z;
   }
   const g = new BufferGeometry();
   g.setAttribute("position", new BufferAttribute(pos, 3));
-  g.setAttribute("uv", new BufferAttribute(uv, 2));
-  g.setIndex(index);
-  g.computeVertexNormals();
-  const inr = PLATE_H + LINER_W + FRAME_W;
-  const geo = toMorph(g, (x, y) => 0.55 + 0.45 * Math.min(1, (Math.abs(x) + Math.abs(y)) / (2 * inr)));
-  return { geo, arc };
-}
-
-/**
- * Carve the drawn trim into the swept moulding — REAL geometry: the height displaces
- * the profile's crest along z, keyed by arc-length (a whole number of cells around
- * the ring, so the pattern closes on itself), weighted to the crown of the profile so
- * the plinth and the liner's step stay clean. Applied to aTarget: the sphere homes
- * stay a sphere. Normals recomputed from the carved seats, as the skull's are.
- */
-function carveFrame(geo: BufferGeometry, arc: Float32Array, img: HTMLImageElement) {
-  const cv = document.createElement("canvas");
-  cv.width = img.width;
-  cv.height = img.height;
-  const ctx = cv.getContext("2d")!;
-  ctx.drawImage(img, 0, 0);
-  const data = ctx.getImageData(0, 0, img.width, img.height).data;
-  const tgt = geo.getAttribute("aTarget") as BufferAttribute;
-  const uv = geo.getAttribute("uv") as BufferAttribute;
-  const inr = PLATE_H + LINER_W + FRAME_W;
-  const perim = arc.length ? 4 * (2 * (inr - FRAME_W * 0.9) + (Math.PI / 2) * FRAME_W * 0.9) : 1;
-  const cells = Math.max(1, Math.round(perim / TRIM_CELL));
-  for (let i = 0; i < tgt.count; i++) {
-    const t = arc[i] / perim;
-    const v = uv.getY(i);
-    // The crown carries the carving; the edges of the band stay architecture.
-    const wgt = Math.sin(Math.min(1, Math.max(0, (v - 0.12) / 0.76)) * Math.PI);
-    if (wgt <= 0.01) continue;
-    const u = ((t * cells) % 1) * img.width;
-    const row = Math.min(0.999, 1 - v) * img.height;
-    const h = data[((row | 0) * img.width + (u | 0)) * 4] / 255;
-    tgt.setZ(i, tgt.getZ(i) + h * 0.16 * wgt);
-  }
-  tgt.needsUpdate = true;
-  const tmp = new BufferGeometry();
-  tmp.setAttribute("position", tgt.clone());
-  if (geo.index) tmp.setIndex(geo.index.clone());
-  tmp.computeVertexNormals();
-  (geo.getAttribute("normal") as BufferAttribute).copyArray(
-    (tmp.getAttribute("normal") as BufferAttribute).array
+  g.setAttribute("normal", new BufferAttribute(nrm, 3));
+  const srcUv = src.geometry.getAttribute("uv");
+  g.setAttribute(
+    "uv",
+    srcUv ? (srcUv.clone() as BufferAttribute) : new BufferAttribute(new Float32Array(n * 2), 2)
   );
-  (geo.getAttribute("normal") as BufferAttribute).needsUpdate = true;
+  if (src.geometry.index) g.setIndex(src.geometry.index.clone());
+
+  const inr = PLATE_H + LINER_W + FRAME_W;
+  return toMorph(g, (x, y) => 0.55 + 0.45 * Math.min(1, (Math.abs(x) + Math.abs(y)) / (2 * inr)));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -415,7 +309,18 @@ export function ChromeTableau({ reduced }: Props) {
   const frameBox = useRef({ w: 0, h: 0, cx: 0 });
 
   const canvasGeo = useMemo(() => buildCanvas(), []);
-  const frame = useMemo(() => buildFrame(), []);
+
+  // meshopt-compressed glb (EXT_meshopt_compression) — the decoder ships with drei.
+  const { scene: frameScene } = useGLTF(FRAME_SRC, false, true);
+  const frameSrc = useMemo<Mesh | null>(() => {
+    let found: Mesh | null = null;
+    frameScene.traverse((o) => {
+      const m = o as Mesh;
+      if (!found && m.isMesh && m.geometry) found = m;
+    });
+    return found;
+  }, [frameScene]);
+  const frameGeo = useMemo(() => (frameSrc ? buildFrameFrom(frameSrc) : null), [frameSrc]);
 
   const { canvasMat, frameMat } = useMemo(() => {
     const blank = new DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
@@ -483,11 +388,8 @@ export function ChromeTableau({ reduced }: Props) {
         loaded.push(t);
       });
     });
-    const img = new Image();
-    img.onload = () => carveFrame(frame.geo, frame.arc, img);
-    img.src = "/textures/frame-trim.png";
     return () => loaded.forEach((t) => t.dispose());
-  }, [canvasMat, frame]);
+  }, [canvasMat]);
 
   useFrame((_, delta) => {
     const g = group.current;
@@ -573,10 +475,13 @@ export function ChromeTableau({ reduced }: Props) {
     }
   });
 
+  if (!frameGeo) return null;
   return (
     <group ref={group} visible={false}>
       <mesh geometry={canvasGeo} material={canvasMat} frustumCulled={false} />
-      <mesh geometry={frame.geo} material={frameMat} frustumCulled={false} />
+      <mesh geometry={frameGeo} material={frameMat} frustumCulled={false} />
     </group>
   );
 }
+
+useGLTF.preload(FRAME_SRC, false, true);
