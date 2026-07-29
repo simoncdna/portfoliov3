@@ -82,11 +82,13 @@ export type PlateLook = {
  * photographic print, not a mirror — no liquid relief either, and the modelling left
  * entirely to `shade`, kept low: the picture is the subject, not the metal.
  *
- * THE PICTURE IS FLAT, AND NOTHING IS DONE TO IT. Every effect that touched it is at zero:
- * `flagAmp` (the wave), `relief` (the liquid), `warp` (the drag along the surface), `aber` (the
- * chromatic split), `sheen` and `gloss` (the reflection). The sway went too — see formClock —
- * so the plate faces the camera square and projects as a true rectangle. What is left is a
- * photograph, greyscaled, at an exposure and a contrast, which is the whole brief.
+ * THE CANVAS LIVES, THE FRAME DOES NOT. The flat-print doctrine ("nothing is done to the
+ * picture") gave way when the work became a framed tableau: the canvas keeps the blob's
+ * own breathing — a liquid relief driven by the panel's Distort dial (see LiquidDna),
+ * with `warp` dragging the image along the surface's tilt — while the sculpted moulding
+ * around it stays rigid. The wave (`flagAmp`), the chromatic split (`aber`), `sheen` and
+ * `gloss` stay at zero; the sway stayed dead too (see formClock), so the settled work
+ * still projects as a true rectangle.
  *
  * All of it is still wired and tuned, and each is one number away from coming back: the wave
  * (with `cloth` and `wind` as the settings it had, ~0.45 local units of depth — it read as
@@ -97,8 +99,13 @@ export type PlateLook = {
 export const PLATE_LOOK: PlateLook = {
   flagAmp: 0,
   wind: 0.4,
+  // relief is a BASE here — the living term rides on top of it, driven by the panel's
+  // Distort (see LiquidDna): the canvas breathes with the blob's own dial.
   relief: 0,
-  warp: 0,
+  // …and the picture is dragged by that living surface (uv per unit of tilt): what
+  // says "the image IS the metal" rather than a print pinned onto it. Small — at 0.015
+  // the swim is a shimmer, not a smear.
+  warp: 0.015,
   cloth: 0.16,
   exposure: 0.89,
   sheen: 0,

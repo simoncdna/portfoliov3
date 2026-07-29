@@ -635,7 +635,13 @@ export function LiquidDna({ reduced }: Props) {
     // and the wave's clock only — never uWind, which multiplies the accumulated phase.
     u.uFlagAmp.value = (pt.flagAmp + SLIDE_AMP * s.mood.slide) * calm;
     u.uWind.value = pt.wind;
-    u.uRelief.value = pt.relief * calm;
+    // THE TABLEAU KEEPS THE BLOB'S MATTER. The canvas's liquid relief is driven by the
+    // same dial as the blob's lumps (the panel's Distort), so the framed work goes on
+    // breathing as the thing it is made of — against the RIGID frame, which is what
+    // reads as sculpture. Capped under the sheet's half-thickness (0.16): past it the
+    // waves pinch holes through the print. The hover still stills it — attention
+    // quiets the matter, and a read picture is a legible one.
+    u.uRelief.value = Math.min(0.15, pt.relief + tw.distort * DISTORT_MAX * 0.55) * calm;
     u.uWarp.value = pt.warp;
     (u.uPrint.value as Vector3).set(pt.exposure, pt.sheen, pt.gloss);
     u.uContrast.value = pt.contrast;
