@@ -18,6 +18,8 @@ import {
 import type { Mesh } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { SNOISE, FORM_DISPLACE, CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
+import { FRAME_OUT, FRAME_T, PLATE_H } from "@/lib/formPhoto";
+import { plateView } from "@/lib/plateView";
 import { formState } from "@/lib/formClock";
 
 type Props = {
@@ -67,7 +69,12 @@ uniform float uDistort;
 uniform float uFreq;
 uniform float uPres;
 uniform float uFly;
+uniform float uWork;
+uniform float uAspX;
+uniform float uSeatK;
 attribute vec3 aTarget;
+attribute vec3 aWork;
+attribute vec3 aWorkN;
 attribute float aSeed;
 varying vec3 vNrm;
 varying vec3 vWPos;
@@ -126,9 +133,22 @@ void main(){
                     formOffset(ps + vec3(0.0, 0.0, e))) - f) / e;
   vec3 nOut = normalize(nrm - (grad - nrm * dot(grad, nrm)));
 
-  vec4 wp = modelMatrix * vec4(ps, 1.0);
+  // THE THIRD SEAT — skull to TABLEAU, directly. Each vertex also knows its place on
+  // the work's slab (aWork, projected at build), and uWork — the roll-out's scrub —
+  // flies it there from wherever the sphere↔skull morph left it: no return to the
+  // sphere, no blob stopover. The seat wears the live aspect and size cap (uniforms),
+  // the same staggering key spreads the flight, and the field's displacement fades
+  // with it — a slab is still, its detail comes from the real sculpture that
+  // crossfades in at the end (see ChromeTableau).
+  float wk = clamp((uWork - aSeed * 0.25) / 0.75, 0.0, 1.0);
+  wk = wk * wk * (3.0 - 2.0 * wk);
+  vec3 seat = aWork * vec3(uAspX, 1.0, 1.0) * uSeatK;
+  vec3 pf = mix(ps, seat, wk);
+  vec3 nf = normalize(mix(nOut, aWorkN, wk));
+
+  vec4 wp = modelMatrix * vec4(pf, 1.0);
   vWPos = wp.xyz;
-  vNrm = normalize(mat3(modelMatrix) * nOut);   // uniform scale → normalize suffices
+  vNrm = normalize(mat3(modelMatrix) * nf);   // uniform scale → normalize suffices
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
 `;
@@ -195,10 +215,20 @@ function buildMorphGeometry(src: Mesh): BufferGeometry {
   const home = new Float32Array(n * 3);
   const target = new Float32Array(n * 3);
   const normal = new Float32Array(n * 3);
+  const work = new Float32Array(n * 3);
+  const workN = new Float32Array(n * 3);
   const seed = new Float32Array(n);
 
   const p = new Vector3();
   const nrm = new Vector3();
+
+  // The work's SLAB, at the reference aspect — the box the whole framed tableau
+  // occupies (canvas + liner + moulding, moulding depth). The skull's vertices fly
+  // straight onto it (see the third seat in VERT); the sculpted detail belongs to the
+  // real frame mesh, which crossfades in over this slab once it has landed.
+  const HX = PLATE_H + FRAME_OUT;
+  const HY = PLATE_H + FRAME_OUT;
+  const HZ = FRAME_T;
 
   // mean radius first — the shell offset is measured against it, so the sphere
   // keeps FORM_RADIUS on average whatever the model's proportions are
@@ -226,6 +256,31 @@ function buildMorphGeometry(src: Mesh): BufferGeometry {
     normal[i * 3 + 1] = nrm.y;
     normal[i * 3 + 2] = nrm.z;
 
+    // Radial projection onto the slab: the vertex keeps its own direction (the same
+    // rule as the sphere home — the metal flows outward/inward along its radius, it
+    // does not shuffle sideways), scaled to the box's surface. Face normal by the
+    // dominant axis, for the landing's shading.
+    {
+      const dx = p.x / r;
+      const dy = p.y / r;
+      const dz = p.z / r;
+      const m = Math.max(Math.abs(dx) / HX, Math.abs(dy) / HY, Math.abs(dz) / HZ, 1e-6);
+      const t = 1 / m;
+      work[i * 3] = dx * t;
+      work[i * 3 + 1] = dy * t;
+      work[i * 3 + 2] = dz * t;
+      const fx = Math.abs(dx) / HX;
+      const fy = Math.abs(dy) / HY;
+      const fz = Math.abs(dz) / HZ;
+      if (fz >= fx && fz >= fy) {
+        workN[i * 3 + 2] = Math.sign(dz) || 1;
+      } else if (fx >= fy) {
+        workN[i * 3] = Math.sign(dx) || 1;
+      } else {
+        workN[i * 3 + 1] = Math.sign(dy) || 1;
+      }
+    }
+
     // assembly key: bottom-up, with a touch of jitter so the wave has a grain.
     // Kept small enough that neighbours still arrive together.
     seed[i] = Math.min(1, Math.max(0, 0.5 + (0.5 * p.y) / (SKULL_SPAN * 0.5) + (Math.random() - 0.5) * 0.06));
@@ -235,6 +290,8 @@ function buildMorphGeometry(src: Mesh): BufferGeometry {
   geo.setAttribute("position", new BufferAttribute(home, 3));
   geo.setAttribute("normal", new BufferAttribute(normal, 3));
   geo.setAttribute("aTarget", new BufferAttribute(target, 3));
+  geo.setAttribute("aWork", new BufferAttribute(work, 3));
+  geo.setAttribute("aWorkN", new BufferAttribute(workN, 3));
   geo.setAttribute("aSeed", new BufferAttribute(seed, 1));
   if (src.geometry.index) geo.setIndex(src.geometry.index);
   return geo;
@@ -281,6 +338,9 @@ export function ChromeSkull({ reduced }: Props) {
           uDistort: { value: 0.25 },
           uFreq: { value: 0.5 },
           uPres: { value: 0 },
+          uWork: { value: 0 },
+          uAspX: { value: 1 },
+          uSeatK: { value: 1 },
           uFly: { value: FLY },
           uFade: { value: 0 },
           uRough: { value: 0.12 },
@@ -316,14 +376,28 @@ export function ChromeSkull({ reduced }: Props) {
     const modeTarget = tw.mode === "blob" ? 1 : 0;
     modeVis.current += (modeTarget - modeVis.current) * (1 - Math.pow(0.06, delta));
 
-    const fade = (reduced ? 1 : appear.current) * modeVis.current * s.skullOn;
+    // SKULL TO TABLEAU, directly: through the Work corridor the skull does not melt
+    // back and hand over — it stays on stage (tableauOn extends its window), holds its
+    // own shape (uPres pinned high, so the About exit cannot dissolve it to the
+    // sphere), and its vertices fly straight onto the work's slab as the roll-out
+    // scrubs (uWork). It leaves only at the very end, under the real sculpture's
+    // crossfade (the same 0.85→1 window ChromeTableau reveals in).
+    const reveal =
+      s.mood.flat <= 0.85 ? 0 : Math.min(1, (s.mood.flat - 0.85) / 0.15);
+    const fade =
+      (reduced ? 1 : appear.current) *
+      modeVis.current *
+      Math.max(s.skullOn, s.tableauOn * (1 - reveal));
     u.uFade.value = fade;
     const on = fade > 0.004;
     m.visible = on;
     if (!on) return;
 
     u.uTime.value = s.time;
-    u.uPres.value = s.pres;
+    u.uPres.value = Math.max(s.pres, s.tableauOn);
+    u.uWork.value = s.mood.flat;
+    u.uAspX.value = plateView.asp;
+    u.uSeatK.value = plateView.k;
     u.uDistort.value = tw.distort * DISTORT_MAX;
     u.uFreq.value = tw.freq;
     u.uRough.value = tw.roughness;
