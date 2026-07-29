@@ -46,14 +46,6 @@ export type FormState = FormChoreo & {
    */
   tableauOn: number;
   /**
-   * Whose sphere it is, 0..1 — the BATON inside the one metamorphosis. About→Work is
-   * a single scrub (workReveal.form): its first half melts the skull (pres 1→0), its
-   * second unrolls the sheet (flat 0→1), and this crossfades the two meshes in the
-   * narrow window around the middle (0.45→0.55) where both are imitating the sphere —
-   * IN MOTION, never held. 0 = the skull carries the form, 1 = the tableau does.
-   */
-  baton: number;
-  /**
    * The plates' wave phase — a SECOND clock, because the wind has to be able to stop while
    * the metal keeps breathing.
    *
@@ -208,7 +200,6 @@ const state: FormState = {
   wave: 0,
   spin: 0,
   tableauOn: 0,
-  baton: 0,
   mood: {
     sx: MOOD_REST.stretch[0],
     sy: MOOD_REST.stretch[1],
@@ -338,15 +329,12 @@ export function advanceFormClock(
   // Reduced motion still gets the plate: it is the section's subject, not an effect.
   // (mr is 1 there, so it simply snaps.)
   const onPlate = workPlate.index >= 0 ? 1 : 0;
-  // ONE METAMORPHOSIS, ONE AXIS. workReveal.form (the arrival's scrub) carries the
-  // whole About→Work gesture: its FIRST half melts the skull (see the pres override
-  // below), its SECOND unrolls the sheet — so the sphere is only ever an instant both
-  // shapes pass through, never a state that travels. The clock chases the scrub
-  // tightly (FORM_RATE): enough smoothing for the matter to keep its weight, not
-  // enough to lag the gesture.
-  const formScrub = reduced ? 1 : Math.max(0, Math.min(1, workReveal.form));
-  const unroll = Math.max(0, Math.min(1, (formScrub - 0.5) / 0.5));
-  const flatTarget = onPlate * (reduced ? 1 : unroll * unroll * (3 - 2 * unroll));
+  // The roll-out is SCRUBBED, not played: workReveal.form is written by the entrance
+  // timeline, so the metamorphosis advances under the reader's hand — each notch of
+  // the wheel rolls the metal further, backing up melts it back. The clock chases the
+  // scrub tightly (FORM_RATE): enough smoothing for the matter to keep its weight,
+  // not enough to lag the gesture.
+  const flatTarget = onPlate * (reduced ? 1 : Math.max(0, Math.min(1, workReveal.form)));
   md.flat += (flatTarget - md.flat) * (reduced ? 1 : 1 - Math.pow(FORM_RATE, delta));
   // …and the top and bottom of the range SNAP. An exponential ease never lands, and here the
   // last half percent is not cosmetic — it costs twice over:
@@ -448,23 +436,13 @@ export function advanceFormClock(
   // park), falls with the putting-away so the liquid can carry the blob on to
   // Contact's dock. Smooth at both ends: this drives a crossfade of two
   // sphere-wearing forms, and any step in it would flash.
-  // …and EARLY (0.12→0.45 of the presence): it must be fully up before the melt's
-  // midpoint, because it is what HOLDS the skull on stage (and the liquid off it)
-  // while the one metamorphosis plays — see the pres override and baton below.
+  // …and EARLY enough (0.12→0.45) that the tableau's sphere is on stage while the
+  // skull is still melting: the baton passes skull → tableau with no liquid interlude
+  // — a third carrier taking the sphere for a beat between the two meshes read as one
+  // more transition in a stretch that should read as ONE.
   {
     const tIn = Math.max(0, Math.min(1, (easedWork - 0.12) / 0.33));
     state.tableauOn = tIn * tIn * (3 - 2 * tIn) * (1 - easedAfter);
-  }
-  // THE ONE GESTURE's two halves. The skull is HELD (pres pinned up by the corridor)
-  // until the scrub's first half melts it — About's own exit no longer decides; it
-  // only matters outside the corridor. And the baton crossfades the meshes in the
-  // narrow window around the middle, where both are passing through the sphere.
-  {
-    const melt = Math.max(0, Math.min(1, formScrub / 0.5));
-    const meltE = melt * melt * (3 - 2 * melt);
-    state.pres = Math.max(state.pres, state.tableauOn * (1 - meltE));
-    const b = Math.max(0, Math.min(1, (formScrub - 0.45) / 0.1));
-    state.baton = b * b * (3 - 2 * b);
   }
   // NOTE the hover's step forward is NOT here. It used to multiply this scale, which is the
   // whole form's — so pointing at one project's name grew every picture in the gallery,

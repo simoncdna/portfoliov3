@@ -404,13 +404,11 @@ export function ChromeTableau({ reduced }: Props) {
     const modeTarget = tw.mode === "blob" ? 1 : 0;
     modeVis.current += (modeTarget - modeVis.current) * (1 - Math.pow(0.06, delta));
 
-    // On from the BATON (see formClock): the one metamorphosis hands the sphere over
-    // mid-motion — the skull melts through the scrub's first half, this mesh takes the
-    // crossfade around the middle wearing its own sphere disguise, and unrolls through
-    // the second half. Never a held ball, never a liquid interlude.
-    const workOn = reduced
-      ? (s.tableauOn * s.baton > 0.5 ? 1 : 0)
-      : s.tableauOn * s.baton;
+    // On for the whole corridor (see tableauOn in formClock): the baton passes MESH TO
+    // MESH — the skull reforms its sphere at About's end and this mesh, wearing its own
+    // sphere disguise, takes the stage from there. It TRAVELS as that sphere (the dock
+    // below is the clock's), and only unrolls where the roll-out scrub says so.
+    const workOn = reduced ? (s.tableauOn > 0.5 ? 1 : 0) : s.tableauOn;
     const fade = (reduced ? 1 : appear.current) * modeVis.current * workOn;
     const on = fade > 0.004;
     g.visible = on;
