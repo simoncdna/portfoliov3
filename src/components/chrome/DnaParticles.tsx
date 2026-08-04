@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import { Box3, BufferGeometry, BufferAttribute, Color, Euler, Matrix3, Matrix4, Quaternion, ShaderMaterial, Vector3, Vector4 } from "three";
@@ -178,7 +178,42 @@ export function DnaParticles({ reduced }: Props) {
 
   // panel "Particles" slider (8..72) → particle count (density)
   const { particleDetail } = useBlobTweak();
-  const N = Math.max(8000, Math.round(particleDetail * 900));
+  /**
+   * The density the cloud is actually BUILT at — the slider once it has SETTLED,
+   * not its live value.
+   *
+   * Rebuilding this cloud is expensive (a MeshSurfaceSampler pass plus up to 90 000
+   * surface samples), and the slider is a drag: bound straight to `particleDetail`
+   * it fired one full rebuild per pointermove. Measured on an M3 Pro, dragging the
+   * bar across its range:
+   *
+   *   during the drag   66.7 ms/frame (peaks 91.7)   ~15 fps
+   *   at rest           8.3 ms/frame                  120 fps
+   *
+   * i.e. exactly one rebuild per frame, and the one control whose whole job is to
+   * be dialled was the only thing on the page that stuttered.
+   *
+   * So the geometry trails the gesture instead of chasing it. The bar's segments and
+   * its readout still follow the finger — the control feels live, because the part
+   * that is live is the part the eye is on — and the cloud re-forms once, 120 ms
+   * after the hand stops. That reads as the matter taking a moment to reorganise,
+   * which is what it is doing. Rebuilding mid-gesture only ever showed it at 15 fps.
+   *
+   * NOTE the obvious alternative does NOT work here, and it is worth saying why:
+   * allocating once at the maximum count and moving `setDrawRange` would be free,
+   * but the home positions are a golden-angle spiral parameterised on N — `y` walks
+   * from the north pole to the south as `i` goes 0→N. A prefix of that list is
+   * therefore a CAP, not a sparser sphere. Making prefixes uniform means changing
+   * the distribution itself (a radical-inverse sequence on y rather than a linear
+   * walk), which changes how the cloud looks — a decision for the eye, not for a
+   * perf pass.
+   */
+  const [settled, setSettled] = useState(particleDetail);
+  useEffect(() => {
+    const id = window.setTimeout(() => setSettled(particleDetail), 120);
+    return () => window.clearTimeout(id);
+  }, [particleDetail]);
+  const N = Math.max(8000, Math.round(settled * 900));
 
   // head model → the particles form a face (sampled on its surface).
   // skull.glb is meshopt-compressed (EXT_meshopt_compression), hence the third flag —
@@ -218,6 +253,37 @@ export function DnaParticles({ reduced }: Props) {
     []
   );
 
+  /**
+   * The surface sampler and the model's framing — everything about the SKULL, which
+   * the particle count has no bearing on.
+   *
+   * Lifted out of the geometry memo below because it was keyed on N as well, so
+   * every change of density rebuilt the sampler's cumulative-area table over the
+   * model's ~32 600 triangles for a figure that had not moved. The count decides how
+   * many times we ask this object a question; it does not change the object.
+   */
+  const surface = useMemo(() => {
+    if (!headMesh) return null;
+    // respect the glTF node transform (the model is stored lying down; its node
+    // rotation stands it up) → sample local, then push to world space
+    headMesh.updateWorldMatrix(true, false);
+    const worldMat = new Matrix4().copy(headMesh.matrixWorld);
+    const normalMat = new Matrix3().getNormalMatrix(worldMat);
+    const sampler = new MeshSurfaceSampler(headMesh).build();
+    const center = new Vector3();
+    let scale = 1;
+    headMesh.geometry.computeBoundingBox();
+    const lb = headMesh.geometry.boundingBox;
+    if (lb) {
+      const wb = new Box3().copy(lb).applyMatrix4(worldMat);
+      wb.getCenter(center);
+      const size = new Vector3();
+      wb.getSize(size);
+      scale = 3.6 / Math.max(size.x, size.y, size.z);
+    }
+    return { sampler, worldMat, normalMat, center, scale };
+  }, [headMesh]);
+
   const geometry = useMemo(() => {
     const home = new Float32Array(N * 3);
     const target = new Float32Array(N * 3);
@@ -225,29 +291,11 @@ export function DnaParticles({ reduced }: Props) {
     const golden = Math.PI * (3 - Math.sqrt(5));
     const rnd = () => Math.random();
 
-    // sample the head surface → particle target positions (the face)
-    const center = new Vector3();
-    let scale = 1;
-    let sampler: MeshSurfaceSampler | null = null;
-    const worldMat = new Matrix4();
-    const normalMat = new Matrix3();
-    if (headMesh) {
-      // respect the glTF node transform (the model is stored lying down; its node
-      // rotation stands it up) → sample local, then push to world space
-      headMesh.updateWorldMatrix(true, false);
-      worldMat.copy(headMesh.matrixWorld);
-      normalMat.getNormalMatrix(worldMat);
-      sampler = new MeshSurfaceSampler(headMesh).build();
-      headMesh.geometry.computeBoundingBox();
-      const lb = headMesh.geometry.boundingBox;
-      if (lb) {
-        const wb = new Box3().copy(lb).applyMatrix4(worldMat);
-        wb.getCenter(center);
-        const size = new Vector3();
-        wb.getSize(size);
-        scale = 3.6 / Math.max(size.x, size.y, size.z);
-      }
-    }
+    const sampler = surface?.sampler ?? null;
+    const worldMat = surface?.worldMat ?? new Matrix4();
+    const normalMat = surface?.normalMat ?? new Matrix3();
+    const center = surface?.center ?? new Vector3();
+    const scale = surface?.scale ?? 1;
     const tp = new Vector3();
     const tn = new Vector3();
 
@@ -290,7 +338,7 @@ export function DnaParticles({ reduced }: Props) {
     geometry.setAttribute("aTarget", new BufferAttribute(target, 3));
     geometry.setAttribute("aSeed", new BufferAttribute(seed, 1));
     return geometry;
-  }, [N, headMesh]);
+  }, [N, surface]);
 
   useFrame((_, delta) => {
     const pts = points.current;

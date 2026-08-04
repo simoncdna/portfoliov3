@@ -261,12 +261,25 @@ function Oscilloscope({
     let raf = 0;
     let phase = 0;
     let last = performance.now();
+    // Whether there is anything on the canvas to rub out. The clear used to run
+    // unconditionally, ahead of the active test — so a shut panel repainted this
+    // canvas and handed the compositor a fresh texture on every single frame, for
+    // ever, to draw nothing. It now clears ONCE on the way down and then leaves
+    // the surface alone; the loop itself stays alive so re-opening resumes.
+    let painted = false;
     const draw = (now: number) => {
       raf = requestAnimationFrame(draw);
       const dt = (now - last) / 1000;
       last = now;
+      if (!activeRef.current) {
+        if (painted) {
+          ctx.clearRect(0, 0, w, h);
+          painted = false;
+        }
+        return;
+      }
       ctx.clearRect(0, 0, w, h);
-      if (!activeRef.current) return;
+      painted = true;
       phase += dt * 2.4;
       // graticule — minor grid
       const minor = 7;
@@ -474,8 +487,42 @@ export function ControlPanel() {
   const [boot, setBoot] = useState(0);
   // stays true through the reverse "piano" retract on close (before hiding)
   const [show, setShow] = useState(false);
+  const open = t.open;
+  /**
+   * The cascade, opening — unchanged, and deliberately unhurried: this is the
+   * reveal, the moment instrumentation you did not know was there lights up one row
+   * at a time. It is meant to be watched.
+   */
   const STAGGER = 100;
   const REVEAL = 460;
+  /**
+   * The cascade, CLOSING — and it is not the same gesture played backwards.
+   *
+   * Opening is a reveal; closing is putting the tools away, and a reader who has
+   * dismissed a panel has already moved on. At the opening's pace the retract ran
+   * (n-1)·100 + 460 ≈ 1160 ms, which is over a second of watching rows you have
+   * finished with leave the screen one by one — long enough that the ✕ felt
+   * unresponsive.
+   *
+   * Brisk, not instant: it is still a cascade top-down, so the eye reads it as the
+   * panel being ranged rather than as a cut.
+   *
+   * The number that actually decides how fast the dismissal FEELS is not the stagger
+   * on its own — it is when the LAST row is finally gone, because that is the moment
+   * the screen is clear. That tail is (n-1)·CLOSE_STAGGER + CLOSE_REVEAL, and it is
+   * what these two are tuned against rather than the per-row pace:
+   *
+   *   opening's pace, reversed   7·100 + 460 = 1160 ms
+   *   first pass                 7· 40 + 240 =  520 ms
+   *   now                        7· 22 + 190 =  344 ms
+   *
+   * MUST fit inside PANEL_CLOSE_MS — that is the timer that then hides the panel,
+   * releases the scroll (SmoothScroll) and turns the barcode's TWEAK off
+   * (BarcodeEAN13's CLOSE_GRACE_MS). Overrun it and the panel is cut off mid-retract.
+   *   344 ms  ≤  380
+   */
+  const CLOSE_STAGGER = 22;
+  const CLOSE_REVEAL = 190;
 
   const rows = [
     <div key="head" className="flex items-center justify-between">
@@ -524,7 +571,7 @@ export function ControlPanel() {
   const n = rows.length;
 
   useEffect(() => {
-    if (t.open) {
+    if (open) {
       setShow(true);
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         setBoot(1);
@@ -557,7 +604,7 @@ export function ControlPanel() {
       setBoot(0);
     }, PANEL_CLOSE_MS);
     return () => clearTimeout(tid);
-  }, [t.open, n]);
+  }, [open, n]);
 
   // grey → full brightness with a mid flash → the "lights coming on" breath
   const glow = 0.5 + 0.5 * boot + Math.sin(boot * Math.PI) * 0.35;
@@ -565,7 +612,7 @@ export function ControlPanel() {
   return (
     <div
       className="pointer-events-none fixed right-8 top-1/2 z-[120] w-[min(86vw,240px)] -translate-y-1/2"
-      aria-hidden={!t.open}
+      aria-hidden={!open}
     >
       <div
         role="dialog"
@@ -580,11 +627,16 @@ export function ControlPanel() {
           <div
             key={i}
             style={{
-              opacity: t.open ? 1 : 0,
-              transform: t.open ? "translateY(0)" : "translateY(14px)",
-              transition: `opacity ${REVEAL}ms var(--ease-out), transform ${REVEAL}ms var(--ease-out)`,
-              // open: bottom→top (piano). close: reversed (top leaves first) → "ranger".
-              transitionDelay: t.open ? `${(n - 1 - i) * STAGGER}ms` : `${i * STAGGER}ms`,
+              opacity: open ? 1 : 0,
+              transform: open ? "translateY(0)" : "translateY(14px)",
+              transition: `opacity ${open ? REVEAL : CLOSE_REVEAL}ms var(--ease-out), transform ${
+                open ? REVEAL : CLOSE_REVEAL
+              }ms var(--ease-out)`,
+              // open: bottom→top (piano). close: reversed (top leaves first) → "ranger",
+              // and quicker — see CLOSE_STAGGER.
+              transitionDelay: open
+                ? `${(n - 1 - i) * STAGGER}ms`
+                : `${i * CLOSE_STAGGER}ms`,
             }}
           >
             {row}

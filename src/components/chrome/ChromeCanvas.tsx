@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Environment, Lightformer } from "@react-three/drei";
+import { Environment, Lightformer, PerformanceMonitor } from "@react-three/drei";
 import type { Group } from "three";
 import type { BlobShape } from "./ChromeBlob";
 import { FormDriver } from "./FormDriver";
@@ -12,6 +12,7 @@ import { ChromeSkull } from "./ChromeSkull";
 import { DnaParticles } from "./DnaParticles";
 import { MeshDna } from "./MeshDna";
 import { useStageLoad } from "@/lib/stageLoad";
+import { useBlobArmed } from "@/lib/blobTweak";
 import { ENV_FILE } from "@/lib/formField";
 
 const smoothstep = (e0: number, e1: number, x: number) => {
@@ -96,6 +97,47 @@ function ChromeClean({ intensity = 1.2 }: { intensity?: number }) {
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* resolution                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * THE STAGE'S RESOLUTION CEILING — and it is the display's, deliberately.
+ *
+ * A DEAD END, KEPT HERE SO IT IS NOT RE-TRIED. The Hero costs per pixel and
+ * nothing else (LiquidDna is one draw call of two triangles; see MARCH_STEPS
+ * there), and it scales dead linear in them — 4.02 Mpx at 25–33 ms, ~6 ms per
+ * megapixel on an M3 Pro. So dropping this ceiling to 1.25 halves the pixel count
+ * and halves the frame time, which makes it the cheapest win on the whole page on
+ * paper. It was tried, and it is wrong.
+ *
+ * Compared at 1:1 device pixels, 1.75 against 1.25: the specular liseré on the
+ * chrome goes visibly chunky. The reasoning that justified it — "a mirror-smooth
+ * blob has no high-frequency detail to resolve" — has it exactly backwards. On a
+ * mirror the REFLECTIONS are the detail: thin bright edges one or two pixels wide,
+ * which is precisely what resolution buys and precisely what this material is
+ * made of. There is no text on the stage, but there is plenty to resolve.
+ *
+ * So the frame rate comes from the cost per pixel instead (MARCH_STEPS, 96 → 64,
+ * for the same 2x at full resolution), and this stays at the display's.
+ *
+ * The floor below is only where PerformanceMonitor may take it on hardware that
+ * still cannot cope — a soft blob moving is better than a sharp one stuttering.
+ * That trade is worth making when the alternative is 15 fps; it is not worth
+ * making pre-emptively on machines that were fine.
+ */
+const DPR_CEIL = 1.75;
+/**
+ * Phones get a shade less. Not because their screens are short of pixels — a 3x
+ * phone screen has plenty — but because their fill rate is an order of magnitude
+ * under a desktop GPU's, and this shader is pure fill.
+ */
+const DPR_CEIL_SMALL = 1.4;
+const DPR_FLOOR = 0.75;
+
+/** Resolution changes reallocate the drawing buffer, so they are quantised. */
+const dprStep = (v: number) => Math.round(v * 20) / 20;
+
 type Vec3 = [number, number, number];
 type Lamp = { intensity: number; color: string; position: Vec3 };
 export type LightsConfig = {
@@ -144,7 +186,19 @@ export function ChromeCanvas({
   const blobGroup = useRef<Group | null>(null);
   const shapeRef = useRef({ flow: 0, distort: 0.3, freq: 0.4 });
   const [reduced, setReduced] = useState(false);
-  const [dpr, setDpr] = useState<[number, number]>([1, 1.75]);
+  /** The ceiling this device is allowed (see DPR_CEIL), and where we currently are. */
+  const ceil = useRef(DPR_CEIL);
+  const [dpr, setDpr] = useState(DPR_CEIL);
+  /** Whether the barcode's panel has been reached for — see below. */
+  const armed = useBlobArmed();
+  /**
+   * Degrade under load, recover when it lifts. Quantised and clamped to this
+   * device's ceiling, so a machine that copes simply sits at the ceiling and this
+   * never fires at all.
+   */
+  const onPerf = useCallback(({ factor }: { factor: number }) => {
+    setDpr(dprStep(DPR_FLOOR + factor * (ceil.current - DPR_FLOOR)));
+  }, []);
   /** How hard this stage may work right now. The section menu turns it down while its
    *  full-screen curtain is over the page: a canvas repainting at full resolution under a
    *  moving full-screen layer starves the compositor — see stageLoad. */
@@ -157,7 +211,10 @@ export function ChromeCanvas({
     mq.addEventListener("change", onChange);
 
     // lighter GPU load on small screens
-    if (window.innerWidth < 768) setDpr([1, 1.4]);
+    if (window.innerWidth < 768) {
+      ceil.current = DPR_CEIL_SMALL;
+      setDpr(DPR_CEIL_SMALL);
+    }
 
     let ticking = false;
     const onScroll = () => {
@@ -238,6 +295,12 @@ export function ChromeCanvas({
         // canvas has no business receiving them.
         style={{ background: "transparent", pointerEvents: "none" }}
       >
+        {/* Watches the real frame rate and walks the resolution down if this GPU
+            cannot hold the budget — see DPR_CEIL. factor starts at 1 so a capable
+            machine opens at full quality rather than climbing to it; flipflops
+            stops a borderline device oscillating for ever and pins it at the
+            floor instead. */}
+        <PerformanceMonitor factor={1} flipflops={3} onChange={onPerf} onFallback={onPerf} />
         <Suspense fallback={null}>
           {/* No scene background → canvas stays transparent so the chrome form
               floats on the page's void. Glow is done in CSS behind the canvas. */}
@@ -286,14 +349,37 @@ export function ChromeCanvas({
           <Suspense fallback={null}>
             <ChromeTableau reduced={reduced} />
           </Suspense>
-          <MeshDna reduced={reduced} />
-          {/* The two skull-sampling forms wait on an 8.9 MB glb, so they get their
-              own boundary — inside the outer one they would hold the liquid (which
-              needs nothing but a shader) off the screen until the model landed. */}
+          {/* The skull mesh — the About section's form, so always present. */}
+          {/* Its glb is ~1 MB, so it keeps its own boundary: inside the outer one it
+              would hold the liquid (which needs nothing but a shader) off the
+              screen until the model landed. */}
           <Suspense fallback={null}>
             <ChromeSkull reduced={reduced} />
-            <DnaParticles reduced={reduced} />
           </Suspense>
+          {/*
+            THE TWO ALTERNATIVE REPRESENTATIONS — wireframe and particles — exist
+            only for the barcode panel's Form switch, and they are MOUNTED only once
+            that panel has been reached for (see blobTweak.arm).
+
+            They drew nothing before this gate — both bail on `fade <= 0.004` in
+            their first frame — but they were paying their construction on every
+            single page load, for an easter egg most visitors never open:
+
+              MeshDna       a 22 848-vertex line geometry, built on mount
+              DnaParticles  a MeshSurfaceSampler over the whole skull, ~60 ms on
+                            the main thread — one of the page's two long tasks
+
+            Arming happens on the barcode's HOVER, i.e. a beat before the panel can
+            possibly be open, so the construction lands while the cascade plays
+            rather than in the middle of a form crossfade. Nothing is lost: with the
+            panel unreachable, `mode` can never leave "blob".
+          */}
+          {armed && (
+            <Suspense fallback={null}>
+              <MeshDna reduced={reduced} />
+              <DnaParticles reduced={reduced} />
+            </Suspense>
+          )}
         </Suspense>
       </Canvas>
     </div>

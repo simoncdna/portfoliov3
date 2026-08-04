@@ -61,6 +61,13 @@ export function Hero() {
             hover reveals TWEAK; click opens the blob control panel */}
         <button
           type="button"
+          // The panel is fetched and mounted on the REACH, not on the click (see
+          // blobTweak.arm): hovering is what reveals the word TWEAK, so by the time
+          // the click lands the chunk is in and the panel is sitting there closed,
+          // ready to play its cascade. A tap with no hover still works — arm and
+          // open land in the same tick, and the panel covers that itself.
+          onPointerEnter={() => blobTweak.arm()}
+          onFocus={() => blobTweak.arm()}
           onClick={() => blobTweak.toggle()}
           aria-label="Open blob controls"
           className="cursor-none"

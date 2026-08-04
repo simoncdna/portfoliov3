@@ -29,8 +29,46 @@ type Props = {
   reduced?: boolean;
 };
 
+/**
+ * The march's step ceiling — how many times a single ray may evaluate the field
+ * before it gives up.
+ *
+ * This is THE cost of the Hero. The section is one draw call of two triangles and
+ * it was the most expensive frame on the site by a factor of three, because the
+ * price is paid per pixel and nothing else: `map()` costs ~6 simplex fetches, and
+ * this loop runs it up to this many times, then `calcNormal` four more.
+ *
+ * Measured on an M3 Pro at 4.02 Mpx (dpr 1.75, a ~1500px window), median frame:
+ *
+ *            default Distort (0.42)    Distort at 1.0 (the panel's max)
+ *   96 steps   25–33 ms  (30–43 fps)              ~38 ms
+ *   64 steps      16.8 ms  (52 fps)          25.4 ms  (35 fps)
+ *   48 steps               —                 25.2 ms  (36 fps)
+ *
+ * 64, on two readings of that table. It takes the whole of the 96→64 win — the
+ * rays that were still creeping toward the surface at step 64 were a minority, and
+ * truncating them costs nothing visible: checked at 1:1 device pixels against the
+ * 96-step render, at BOTH the shipped Distort and the panel's maximum, where the
+ * step-safety factor is tightest and punch-through would show first. No speckle, no
+ * holes, no softening of the specular detail.
+ *
+ * And 48 buys nothing over 64 (25.2 vs 25.4 ms at max Distort, i.e. inside the
+ * noise): below 64 the ceiling has stopped being what binds, so going lower would
+ * be spending artifact risk for no frame time. If this ever needs to move again,
+ * the lever with headroom left is the field's cost per step — sdBlob's domain warp
+ * is three simplex fetches on its own — not this number.
+ *
+ * NOTE what is NOT the lever here: resolution. Dropping dpr from 1.75 to 1.25
+ * halves the pixel count and is by far the cheapest win on paper, and it was tried
+ * and rejected — on a mirror surface the reflections ARE the high-frequency detail,
+ * and at 1.25 the specular liseré goes visibly chunky. The frame rate has to come
+ * from the cost per pixel, not from fewer of them.
+ */
+const MARCH_STEPS = 64;
+
 const FRAG = /* glsl */ `
 precision highp float;
+#define MARCH_STEPS ${MARCH_STEPS}
 varying vec2 vUv;
 uniform vec3  uCamPos;
 uniform mat3  uCamRot;
@@ -313,7 +351,7 @@ void main(){
                                       + uFlag * uFlagAmp * 4.0));
   float d = 0.0;
   bool hit = false;
-  for (int i = 0; i < 96; i++){
+  for (int i = 0; i < MARCH_STEPS; i++){
     d = map(ro + rd * t);
     if (d < 0.0015) { hit = true; break; }
     t += d * stepK;

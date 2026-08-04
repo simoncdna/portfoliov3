@@ -65,13 +65,46 @@ let snapshot: BlobTweak = { ...DEFAULTS };
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
+/**
+ * Whether the instrumentation has been ASKED for yet — the barcode hovered,
+ * focused or clicked.
+ *
+ * The panel is an easter egg: a cipher on a barcode that most visitors never read,
+ * let alone click. What hangs off this flag is the two ALTERNATIVE REPRESENTATIONS
+ * of the form, which nothing but the panel's Form switch can ever select — and which
+ * were being built on every page load for a switch nobody had touched:
+ *
+ *  - MeshDna, a 22 848-vertex line geometry;
+ *  - DnaParticles, a MeshSurfaceSampler run over the whole skull.
+ *
+ * Both bail out on their first frame when their mode is not selected, so they drew
+ * nothing; they simply cost their construction. They are mounted from this flag
+ * instead — see ChromeCanvas. Nothing is lost: with the panel untouched, `mode` can
+ * never leave "blob".
+ *
+ * Armed on HOVER rather than on click (see Hero's barcode), because hovering is what
+ * reveals the word TWEAK — so the construction lands a beat before the panel can be
+ * open, rather than in the middle of a form crossfade. One-way: nothing disarms it.
+ *
+ * Kept out of BlobTweak on purpose: it is not a dial, and `reset()` must not reach it.
+ */
+let armed = false;
+
 export const blobTweak = {
   get: (): BlobTweak => snapshot,
   set: (patch: Partial<BlobTweak>) => {
     snapshot = { ...snapshot, ...patch };
     emit();
   },
+  /** The panel has been reached for — mount it and what it drives. One-way. */
+  arm: () => {
+    if (armed) return;
+    armed = true;
+    emit();
+  },
+  armed: () => armed,
   toggle: () => {
+    armed = true;
     snapshot = { ...snapshot, open: !snapshot.open };
     emit();
   },
@@ -98,6 +131,33 @@ export function useBlobOpen(): boolean {
   );
 }
 
-/** Duration of the panel's reverse "piano" close — kept in sync with the
- *  ControlPanel and the barcode's turn-off timing. */
-export const PANEL_CLOSE_MS = 1200;
+/**
+ * Subscribe to just `armed` — see the flag above. Always false on the server, so
+ * nothing the panel drives is in the prerendered HTML.
+ */
+export function useBlobArmed(): boolean {
+  return useSyncExternalStore(blobTweak.subscribe, blobTweak.armed, () => false);
+}
+
+/**
+ * How long the panel's reverse "piano" close takes — the one number three separate
+ * things wait on, so it lives here rather than in any of them:
+ *
+ *  - ControlPanel hides the panel and resets its gauges once it elapses;
+ *  - BarcodeEAN13 keeps TWEAK lit for PANEL_CLOSE_MS - 250 (its CLOSE_GRACE_MS), so
+ *    the cipher does not go dark while the panel is still on screen;
+ *  - SmoothScroll hands the page back to Lenis, so it cannot start moving under a
+ *    panel that is still retracting.
+ *
+ * 380, down from 1200. It has to be at least as long as the retract itself, and the
+ * retract used to be the opening cascade played backwards: (n-1)·100 + 460 ≈ 1160 ms
+ * of watching rows you are done with leave one at a time, which made the ✕ feel
+ * unresponsive. The close has its own, much brisker pace now — see CLOSE_STAGGER /
+ * CLOSE_REVEAL in ControlPanel, 344 ms to the last row leaving — and this is that
+ * plus a couple of frames of margin.
+ *
+ * Keep it ≥ the retract, and comfortably > 250: shorter than the retract and the
+ * panel is cut off mid-cascade, and the barcode's grace above is derived by
+ * subtracting 250 from this, so it must stay positive.
+ */
+export const PANEL_CLOSE_MS = 380;
