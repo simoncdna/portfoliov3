@@ -166,3 +166,22 @@ export function formChoreo(
     skullOn: smoothstep(0, HANDOVER_IN * 1.5, pres),
   };
 }
+
+/**
+ * Atténue une valeur vers son identité par une présence 0..1.
+ *
+ * La règle de confinement de la caméra, en un seul endroit. Elle interpole depuis
+ * l'IDENTITÉ de la prop et non depuis zéro, ce qui compte : l'identité de camZ est 10 et
+ * celle de camFov 42, donc interpoler depuis zéro mettrait la caméra dans le sujet à
+ * présence nulle au lieu de la laisser où elle a toujours été.
+ *
+ * À présence 0 le résultat est l'identité EXACTEMENT — `identity + (target - identity) * 0`
+ * est `identity + 0`, pas une approximation. C'est ce qui fait du confinement une identité
+ * arithmétique plutôt qu'une promesse : hors du corridor de Work, le frustum contre lequel
+ * tout le CSS a été réglé est intact au bit près. Voir tests/formChoreo.test.ts.
+ *
+ * Ici plutôt que dans formClock parce que ce module n'a AUCUN import : il est donc
+ * importable depuis Node, et l'invariant peut être testé sans navigateur ni framework.
+ */
+export const confine = (identity: number, target: number, presence: number): number =>
+  identity + (target - identity) * presence;
