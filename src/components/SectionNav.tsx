@@ -61,17 +61,47 @@ const STAGGER_MS = 80;
 const CHAR_MS = 38;
 
 /* ---- and the way out ----
-   Its own numbers, because it is not the entrance reversed.
-   DIRECTION: the letters leave UPWARD, the same way the curtain goes. Sent back down the
-   way they came they travelled against it, so the exit was two things moving apart
-   instead of one thing leaving.
-   SPEED: unhurried — the exit lands around 1.1s against the entrance's ~1.7s. What must
-   not come back is the old fault: the curtain sitting still for 640ms while the letters
-   crawled down, which read as a control that had not registered being pressed. That was
-   the DELAY and the EASING, not the duration, so the duration is free to be generous as
-   long as --ease-out keeps the first movement immediate. */
-const EXIT_STAGGER_MS = 75;
-const EXIT_CHAR_MS = 32;
+ * THE EXIT IS THE ENTRANCE RUN BACKWARDS. It has no constants of its own — every delay
+ * below is the mirror of an entrance delay about the moment the entrance ends, so the two
+ * are one gesture and its undoing rather than two animations that happen to resemble each
+ * other. It used to keep a separate 75/32 pair, and separate numbers drift: they were tuned
+ * against a curtain that left at 120ms and carried every still-moving letter off screen
+ * with it, so nobody ever saw what they were tuning.
+ *
+ * THE MIRROR, once simplified. Reversing `BASE_MS + i·STAGGER + c·CHAR + 820` about
+ * T = BASE_MS + 2·STAGGER + 6·CHAR + 820 cancels BASE_MS and the duration and leaves
+ *
+ *     (rows − 1 − i) · STAGGER_MS  +  (LONGEST − 1 − c) · CHAR_MS
+ *
+ * which is what EXIT_DELAY_MS computes. Two consequences worth naming, because both are the
+ * mirror doing its job rather than an oversight:
+ *   - rows leave bottom→top and letters right→left, last-in-first-out.
+ *   - the char term counts from LONGEST, not from this row's own length. The entrance ends on
+ *     CONTACT's seventh letter, so that glyph is the pivot and every shorter row is pushed
+ *     later by the letters it does not have. It is why ABOUT's A is the very last thing gone
+ *     (388ms), which is also the right place to end: the top row, where a reader tidying
+ *     bottom→top finishes.
+ *
+ * WHAT IS NOT MIRRORED, and why. Two departures, both deliberate:
+ *   - THE EASING STAYS --ease-out. Its true inverse is --ease-in (they are each other's
+ *     reflection — the tokens are literally cubic-bezier(0.16,1,0.3,1) and (0.7,0,0.84,0)),
+ *     and it fails twice over. Back-loaded, a letter is still 98% present at 800 of its
+ *     820ms, so it is on screen for its whole travel and the curtain cannot help dragging
+ *     it — the exact bug this replaced. And it puts the slow end of the ramp against the
+ *     click, which reads as a control that has not registered being pressed. Front-loaded is
+ *     what a dismissal owes: the first glyph moves within a frame.
+ *   - THE CURTAIN DOES NOT WAIT AS LONG as the mirror says. Strictly it should lift at
+ *     1068ms; it lifts at 830 (--nav-exit-hold), the moment the last glyph is under the mask.
+ *     The mirror's 1068 is inherited from the entrance's overlap — letters climbing out of a
+ *     curtain still falling — and reflected onto the exit that same overlap lands at the END
+ *     of the letters' travel instead of the start, where it is a drag rather than an
+ *     entanglement. 830 keeps it one continuous cascade with no hole and nothing dragged.
+ *
+ * Total: ~1450ms against the entrance's 1688. Shorter, as a dismissal should be, and shorter
+ * for a reason rather than by taste — it is the same chain with the overlap taken out. */
+const LONGEST_LABEL = Math.max(...SECTIONS.map((s) => s.label.length));
+const EXIT_DELAY_MS = (i: number, c: number) =>
+  (SECTIONS.length - 1 - i) * STAGGER_MS + (LONGEST_LABEL - 1 - c) * CHAR_MS;
 
 /**
  * Safety net only — the veil is normally hidden on its own `transitionend`.
@@ -87,8 +117,16 @@ const EXIT_CHAR_MS = 32;
  * This is kept for the cases where the event never arrives at all: a tab backgrounded
  * mid-close, reduced motion collapsing the transition, a lift interrupted by a resize.
  * Without it the rows would stay in the tab order for ever.
+ *
+ * The exit is due at 1450ms — 830ms of hold while the letters retreat, then the curtain's own
+ * 620ms — and this is deliberately well clear of it rather than just past it. 1800 was tried
+ * and is wrong for the reason above: the event was measured landing at 1757ms under main-
+ * thread pressure, because the blob is running by then and `transitionend` is dispatched on
+ * the main thread. A fallback that can beat the real event is not a safety net, it is the
+ * mid-lift `visibility: hidden` bug reintroduced through the back door. Anything the event
+ * genuinely never arrives for is not in a hurry, so the headroom is free.
  */
-const CLOSE_FALLBACK_MS = 1900;
+const CLOSE_FALLBACK_MS = 2400;
 
 /*
  * THE BLOB IS ALIVE FROM THE FIRST FRAME OF THE CLOSE — at reduced resolution, not paused.
@@ -550,6 +588,11 @@ export function SectionNav() {
     } else {
       // The blob is alive for the whole lift, at reduced resolution — see the compositor
       // note above OPEN_MS. Full resolution returns in finish(), once the veil is off.
+      // Since the curtain now holds for --nav-exit-hold, this resume lands 830ms BEFORE
+      // the lift, behind a screen that is still entirely black: the form is warm and
+      // running by the time any of it can be seen, which is what that note was trying to
+      // buy with a 0ms delay. Left at the top of the close rather than moved onto a timer
+      // of its own — a resume nobody can see needs no timing.
       // Guarded on the veil actually being up: this effect also runs on MOUNT with
       // open=false, and a page that loads into low resolution for nobody is the bug the
       // guard prevents. The inline style is `show`'s reflection in the DOM, which keeps
@@ -674,10 +717,6 @@ export function SectionNav() {
 
         <nav className="nav-list" aria-label="Sections">
           {SECTIONS.map((s, i) => {
-            // Rows arrive in reading order and leave from the far end back.
-            const row = open
-              ? i * STAGGER_MS
-              : (SECTIONS.length - 1 - i) * EXIT_STAGGER_MS;
             const chars = [...s.label];
             return (
               <a
@@ -700,6 +739,8 @@ export function SectionNav() {
                       It is also why the underline lives on .nav-label, outside this: a
                       rule below the boundary would be clipped by it. */}
                   <span className="nav-mask">
+                    {/* Arriving, a letter's delay counts UP from its row; leaving, the whole
+                        chain is the entrance mirrored — see EXIT_DELAY_MS. */}
                     {chars.map((ch, c) => (
                       <span
                         key={c}
@@ -707,8 +748,8 @@ export function SectionNav() {
                         style={{
                           transitionDelay: `${
                             open
-                              ? BASE_MS + row + c * CHAR_MS
-                              : row + (chars.length - 1 - c) * EXIT_CHAR_MS
+                              ? BASE_MS + i * STAGGER_MS + c * CHAR_MS
+                              : EXIT_DELAY_MS(i, c)
                           }ms`,
                         }}
                       >

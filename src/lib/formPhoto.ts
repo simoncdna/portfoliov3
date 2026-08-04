@@ -51,8 +51,11 @@ const N = works.length;
  * camera's visible height at z = 0 — see --form-lift.)
  */
 export const PLATE_H = 3.4;
-/** Half-thickness. Never scaled with the picture: it is the edge of a print, not part of it. */
-export const PLATE_T = 0.16;
+/** Half-thickness. Never scaled with the picture: it is the edge of a print, not part of it.
+    0.06 (from 0.16): at 0.16 the canvas read as a PANEL — a slab of metal with a picture on
+    it — where a toile is millimetres of cloth on a châssis; the edge shows at the page turn,
+    and it should read thin. The lining's tuck (PLATE_T·0.5) rides the same number. */
+export const PLATE_T = 0.06;
 /**
  * The moulding's measures — the piece is a FRAMED WORK, and the frame is a MESH now
  * (see ChromeFrame, which owns the sculpture); these numbers stay here because the
@@ -322,8 +325,9 @@ export const PHOTO_SHADE = /* glsl */ `
 ${Array.from({ length: N }, (_, i) => `uniform sampler2D uPhoto${i};`).join("\n")}
 /** 1 once a file has decoded; a slot at 0 is a sheet that simply stays chrome */
 uniform float uPhotoReady[${N}];
-/** The developer, 0 = chrome, 1 = print — mood.dev from the clock. Strictly AFTER uFlat:
-    the metal settles flat and still, and only then does the image come up (see photoShade). */
+/** The print's arrival, 0 = bare chrome, 1 = the finished print — mood.dev from the
+    clock. Strictly AFTER uFlat: the metal settles flat and still, and only then does
+    the picture fade in over it (see photoShade). */
 uniform float uPhotoOn;
 /** the print's exposure / sheen / gloss — see photoShade */
 uniform vec3 uPrint;
@@ -450,30 +454,13 @@ vec3 photoShade(vec3 metal, vec3 nLocal, vec2 uv, float dim, vec3 rgb){
   // not mirrored: this is what shows the wind without a single highlight.
   float lam = 0.5 + 0.5 * dot(nLocal, normalize(vec3(-0.35, 0.45, 0.82)));
   float lit = mix(1.0, 0.35 + 1.1 * lam, uShade);
-  // The developer. The print does not fade in, it COMES UP, and it comes up the way a
-  // print does — BY TONE. In the bath the shadows are the first thing to exist: density
-  // grows where the exposure was strongest, and the highlights are the last to separate
-  // from the paper. So each pixel's threshold is its own luminance (dark = early),
-  // jittered by a photographic grain that crawls while the developer works. The frontier
-  // is tonal, not spatial: the image surfaces as a latent picture gaining density, not as
-  // a wipe or a dissolve. The whole branch is dead once developed — uPhotoOn is a
-  // uniform, so the settled section pays for none of this.
+  // The print fades in over the settled chrome. The fade's CURVE is the caller's
+  // business: ChromeTableau shapes uPhotoOn on the CPU (dev-panel dialled — density
+  // ramp, timing), so this mixes and nothing else. At low \`on\` the result is mostly
+  // metal, which is exactly a print still wet in the chrome — the reflection drains
+  // away for free as the picture lands.
   float on = uPhotoOn;
-  // Density rises with the developer: exposure climbs and the curve steepens — a young
-  // print is thin and foggy, and the contrast is the last thing it earns.
-  vec3 dTone = clamp((tone - 0.5) * (0.75 + 0.25 * on) + 0.5, 0.0, 1.0);
-  // …and the metal's own reflection lies OVER the young emulsion and drains away as the
-  // density comes up: the picture is developed out of the chrome, not pasted over it.
-  float gloss = mix(0.5, uPrint.z, on);
-  vec3 print = dTone * ((uPrint.x * (0.35 + 0.65 * on)) * lit + uPrint.y * e) * dim
-             + metal * gloss;
-  float show = on;
-  if (on < 0.999) {
-    float lum = dot(tone, vec3(0.3333));
-    float g = snoise(vec3(uv * 140.0, uTime * 0.6));
-    float th = lum * 0.85 + g * 0.15;
-    show = smoothstep(th, th + 0.22, on * 1.6 - 0.2);
-  }
-  return mix(metal, print, show);
+  vec3 print = tone * (uPrint.x * lit + uPrint.y * e) * dim + metal * uPrint.z;
+  return mix(metal, print, on);
 }
 `;

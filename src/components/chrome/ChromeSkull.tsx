@@ -86,12 +86,19 @@ const float PI = 3.14159265359;
  */
 vec3 baseAt(vec3 home, float w){
   vec3 p = mix(home, aTarget, w);
-  vec3 d = normalize(home + vec3(1e-4));
-  float fly = sin(w * PI);
-  vec3 nz = vec3(snoise(d * 1.1 + vec3(0.0, uTime * 0.25, 0.0)),
-                 snoise(d * 1.1 + vec3(4.7, uTime * 0.20, 1.3)),
-                 snoise(d * 1.1 + vec3(8.3, uTime * 0.15, 2.6)));
-  return p + nz * fly * uFly;
+  // The swirl only exists in flight — sin(w·PI) is zero at both resting states, and
+  // a settled form (or a sphere waiting to morph) was paying its three fetches per
+  // vertex to add nothing. w varies per vertex, but outside the morph every vertex
+  // sits at the same end, so the branch is coherent exactly when it matters.
+  float fly = sin(w * PI) * uFly;
+  if (fly > 1e-4) {
+    vec3 d = normalize(home + vec3(1e-4));
+    vec3 nz = vec3(snoise(d * 1.1 + vec3(0.0, uTime * 0.25, 0.0)),
+                   snoise(d * 1.1 + vec3(4.7, uTime * 0.20, 1.3)),
+                   snoise(d * 1.1 + vec3(8.3, uTime * 0.15, 2.6)));
+    p += nz * fly;
+  }
+  return p;
 }
 
 void main(){

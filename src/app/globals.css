@@ -36,6 +36,25 @@
   --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
 
+  /* When the section menu's curtain joins the cascade its letters started — it is the last
+     beat of that one gesture, not a second event waiting for the first to be over.
+     Keyed to when the last letter is GONE, not to when its transition ends, and the two are
+     375ms apart: --ease-out is front-loaded, so 98% of an 820ms travel is covered in 445ms
+     and the glyph is under the mask from then on, the rest resolving a distance already out
+     of sight. ABOUT's A is last away at 388ms (the mirror of the entrance — see
+     EXIT_DELAY_MS in SectionNav.tsx), so 388 + 445 ≈ 830: the curtain moves on the frame the
+     screen goes empty. Both the alternatives were tried and both are visible — waiting for
+     the formal end of the chain leaves a hole, and the strict mirror's 1068ms leaves a
+     bigger one.
+     Overlapping the tail is safe for the one reason the old 120ms was not: the mask travels
+     WITH the curtain, so a letter already clipped stays clipped. What the curtain must not do
+     is leave while a letter is still visibly moving; finishing its arithmetic is not the same
+     thing.
+     It lives at :root rather than on .nav-veil because the corner eye has to come back on the
+     same beat and is not a descendant of the veil — one number, two places, and they may not
+     drift apart. */
+  --nav-exit-hold: 830ms;
+
   /* layout */
   --gutter: clamp(20px, 5vw, 64px);
   --section-y: clamp(96px, 14vh, 192px);
@@ -892,6 +911,19 @@ a {
   transition: opacity 200ms linear;
 }
 
+/* And it comes back WITH the curtain, not before it. The toggle sits at z-index 72, above
+   the veil's 70, so an eye that fades in during the hold fades in ON TOP of a full black
+   screen — a control floating on a plane it does not belong to for the best part of a
+   second. Held to --nav-exit-hold it turns up exactly as its own corner is uncovered: the
+   curtain retracts upward, so the top-right is the first thing the lift gives back.
+   The base rule needs the transition at all for the same reason: only [data-open] declared
+   one, so coming back was an instant snap from 0 to 1 that had simply never been noticed
+   behind a curtain that used to leave at 120ms. */
+.nav-toggle {
+  opacity: 1;
+  transition: opacity 320ms linear var(--nav-exit-hold);
+}
+
 .nav-veil {
   position: fixed;
   inset: 0;
@@ -911,19 +943,28 @@ a {
      this size — it arrives like a dropped shutter. In-out accelerates and settles.
      Closing, it retracts upward on a delay, so the letters are gone before it leaves. */
   transform: translateY(-100%);
-  /* THE EXIT. --ease-out, not the --ease-inout the entrance uses, and this is the whole
-     difference between a lift you can see and one you cannot: --ease-inout is
-     cubic-bezier(0.65, 0, 0.35, 1), whose first third covers almost no distance at all —
-     under a pixel of an 861px lift after 300ms, measured. Behind an 140ms delay that made
-     the first third of a second look like nothing happening, and then the curtain was
-     simply gone. --ease-out is front-loaded: it commits immediately, which is what a
-     dismissal owes the click.
-     The whole exit is ~640ms against the entrance's ~1.7s. That asymmetry is deliberate —
-     an entrance is looked at, a dismissal is obeyed. */
-  transition: transform 980ms var(--ease-out);
-  /* Just enough for the letters to get moving first, so they lead the curtain rather than
-     being dragged out by it. */
-  transition-delay: 120ms;
+  /* THE EXIT IS THE FALL REVERSED — the same 620ms and the same --ease-inout, which happens
+     to be its own reflection (cubic-bezier(0.65, 0, 0.35, 1) reversed is itself), so the
+     lift really is the drop played backwards: decelerating into rest becomes accelerating
+     out of it.
+     It carried its own 980ms/--ease-out pair for a while, on the grounds that --ease-inout's
+     slow start read as nothing happening. That was measured at 980ms, where the first 300ms
+     is under a pixel; at 620 the same curve has moved 30px by 120ms and 395px by 310ms, so
+     the objection does not survive the shorter duration. And it was never really about the
+     curve — it was about the curtain being the only thing on screen with anything to do.
+     It no longer is: it picks up a cascade already in progress. */
+  transition: transform 620ms var(--ease-inout);
+  /* IT IS THE LAST BEAT OF THE LETTERS' CASCADE, not a separate event. This was 120ms —
+     "just enough for the letters to get moving first" — and the reasoning was wrong about
+     who was moving whom: the letters are inside this element, so once it starts travelling
+     they travel with it. A curtain leaving at 120ms did not let the retreat lead, it
+     ABDUCTED it: every letter still climbing was carried off screen bodily, and the exit
+     that was tuned letter by letter was never once seen.
+     --nav-exit-hold picks up on the frame the last glyph clears the mask, so the lift is the
+     next item in the same stagger rather than a second gesture after a pause. Nothing is
+     dead at either end: --ease-out has the first letter moving within a frame of the click,
+     and the curtain takes over the moment the screen is empty. */
+  transition-delay: var(--nav-exit-hold);
 }
 
 /* THE ENTRANCE keeps --ease-inout: it is a mass falling into place, and it has to
@@ -1063,13 +1104,17 @@ a {
   transform: translateY(0);
 }
 
-/* Out through the TOP of the mask, the same way the curtain goes, and at half the speed
-   of the entrance. Sent back down below the line they came from, the letters travelled
-   against the curtain and the exit read as two things separating rather than one thing
-   leaving. Must come after the [data-open] rule to win when a re-open lands mid-close. */
+/* Out through the TOP of the mask, the same way the curtain goes. Sent back down below the
+   line they came from, the letters travelled against the curtain and the exit read as two
+   things separating rather than one thing leaving. Must come after the [data-open] rule to
+   win when a re-open lands mid-close.
+   NO duration of its own, and that is the point: it inherits the entrance's 820ms and
+   --ease-out from .nav-char above, so a letter leaves at exactly the speed it arrived. The
+   overrides this rule used to carry (700ms, then 860) were tuning a motion that a curtain
+   lifting at 120ms was carrying off screen before any of it could be seen. Only the
+   direction is reversed here now; the reversal of the ORDER is in EXIT_DELAY_MS. */
 .nav-veil[data-closing] .nav-char {
   transform: translateY(-102%);
-  transition-duration: 700ms;
 }
 
 .nav-label {
@@ -1105,8 +1150,11 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* .nav-toggle is in here for the delay, not the duration: without it the corner eye is
+     held out for --nav-exit-hold after a close that is otherwise instantaneous. */
   .nav-char,
   .nav-close,
+  .nav-toggle,
   .nav-veil {
     transition-duration: 1ms;
     transition-delay: 0ms !important;

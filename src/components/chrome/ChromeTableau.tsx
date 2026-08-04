@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEnvironment, useGLTF } from "@react-three/drei";
 import {
@@ -17,6 +17,7 @@ import {
   Matrix4,
   Mesh,
   ShaderMaterial,
+  SphereGeometry,
   TextureLoader,
   Vector3,
 } from "three";
@@ -25,6 +26,7 @@ import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { SNOISE, FORM_DISPLACE, CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { FRAME_OUT, FRAME_T, FRAME_W, LINER_W, PHOTO_SHADE, PLATE_ASP0, PLATE_H, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
+import { toileTweak, useToileTweak } from "@/lib/toileTweak";
 import { formState } from "@/lib/formClock";
 import { works } from "@/data/site";
 
@@ -58,8 +60,12 @@ type Props = {
 const CANVAS_SEED = 0.45;
 /** Swirl amplitude while vertices are in flight (world units, peaks mid-morph). */
 const FLY = 0.22;
-/** The hover's step forward — mirrors PLATE_GROW in LiquidDna. */
-const GROW = 0.1;
+/*
+ * THE HOVER DOES NOT STEP FORWARD. A 10% grow on mood.hover (mirroring PLATE_GROW
+ * in LiquidDna) was tried and removed: a framed work hanging on a wall does not
+ * lean toward the reader. What answers the hover is the PICTURE — the colour
+ * fading in (uColour below) — not the object's size.
+ */
 /** How far the picture may fill the room the dock leaves it — mirrors PLATE_FILL. */
 const FILL = 0.92;
 
@@ -75,6 +81,7 @@ uniform float uPres;
 uniform float uFly;
 uniform float uAspX;
 uniform float uSeatK;
+uniform float uFit;
 attribute vec3 aTarget;
 attribute float aSeed;
 varying vec3 vNrm;
@@ -91,12 +98,18 @@ const float PI = 3.14159265359;
     home direction at low frequency, so the shell stretches rather than tears. */
 vec3 baseAt(vec3 home, vec3 seat, float w){
   vec3 p = mix(home, seat, w);
-  vec3 d = normalize(home + vec3(1e-4));
-  float fly = sin(w * PI);
-  vec3 nz = vec3(snoise(d * 1.1 + vec3(0.0, uTime * 0.25, 0.0)),
-                 snoise(d * 1.1 + vec3(4.7, uTime * 0.20, 1.3)),
-                 snoise(d * 1.1 + vec3(8.3, uTime * 0.15, 2.6)));
-  return p + nz * fly * uFly;
+  // In flight only — see ChromeSkull's baseAt: zero at both ends of the morph, and
+  // the settled tableau (most of Work's screen time) skips the three fetches on
+  // every vertex of the carved frame.
+  float fly = sin(w * PI) * uFly;
+  if (fly > 1e-4) {
+    vec3 d = normalize(home + vec3(1e-4));
+    vec3 nz = vec3(snoise(d * 1.1 + vec3(0.0, uTime * 0.25, 0.0)),
+                   snoise(d * 1.1 + vec3(4.7, uTime * 0.20, 1.3)),
+                   snoise(d * 1.1 + vec3(8.3, uTime * 0.15, 2.6)));
+    p += nz * fly;
+  }
+  return p;
 }
 
 void main(){
@@ -106,7 +119,10 @@ void main(){
   float w = clamp((uPres - aSeed * 0.35) / 0.65, 0.0, 1.0);
   w = w * w * (3.0 - 2.0 * w);
 
-  vec3 seat = aTarget * vec3(uAspX, 1.0, 1.0) * uSeatK;
+  // uFit: the dev panel's "collée" — grows the CANVAS's seat only (the frame's
+  // material keeps it at 1), walking the picture's edge across the liner band
+  // toward the moulding.
+  vec3 seat = aTarget * vec3(uAspX, 1.0, 1.0) * uSeatK * uFit;
   vec3 p0 = baseAt(position, seat, w);
   vec3 nrm = normalize(mix(normalize(position + vec3(1e-4)), normal, w));
 
@@ -163,6 +179,8 @@ uniform vec3 uHi;
 uniform vec3 uCamPos;
 uniform float uTime;
 uniform float uCar;
+uniform float uDevZoom;
+uniform float uDevDim;
 varying vec3 vNrm;
 varying vec3 vWPos;
 varying vec2 vUv;
@@ -175,13 +193,19 @@ void main(){
   vec3 n = normalize(vNrm);
   if (dot(n, rd) > 0.0) n = -n;
   vec3 col = chromeShade(n, rd);
-  // The photograph, on the canvas's own uv — same pipeline the field used: the
-  // developer's grain, the exposure coming up, the hover's colour. Faces only:
-  // the print's edge stays bare metal.
+  // The photograph, on the canvas's own uv. The ARRIVAL is dialled from the CPU
+  // (see toileTweak + the useFrame below): uPhotoOn carries the shaped density,
+  // uDevZoom an optional approach-from-behind (1 = none — the default; it was
+  // tried baked-in and rejected), uDevDim an optional frame's-shadow dim (1 =
+  // none). All three are scalars per frame, so trying looks costs no recompile.
+  // Faces only: the print's edge stays bare metal.
   if (uPhotoOn > 0.002 && abs(vNrm.z) > 0.0) {
     float slot = floor(uCar + 0.5);
     if (photoHas(slot) > 0.5) {
-      col = photoShade(col, normalize(vNrm), vUv, 1.0, photoTone(slot, vUv, uColour));
+      vec2 tuv = (vUv - 0.5) * uDevZoom + 0.5;
+      if (max(abs(tuv.x - 0.5), abs(tuv.y - 0.5)) <= 0.5) {
+        col = photoShade(col, normalize(vNrm), tuv, uDevDim, photoTone(slot, tuv, uColour));
+      }
     }
   }
   gl_FragColor = vec4(col, uFade);
@@ -248,18 +272,23 @@ function buildCanvas(): BufferGeometry {
  * within what a gallery eye forgives, and real frames do not resize at all.
  */
 const FRAME_SRC = "/models/frame.glb";
-/** The work's outer size at the reference aspect: canvas + liner + the band. */
-const FRAME_REF = 2 * (PLATE_H + LINER_W + 2 * FRAME_W);
 
-function buildFrameFrom(src: Mesh): BufferGeometry {
+/**
+ * @param cadre the dev panel's moulding-width factor (toileTweak.cadre): scales the
+ * band the sculpture spans past the canvas, so the toile/frame PROPORTION is dialled
+ * — the size cap then refits the whole work, so fatter frame reads as smaller toile.
+ */
+function buildFrameFrom(src: Mesh, cadre: number): BufferGeometry {
   src.updateWorldMatrix(true, false);
+  // The work's outer size at the reference aspect: canvas + liner + the band.
+  const frameRef = 2 * (PLATE_H + LINER_W + 2 * FRAME_W * cadre);
   const srcPos = src.geometry.getAttribute("position") as BufferAttribute;
   const srcNrm = src.geometry.getAttribute("normal") as BufferAttribute;
   const wb = new Box3().setFromBufferAttribute(srcPos).applyMatrix4(src.matrixWorld);
   const centre = wb.getCenter(new Vector3());
   const span = wb.getSize(new Vector3());
-  const sx = FRAME_REF / (span.x || 1);
-  const sy = FRAME_REF / (span.y || 1);
+  const sx = frameRef / (span.x || 1);
+  const sy = frameRef / (span.y || 1);
   // Depth follows the HEIGHT's scale: squashing z with x would pancake the relief
   // exactly on the photographs that stretch the least.
   const toForm = new Matrix4()
@@ -293,8 +322,97 @@ function buildFrameFrom(src: Mesh): BufferGeometry {
   );
   if (src.geometry.index) g.setIndex(src.geometry.index.clone());
 
-  const inr = PLATE_H + LINER_W + FRAME_W;
+  const inr = PLATE_H + LINER_W + FRAME_W * cadre;
   return toMorph(g, (x, y) => 0.55 + 0.45 * Math.min(1, (Math.abs(x) + Math.abs(y)) / (2 * inr)));
+}
+
+/**
+ * THE LINING. The disguise's sphere is a SHELL of projected homes — the canvas's
+ * faces and the moulding's band — and radial projection leaves the cap behind them
+ * bare: seen alone (the corridor, where the raymarcher stays dark on purpose), the
+ * resting "sphere" read as a glass bauble with its back missing. The liquid used to
+ * hide this by accident, at fullscreen-march price, whenever its fade leaked back in.
+ *
+ * So the frame carries a lining: a real sphere, HALF A PERCENT under the homes so
+ * the shell always wins the depth test where it exists, filling the holes where it
+ * does not. Its seats tuck it inside the canvas slab — an ellipsoid the closed box
+ * hides at every aspect — so the settled work carries no trace of it, and its seeds
+ * sit with the moulding's crowd: the sheets pour OUT of a mass that is still whole,
+ * and the mass itself drains into the work behind them.
+ */
+const LINING_R = 0.995;
+
+function withLining(geo: BufferGeometry): BufferGeometry {
+  const sph = new SphereGeometry(FORM_RADIUS * LINING_R, 96, 64);
+  const sp = sph.getAttribute("position") as BufferAttribute;
+  const gp = geo.getAttribute("position") as BufferAttribute;
+  const gn = geo.getAttribute("normal") as BufferAttribute;
+  const gu = geo.getAttribute("uv") as BufferAttribute;
+  const gt = geo.getAttribute("aTarget") as BufferAttribute;
+  const gs = geo.getAttribute("aSeed") as BufferAttribute;
+  const n0 = gp.count;
+  const n1 = sp.count;
+  const n = n0 + n1;
+
+  const pos = new Float32Array(n * 3);
+  const nrm = new Float32Array(n * 3);
+  const uv = new Float32Array(n * 2);
+  const tgt = new Float32Array(n * 3);
+  const seed = new Float32Array(n);
+  // Copied by accessor, not by buffer: the glb's attributes are quantized
+  // (KHR_mesh_quantization) and a raw concat would splice int16 into float32.
+  for (let i = 0; i < n0; i++) {
+    pos[i * 3] = gp.getX(i);
+    pos[i * 3 + 1] = gp.getY(i);
+    pos[i * 3 + 2] = gp.getZ(i);
+    nrm[i * 3] = gn.getX(i);
+    nrm[i * 3 + 1] = gn.getY(i);
+    nrm[i * 3 + 2] = gn.getZ(i);
+    uv[i * 2] = gu.getX(i);
+    uv[i * 2 + 1] = gu.getY(i);
+    tgt[i * 3] = gt.getX(i);
+    tgt[i * 3 + 1] = gt.getY(i);
+    tgt[i * 3 + 2] = gt.getZ(i);
+    seed[i] = gs.getX(i);
+  }
+  for (let i = 0; i < n1; i++) {
+    const j = n0 + i;
+    const x = sp.getX(i);
+    const y = sp.getY(i);
+    const z = sp.getZ(i);
+    const r = Math.hypot(x, y, z) || 1e-4;
+    pos[j * 3] = x;
+    pos[j * 3 + 1] = y;
+    pos[j * 3 + 2] = z;
+    // A sphere's normal is its own direction — true at the home AND at the seat.
+    nrm[j * 3] = x / r;
+    nrm[j * 3 + 1] = y / r;
+    nrm[j * 3 + 2] = z / r;
+    // The seat: an ellipsoid tucked inside the canvas slab. x rides uAspX in the
+    // shader exactly as the slab's own width does, so it fits at every aspect.
+    tgt[j * 3] = (x / r) * PLATE_H * 0.7;
+    tgt[j * 3 + 1] = (y / r) * PLATE_H * 0.7;
+    tgt[j * 3 + 2] = (z / r) * PLATE_T * 0.5;
+    seed[j] = 0.55 + 0.3 * Math.min(1, Math.max(0, 0.5 + y / (2 * FORM_RADIUS)));
+  }
+
+  const gi = geo.index;
+  const si = sph.index!;
+  const giCount = gi ? gi.count : n0;
+  const idx = new Uint32Array(giCount + si.count);
+  if (gi) for (let i = 0; i < giCount; i++) idx[i] = gi.getX(i);
+  else for (let i = 0; i < n0; i++) idx[i] = i;
+  for (let i = 0; i < si.count; i++) idx[giCount + i] = n0 + si.getX(i);
+  sph.dispose();
+
+  const out = new BufferGeometry();
+  out.setAttribute("position", new BufferAttribute(pos, 3));
+  out.setAttribute("normal", new BufferAttribute(nrm, 3));
+  out.setAttribute("uv", new BufferAttribute(uv, 2));
+  out.setAttribute("aTarget", new BufferAttribute(tgt, 3));
+  out.setAttribute("aSeed", new BufferAttribute(seed, 1));
+  out.setIndex(new BufferAttribute(idx, 1));
+  return out;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -322,7 +440,21 @@ export function ChromeTableau({ reduced }: Props) {
     });
     return found;
   }, [frameScene]);
-  const frameGeo = useMemo(() => (frameSrc ? buildFrameFrom(frameSrc) : null), [frameSrc]);
+  // The moulding factor rebuilds 132k vertices — debounced, so dragging the Cadre
+  // bar re-carves the frame at rest points rather than on every segment.
+  const cadreLive = useToileTweak().cadre;
+  const [cadre, setCadre] = useState(cadreLive);
+  useEffect(() => {
+    const id = window.setTimeout(() => setCadre(cadreLive), 150);
+    return () => window.clearTimeout(id);
+  }, [cadreLive]);
+  const frameGeo = useMemo(
+    () => (frameSrc ? withLining(buildFrameFrom(frameSrc, cadre)) : null),
+    [frameSrc, cadre]
+  );
+  // A swapped-out frame geometry is not auto-disposed: R3F frees on unmount, and
+  // this mesh never unmounts — without this, every Cadre notch leaks 132k verts.
+  useEffect(() => () => frameGeo?.dispose(), [frameGeo]);
 
   const { canvasMat, frameMat } = useMemo(() => {
     const blank = new DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
@@ -335,6 +467,7 @@ export function ChromeTableau({ reduced }: Props) {
       uFly: { value: FLY },
       uAspX: { value: 1 },
       uSeatK: { value: 1 },
+      uFit: { value: 1 },
       uFade: { value: 0 },
       uRough: { value: 0.12 },
       uEnv: { value: null as Texture | null },
@@ -349,6 +482,8 @@ export function ChromeTableau({ reduced }: Props) {
         ...shared(),
         uCar: { value: 0 },
         uPhotoOn: { value: 0 },
+        uDevZoom: { value: 1 },
+        uDevDim: { value: 1 },
         uPrint: { value: new Vector3(PLATE_LOOK.exposure, PLATE_LOOK.sheen, PLATE_LOOK.gloss) },
         uContrast: { value: PLATE_LOOK.contrast },
         uShade: { value: PLATE_LOOK.shade },
@@ -399,6 +534,7 @@ export function ChromeTableau({ reduced }: Props) {
     if (!g) return;
     const s = formState();
     const tw = blobTweak.get();
+    const tt = toileTweak.get();
 
     appear.current += (1 - appear.current) * (1 - Math.pow(0.04, delta));
     const modeTarget = tw.mode === "blob" ? 1 : 0;
@@ -422,7 +558,10 @@ export function ChromeTableau({ reduced }: Props) {
     const dockXl = Math.abs(s.dockX) / Math.max(0.01, s.scale);
     const roomLocal = Math.max(0.5, halfLocal - dockXl);
     let widest = 0;
-    for (const a of asps.current) widest = Math.max(widest, PLATE_H * a + FRAME_OUT);
+    // FRAME_OUT wears the dev panel's moulding factor, so the size cap counts the
+    // frame the geometry actually has this frame.
+    const frameOut = LINER_W + 2 * FRAME_W * tt.cadre;
+    for (const a of asps.current) widest = Math.max(widest, PLATE_H * a + frameOut);
     const k = Math.min(1, (roomLocal * FILL) / widest);
 
     // The worn aspect AND the worn hanging size glide to the worn slot's — the swap
@@ -454,20 +593,28 @@ export function ChromeTableau({ reduced }: Props) {
     setShared(frameMat);
     const cu = canvasMat.uniforms;
     cu.uCar.value = s.mood.car;
-    cu.uPhotoOn.value = s.mood.dev;
+    // The arrival, shaped by the dev panel (toileTweak): density reaches 1 at
+    // `ramp` of dev (smoothstepped so neither end pops), the optional recul and
+    // ombre ride the RAW dev — the travel keeps going while the density holds.
+    const dRaw = s.mood.dev;
+    const dR = Math.min(1, dRaw / Math.max(0.05, tt.ramp));
+    cu.uPhotoOn.value = dR * dR * (3 - 2 * dR);
+    cu.uDevZoom.value = 1 + tt.recul * (1 - dRaw);
+    cu.uDevDim.value = 1 - tt.ombre * (1 - dRaw);
+    cu.uFit.value = tt.fit;
     cu.uColour.value = s.mood.hover * PLATE_LOOK.colour;
 
-    const grow = 1 + GROW * s.mood.hover;
     g.position.set(s.dockX, s.dockY, 0);
-    g.rotation.set(0, s.spin, 0);
-    g.scale.setScalar(s.scale * grow);
+    // tt.turn: the dev panel's manual turntable, for inspecting the work at an angle.
+    g.rotation.set(0, s.spin + (tt.turn * Math.PI) / 180, 0);
+    g.scale.setScalar(s.scale);
 
     // The DOM's hit link, published from here now — the field goes dark in Work and
     // stale numbers would park the link on the wrong rectangle.
     const pxPerWorld = size.height / (2 * tanHalf * (camera.position.z - PLATE_T * s.scale));
     const kk = k * sizeNow.current;
-    const h = 2 * (PLATE_H + FRAME_OUT) * kk * s.scale * grow * pxPerWorld;
-    const w = 2 * (PLATE_H * aspNow.current + FRAME_OUT) * kk * s.scale * grow * pxPerWorld;
+    const h = 2 * (PLATE_H + frameOut) * kk * s.scale * pxPerWorld;
+    const w = 2 * (PLATE_H * aspNow.current + frameOut) * kk * s.scale * pxPerWorld;
     const cx = s.dockX * pxPerWorld;
     if (
       Math.abs(w - frameBox.current.w) > 0.75 ||

@@ -77,11 +77,21 @@ export const FORM_DISPLACE = /* glsl */ `
 const float FORM_R = ${FORM_RADIUS.toFixed(2)};
 float fbm(vec3 p){ return snoise(p) * 0.7 + snoise(p * 2.1) * 0.3; }
 float formOffset(vec3 pos){
-  vec3 sp = (pos / FORM_R) * uFreq;
-  vec3 wrp = sp + vec3(snoise(sp + vec3(0.0, uTime * 0.30, 0.0)),
-                       snoise(sp + vec3(3.1, 1.7, uTime * 0.18)),
-                       snoise(sp + vec3(9.2, 5.3, uTime * 0.12))) * 0.9;
-  float lump = fbm(wrp) * uDistort * FORM_R * (1.0 - uPres);
+  // The lump's amplitude gates its five snoise fetches, it does not just scale them:
+  // at full presence the factor is exactly zero (uPres snaps to 1 — see formClock),
+  // and an assembled form — the skull through About, the tableau through the whole
+  // of Work — was still paying five of the six fetches per call for a term it then
+  // multiplied away. The condition is made of uniforms, so every invocation takes
+  // the same side and the branch costs nothing.
+  float lumpAmp = uDistort * FORM_R * (1.0 - uPres);
+  float lump = 0.0;
+  if (lumpAmp > 1e-4) {
+    vec3 sp = (pos / FORM_R) * uFreq;
+    vec3 wrp = sp + vec3(snoise(sp + vec3(0.0, uTime * 0.30, 0.0)),
+                         snoise(sp + vec3(3.1, 1.7, uTime * 0.18)),
+                         snoise(sp + vec3(9.2, 5.3, uTime * 0.12))) * 0.9;
+    lump = fbm(wrp) * lumpAmp;
+  }
   float flow = snoise(pos * 1.6 + vec3(uTime * 0.5, uTime * 0.35, 0.0))
              * uDistort * 0.55 * (0.25 + 0.35 * uPres);
   return lump + flow;

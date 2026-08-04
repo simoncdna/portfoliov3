@@ -1,10 +1,11 @@
 "use client";
 
 import { blobTweak, TIME_RATE, SPIN_RATE } from "./blobTweak";
-import { formChoreo, type FormChoreo } from "./formChoreo";
+import { formChoreo, smoothstep, type FormChoreo } from "./formChoreo";
 import { aboutReveal } from "./aboutReveal";
 import { workReveal } from "./workReveal";
 import { workPlate, MOOD_REST, SHAPES, type Shape } from "./workPlate";
+import { toileTweak } from "./toileTweak";
 
 /**
  * The central form's live state: one clock, one turntable, one eased scroll
@@ -158,20 +159,22 @@ const MOOD_RATE = 0.4;
  * 2π, and every plate projects as a true rectangle.
  */
 
-/**
- * How fast the print comes up once the plate is flat, as the fraction still to go after
- * a second. 0.1 → 90% developed in one second: slow enough to be seen rising (it is the
- * entrance's payoff, not a switch), fast enough that the section is not kept waiting.
+/*
+ * There is no DEV_RATE constant while the dev panel lives: the print's arrival time
+ * is toileTweak.secs (seconds to 90%, default 1s — slow enough to be seen arriving,
+ * fast enough that the section is not kept waiting). When the numbers are found,
+ * the winner comes back here as a constant and the panel goes.
  */
-const DEV_RATE = 0.1;
 
 /**
  * The page turn's rate — how fast the framed work spins its revolution, as the
- * fraction still to go after a second. 0.02 → most of the turn in half a second, the
- * settle inside the dwell: an exponential revolution reads as a work being turned by
- * a hand — committed at once, gentle on the landing.
+ * fraction still to go after a second. An exponential revolution reads as a work
+ * being turned by a hand — committed at once, gentle on the landing. 0.06 (from
+ * 0.02): 90% of the turn in ~0.8s rather than ~0.6 — at the old rate the work was
+ * around before the gesture could be followed; a hand turning a framed picture
+ * takes its time, and the settle still lands inside the dwell.
  */
-const TURN_RATE = 0.02;
+const TURN_RATE = 0.06;
 
 /**
  * How tightly the sheet's flatness chases the entrance's scrub (workReveal.form), as
@@ -254,6 +257,8 @@ let swapAtAngle = 0;
 let swapPending = false;
 // The face-on angle the flattening plate is walked to (radians) — latched, see below.
 let faced = 0;
+// The dev panel's replay nonce last honoured (see the print's arrival below).
+let devReplaySeen = 0;
 
 export function advanceFormClock(
   delta: number,
@@ -374,14 +379,23 @@ export function advanceFormClock(
     swapPending = false;
   }
 
-  // The developer: the print rises once the work is EXACTLY flat — the section's
+  // The print's arrival: it rises once the work is EXACTLY flat — the section's
   // OPENING moment only. A canvas change keeps its picture through the whole turn
   // (the swap happens edge-on, where there is nothing to see): a painting being
   // turned around does not fade, it turns. Snapped at both ends like flat itself —
   // the shader gates its grain branch on dev reaching 1, and an exponential ease
   // never lands on its own.
+  //
+  // The dev panel's replay rewinds it to 0 on a settled plate, so the arrival can
+  // be watched again without scrubbing the whole entrance back and forth.
+  const tt = toileTweak.get();
+  if (tt.replayNonce !== devReplaySeen) {
+    devReplaySeen = tt.replayNonce;
+    md.dev = 0;
+  }
   const devTarget = md.flat === 1 && workPlate.index >= 0 ? 1 : 0;
-  md.dev += (devTarget - md.dev) * (reduced ? 1 : 1 - Math.pow(DEV_RATE, delta));
+  const devRate = Math.pow(0.1, 1 / Math.max(0.05, tt.secs));
+  md.dev += (devTarget - md.dev) * (reduced ? 1 : 1 - Math.pow(devRate, delta));
   if (md.dev > 0.995) md.dev = 1;
   else if (md.dev < 0.005) md.dev = 0;
 
@@ -442,7 +456,17 @@ export function advanceFormClock(
   // more transition in a stretch that should read as ONE.
   {
     const tIn = Math.max(0, Math.min(1, (easedWork - 0.12) / 0.33));
-    state.tableauOn = tIn * tIn * (3 - 2 * tIn) * (1 - easedAfter);
+    // …and CLAIMED by the exit scrub itself, not only by Work's eased presence. The
+    // eased presence LAGS a fast scroll by up to a second, and the liquid's fade is
+    // (1 − handover)(1 − tableauOn): a late tableauOn left a gap where the raymarcher
+    // lit back up, at partial alpha, over the full screen — invisible (it draws the
+    // same sphere the meshes are exchanging) but paid at full march price, which was
+    // the corridor's frame drop. The claim rides aboutReveal.exit — the same signal
+    // that lowers the handover — so by the time the liquid COULD wake (exit ≳ 0.8),
+    // the corridor is already sealed. Exit holds 1 for the rest of the page, so the
+    // claim costs nothing new in Work, and (1 − easedAfter) releases it for Contact.
+    const claim = reduced ? 0 : smoothstep(0.55, 0.85, aboutReveal.exit);
+    state.tableauOn = Math.max(tIn * tIn * (3 - 2 * tIn), claim) * (1 - easedAfter);
   }
   // NOTE the hover's step forward is NOT here. It used to multiply this scale, which is the
   // whole form's — so pointing at one project's name grew every picture in the gallery,
