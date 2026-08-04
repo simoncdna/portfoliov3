@@ -1,0 +1,25 @@
+{
+  // Les tests tournent sous Node (`node --test`), pas à travers le bundler — d'où une
+  // config à eux.
+  //
+  // Le tsconfig racine EXCLUT `tests`, et il a raison : ces fichiers n'ont rien à faire
+  // dans le typecheck du build Next. Mais un fichier exclu est un fichier sans config du
+  // tout pour le serveur TS de l'éditeur, qui le relit alors avec des réglages par défaut
+  // et souligne en rouge un import parfaitement valide. Ce fichier-ci rend la config à
+  // l'éditeur sans la rendre au build.
+  //
+  // allowImportingTsExtensions : le test importe `../src/lib/formChoreo.ts` avec son
+  // extension, parce que c'est Node qui le résout et que Node l'exige. L'option est portée
+  // ici et pas à la racine pour que le reste du projet garde l'interdiction — dans `src`,
+  // les imports passent par le bundler et s'écrivent sans extension.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"],
+  // Surcharge obligatoire : `extends` hérite du `exclude` de la racine, dont l'entrée
+  // "tests" se résout ici en "../tests" — soit exactement les fichiers que ce fichier
+  // existe pour inclure. Sans cette ligne, tsc répond « No inputs were found ».
+  "exclude": []
+}

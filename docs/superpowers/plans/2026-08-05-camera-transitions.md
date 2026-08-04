@@ -16,7 +16,7 @@
 
 | moyen | pour quoi | commande |
 |---|---|---|
-| **`node:test`** | l'arithmétique pure (`confine`). Node 22.22 exécute le TS directement, `node:test` est intégré → **zéro dépendance ajoutée** | `node --test tests/` |
+| **`node:test`** | l'arithmétique pure (`confine`). Node 22.22 exécute le TS directement, `node:test` est intégré → **zéro dépendance ajoutée** | `node --test tests/**/*.ts` |
 | **`tsc` + build** | les types et la compilation | `npx tsc --noEmit && pnpm build` |
 | **mesure navigateur** | tout ce qui est runtime : le confinement bout-en-bout, le FPS, le suivi du cadre DOM | script `page.evaluate` (fourni à chaque tâche) |
 
@@ -185,7 +185,7 @@ test("cible = identité → inerte à toute présence", () => {
 - [ ] **Step 2 : lancer le test pour le voir échouer**
 
 ```bash
-node --test tests/
+node --test tests/**/*.ts
 ```
 
 Attendu : échec, `SyntaxError` ou `The requested module '../src/lib/formChoreo.ts' does not provide an export named 'confine'`.
@@ -218,7 +218,7 @@ export const confine = (identity: number, target: number, presence: number): num
 - [ ] **Step 4 : lancer le test pour le voir passer**
 
 ```bash
-node --test tests/
+node --test tests/**/*.ts
 ```
 
 Attendu : `# pass 4`, `# fail 0`.
@@ -244,7 +244,7 @@ Puis relancer la commande ci-dessus et vérifier qu'elle passe.
 Dans `package.json`, dans `scripts` :
 
 ```json
-    "test": "node --test tests/",
+    "test": "node --test tests/**/*.ts",
 ```
 
 Vérifier : `pnpm test` → `# pass 4`.
