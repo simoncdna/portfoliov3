@@ -65,12 +65,11 @@
      and the
      form's on-screen size is set by this box, not by the viewport. */
   --form-dim: min(108vw, 103.68vh, 1188px);
-  /* How far above the viewport's centre the form rides in Work, in pixels: DOCK_Y_WORK
-     (0.7 world units, see formChoreo) ÷ 7.677, the world height the stage's camera
-     sees. Both halves of the composition are then a fraction of the same box, so the
-     furniture lands on the metal at every window size rather than only at the one it was
-     measured at. MOVE THIS WITH DOCK_Y_WORK, never on its own. */
-  --form-lift: calc(var(--form-dim) * 0.0912);
+  /* FALLBACK AVANT LE PREMIER RENDU seulement — la vraie valeur est écrite par
+     ChromeTableau, dérivée de s.dockY et du pxPerWorld vivant (voir là-bas pourquoi).
+     0px parce que DOCK_Y_WORK vaut 0 : la forme est à plomb au centre. Exactement le rôle
+     que --plate-frame joue pour --plate-px-w. */
+  --form-lift: 0px;
 }
 
 /* Expose tokens to Tailwind v4 utilities */

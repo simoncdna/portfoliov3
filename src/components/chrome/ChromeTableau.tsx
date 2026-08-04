@@ -626,6 +626,17 @@ export function ChromeTableau({ reduced }: Props) {
       root.setProperty("--plate-px-w", `${w.toFixed(1)}px`);
       root.setProperty("--plate-px-h", `${h.toFixed(1)}px`);
       root.setProperty("--plate-px-cx", `${cx.toFixed(1)}px`);
+
+      // …et le relèvement du mobilier, dérivé de la MÊME source que le reste.
+      //
+      // Il était en dur dans le CSS (0.0912 · --form-dim), calculé à la main depuis un
+      // DOCK_Y_WORK de 0.7 qui vaut 0 depuis l'index — le token disait donc de relever le
+      // mobilier de ~108px au-dessus d'une forme qui est à plomb au centre. Son propre
+      // commentaire disait « MOVE THIS WITH DOCK_Y_WORK, never on its own », et ça n'a pas
+      // été fait. Écrit ici, il ne peut plus mentir : il est une fonction de la position
+      // réelle de la forme et du pxPerWorld vivant, donc il suit aussi la caméra.
+      // Négatif parce que dockY monte en y-monde et que `top` descend en pixels.
+      root.setProperty("--form-lift", `${(-s.dockY * pxPerWorld).toFixed(1)}px`);
     }
   });
 
