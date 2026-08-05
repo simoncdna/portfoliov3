@@ -339,6 +339,25 @@ export function ChromeCanvas({
               switch): liquid / particles / wireframe mesh — plus the skull mesh the
               liquid hands the frame to. The scroll choreography they all follow is
               integrated ONCE, here, and only read by the forms: see formClock. */}
+          {/*
+            FORMDRIVER MUST STAY FIRST AMONG THESE SIBLINGS. It does not just advance the
+            clock, it WRITES THE CAMERA (see FormDriver), and the forms below read that
+            camera in their own useFrame — LiquidDna copies it into uCamPos, ChromeTableau
+            derives pxPerWorld from its z. Written after being read, they would all be a
+            frame behind.
+
+            The ordering is a real guarantee, not a hope, but it rests on THIS LINE'S
+            POSITION: useFrame subscribes in a layout effect, so siblings subscribe in JSX
+            order; r3f then sorts subscribers by priority, and Array.sort is stable, so
+            equal priorities keep their insertion order. Every one of these uses the
+            default priority 0. Move this line below a form and the camera silently lags.
+
+            AND DO NOT REACH FOR `priority` TO MAKE THAT EXPLICIT — it is the obvious fix
+            and it is a trap. r3f counts any subscription with priority > 0 as taking
+            rendering into its own hands: it increments an internal flag and then skips
+            `gl.render` entirely while that flag is positive. A priority here would not
+            reorder the callbacks, it would black out the scene.
+          */}
           <FormDriver about={about} work={work} scroll={scroll} reduced={reduced} />
           <LiquidDna reduced={reduced} />
           {/* The WORK — canvas and moulding as one morphing mesh (the skull's
