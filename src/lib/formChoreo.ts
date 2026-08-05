@@ -67,8 +67,15 @@ const EXIT_SCALE = 0.2;
  * mid-crossing: the four notches have to read as a frame around the piece with real
  * air between them and it, and that air is what the exit's swell spends. So the form
  * comes back down a little to sit inside its own frame.
+ *
+ * EXPORTÉE depuis le correctif du relais crâne→poste : ChromeTableau s'en sert aussi,
+ * comme la référence FIXE contre laquelle son cadrage (`uSeatK`) est calibré, au lieu
+ * de la valeur VIVANTE de `scale` — voir le commentaire au-dessus de `halfHeightLocal`
+ * dans son useFrame pour la raison (sans ce gel, le cadrage divise par un `scale` qui
+ * gonfle encore pendant le gonflement de sortie d'About, ce que le crâne ne fait
+ * jamais puisqu'il n'a pas d'équivalent de `k`).
  */
-const WORK_SCALE = 0.62;
+export const WORK_SCALE = 0.62;
 
 /** Companion size beside Contact — small, off to the side, no longer the subject. */
 const AFTER_SCALE = 0.72;

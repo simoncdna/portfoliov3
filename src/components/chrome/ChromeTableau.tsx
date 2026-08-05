@@ -24,7 +24,7 @@ import {
 } from "three";
 import type { Texture } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
-import { smoothstep } from "@/lib/formChoreo";
+import { smoothstep, WORK_SCALE } from "@/lib/formChoreo";
 import { SNOISE, FORM_DISPLACE, CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { FRAME_W, LINER_W, PHOTO_SHADE, PLATE_H, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
@@ -168,6 +168,7 @@ uniform float uTime;
 uniform float uDistort;
 uniform float uFreq;
 uniform float uPres;
+uniform float uTv;
 uniform float uFly;
 uniform float uAspX;
 uniform float uSeatK;
@@ -207,7 +208,15 @@ void main(){
   // Staggered arrival on the built-in key: canvas first, moulding last (see the
   // seeds in the geometry builders) — the frame is RAISED out of an already-forming
   // sheet, which is the whole read of the entrance.
-  float w = clamp((uPres - aSeed * 0.35) / 0.65, 0.0, 1.0);
+  //
+  // uTv, PAS uPres — le poste's OWN forming progress (md.flat, unchanged since T6),
+  // pas le signal du champ ci-dessous. Les deux valaient la même chose avant ce
+  // correctif (les deux LISAIENT md.flat) ; ils divergent maintenant, et c'est cette
+  // ligne qui doit rester sur celui du poste : combien le boîtier s'est LEVÉ hors de
+  // la sphère ne regarde que le scrub de Work (workReveal.form), jamais l'agonie du
+  // crâne — mesuré : md.flat reste À ZÉRO tout le temps que le crâne fond (voir le
+  // commentaire d'uPres plus bas), donc rien ici ne bouge pendant le relais.
+  float w = clamp((uTv - aSeed * 0.35) / 0.65, 0.0, 1.0);
   w = w * w * (3.0 - 2.0 * w);
 
   // The seat as BUILT. A "collée" factor lived here — the dev panel's dial that walked
@@ -220,6 +229,27 @@ void main(){
   // The shared lump/flow field, exactly as the skull samples it — twice, one
   // fixed-point step, so the disguised sphere wears the liquid's lumps in the same
   // places and the handover has nothing to show.
+  //
+  // uPres A CHANGÉ DE SENS ICI — ce n'est plus md.flat. formOffset (voir formField.ts)
+  // lit ce uniform pour savoir combien étouffer le lump (1 − uPres) et combien
+  // renforcer le flow (0.25 + 0.35·uPres) : c'est la même bascule que le crâne fait
+  // avec SON uPres (= s.pres), et le relais n'est invisible que si les deux valent LE
+  // MÊME NOMBRE au même instant — deux sphères déguisées qui ne s'accordent que sur
+  // leur rayon (voir buildPart, ~ligne 533 : le même repli de 0.96 que le crâne) mais
+  // pas sur leur grain restent deux objets reconnaissables l'un sous l'autre.
+  //
+  // MESURÉ (avant ce correctif) : au cœur du relais (crâne à ~40 % d'opacité,
+  // poste à ~20 %, scrollY ≈ 2040 sur un chargement de test), s.pres valait 0.41
+  // (crâne déjà à 59 % de lump) tandis que md.flat valait encore 0 (poste à 100 % de
+  // lump) — le poste montrait TOUJOURS son grain maximal tant que le crâne n'avait
+  // pas fini de fondre, quel que soit où le crâne en était lui-même. D'où
+  // max(s.pres, md.flat) : tant que md.flat n'a pas commencé à monter (tout le
+  // relais), ce max SUIT s.pres — le poste emprunte le degré de lissage du crâne,
+  // comme deux rendus de la même sphère plutôt que deux sphères indépendantes. Une
+  // fois md.flat > s.pres (le crâne est déjà parti, le poste se déroule pour de
+  // vrai), le max redevient md.flat et le comportement d'avant ce correctif reprend
+  // À L'IDENTIQUE — cette ligne ne change donc RIEN à la façon dont le poste se
+  // forme, seulement à l'aspect de sa sphère de déguisement pendant le relais.
   float f = formOffset(p0);
   f = formOffset(p0 + nrm * f);
   /*
@@ -229,10 +259,17 @@ void main(){
    * vivante : formé, il est RIGIDE. L'ancienne toile gardait le flow à pleine
    * présence (« keeps the settled canvas breathing ») parce qu'une toile respire ;
    * un boîtier ne respire pas, et un objet dur qui ondule lit comme une erreur.
-   * (1 − uPres) éteint le déplacement ET sa correction de normale ensemble — l'un
+   * (1 − uTv) éteint le déplacement ET sa correction de normale ensemble — l'un
    * sans l'autre, c'est une surface plate éclairée comme si elle ondulait.
+   *
+   * SUR uTv, PAS uPres : la rigidité est une propriété du POSTE (elle doit s'éteindre
+   * une fois QU'IL s'est formé, sur md.flat), pas du champ partagé emprunté au crâne
+   * pendant le relais — si ce gate lisait le uPres ci-dessus, il s'éteindrait dès que
+   * s.pres redescend vers 0 en fin de relais, c'est-à-dire AVANT que le poste n'ait
+   * commencé à se déployer, ce qui est exactement l'inverse de ce qui est demandé
+   * (« il doit s'éteindre PLUS TARD, une fois le relais passé »).
    */
-  float alive = 1.0 - uPres;
+  float alive = 1.0 - uTv;
   // f BRUT dans la différence du gradient, alive appliqué UNE fois au résultat. La
   // première version faisait f *= alive avant la soustraction : le gradient valait
   // alors alive·(F(ps±e) − alive·f)/e, soit un biais isotrope alive·(1−alive)·f/e sur
@@ -754,6 +791,13 @@ export function ChromeTableau({ reduced }: Props) {
   const modeVis = useRef(0);
   const colScratch = useMemo(() => new Color(), []);
   const frameBox = useRef({ w: 0, h: 0, cx: 0 });
+  /**
+   * LA ROTATION APPLIQUÉE, tenue à part de `s.spin` — voir son useFrame pour le
+   * pourquoi : `s.spin` appartient au blob (le crâne et le liquide le lisent tel
+   * quel, et doivent continuer à le faire), le poste n'en garde qu'une part qui
+   * DÉCROÎT à mesure qu'il se forme.
+   */
+  const heldSpin = useRef(0);
 
   const canvasGeo = useMemo(() => buildCanvas(), []);
 
@@ -1124,9 +1168,38 @@ export function ChromeTableau({ reduced }: Props) {
      * perspective (le poste grossit parce qu'on s'en approche, pas par un zoom déguisé) —
      * voir le commentaire de CAM_REST dans formClock.ts pour le même argument de l'autre
      * bout.
+     *
+     * GELÉ SUR WORK_SCALE AUSSI, PAS SUR s.scale VIVANT — second désaccord avec le crâne,
+     * celui-ci sur la TAILLE plutôt que sur le champ (voir uPres plus haut dans ce fichier).
+     *
+     * Le crâne n'a pas d'équivalent de `k` : il applique `s.scale` UNE fois
+     * (`m.scale.setScalar(s.scale)` dans ChromeSkull), sur un mélange où repos (la
+     * sphère, FORM_RADIUS) et cible (le crâne assemblé) sont déjà à la même échelle —
+     * le gonflement de la sortie d'About (`grow · EXIT_SCALE`, jusqu'à 1.2 — voir
+     * formChoreo) grossit donc les deux bouts du mélange PAREIL, et rien ne diverge
+     * quel que soit l'instant où `w` (l'avancement crâne↔sphère) passe entre les deux.
+     *
+     * Le poste, lui, mélange une sphère qui SUIT s.scale (`home`, non affecté par `k`)
+     * avec un siège que `k` rend délibérément INVARIANT à s.scale — MESURÉ : `--plate-px-w`
+     * publié valait 668.7px à s.scale = 1.2 (le pic du gonflement) et 667.2px à
+     * s.scale = 0.62 (posé), un écart de 0.2 %, la tolérance de l'anti-scintillement
+     * plus bas — c'est voulu et ça marche, il ne faut pas y toucher. Mais tant que `k`
+     * chassait s.scale EN DIRECT (`/ s.scale` ci-dessous), cette invariance ne
+     * s'établissait qu'UNE FOIS s.scale déjà revenu à WORK_SCALE : pendant le
+     * gonflement (s.scale jusqu'à 1.2) le siège représentait toujours la taille
+     * posée, MESURÉE INVARIANTE, tandis que la sphère avec laquelle il se mélange
+     * grossissait avec le direct — deux bouts d'un même mélange qui ne bougent plus
+     * ensemble, contrairement au crâne. `s.scale` atteint TOUJOURS exactement
+     * WORK_SCALE une fois le poste posé (voir formChoreo : `WORK_SCALE · w` sans terme
+     * de gonflement une fois `w` — la présence de Work — à 1), donc geler la référence
+     * dessus au lieu du direct restaure le même principe que le crâne (les deux bouts
+     * du mélange bougent ensemble) SANS RIEN CHANGER à la taille posée : au repos
+     * s.scale vaut déjà WORK_SCALE, donc l'ancienne et la nouvelle formule coïncident
+     * au bit près une fois le poste formé — seule la TRAJECTOIRE pendant le gonflement
+     * change.
      */
     const tanHalf = Math.tan((CAM_REST.fov * Math.PI) / 180 / 2);
-    const halfHeightLocal = (tanHalf * CAM_REST.z) / Math.max(0.01, s.scale);
+    const halfHeightLocal = (tanHalf * CAM_REST.z) / WORK_SCALE;
     const halfWidthLocal = halfHeightLocal * (size.width / size.height);
     const k =
       pt.fill * Math.min(halfHeightLocal / tvExt.halfH, halfWidthLocal / tvExt.halfW);
@@ -1278,7 +1351,25 @@ export function ChromeTableau({ reduced }: Props) {
     const setShared = (m: ShaderMaterial) => {
       const u = m.uniforms;
       u.uTime.value = s.time;
-      u.uPres.value = s.mood.flat;
+      /*
+       * uPres NOURRIT LE CHAMP PARTAGÉ (formOffset, via VERT), PAS L'ASSEMBLAGE DU
+       * POSTE — voir les commentaires de `w` et `alive` dans VERT pour ce second rôle,
+       * maintenant tenu par uTv.
+       *
+       * max(s.pres, s.mood.flat), pas s.mood.flat seul. Le crâne alimente SON champ
+       * partagé avec s.pres (ChromeSkull, u.uPres.value = s.pres) ; tant que le poste
+       * lisait md.flat ici, les deux sphères déguisées montraient des grains
+       * DIFFÉRENTS au même instant du relais — mesuré au navigateur : à s.pres = 0.41
+       * (crâne déjà lissé à 59 %) le poste, à md.flat = 0 pendant tout le relais,
+       * restait à 100 % de lump, visiblement plus grumeleux que le crâne qui
+       * s'effaçait dessus. max() fait suivre le poste sur le degré de lissage du
+       * crâne tant que md.flat n'a pas commencé à monter (donc pendant tout le
+       * relais, où md.flat vaut exactement 0 — le déroulé du poste ne démarre
+       * qu'une fois le crâne déjà parti, voir le déclencheur "top 92%" de
+       * Work.tsx) ; une fois md.flat > s.pres, le max redevient md.flat et le
+       * déroulé du poste n'est pas retouché par ce correctif.
+       */
+      u.uPres.value = Math.max(s.pres, s.mood.flat);
       u.uDistort.value = tw.distort * DISTORT_MAX;
       u.uFreq.value = tw.freq;
       u.uRough.value = tw.roughness;
@@ -1364,7 +1455,41 @@ export function ChromeTableau({ reduced }: Props) {
     cu.uColour.value = s.mood.hover * PLATE_LOOK.colour;
 
     g.position.set(s.dockX, s.dockY, 0);
-    g.rotation.set(0, s.spin, 0);
+    /*
+     * LA ROTATION S'ÉTEINT À MESURE QUE LE POSTE SE FORME — pas d'un coup, et pas dans
+     * formClock (qui reste inchangé : le crâne et le liquide continuent de lire
+     * `s.spin` brut, comme avant).
+     *
+     * `s.spin` PORTE DEUX CHOSES qui n'intéressent que le crâne/liquide : la dérive
+     * d'ambiance (`drift`, freinée mais jamais nulle) ET LE TOUR DE PAGE — chaque
+     * changement d'œuvre ajoute exactement 2π à `turnTarget`, un geste hérité de
+     * l'ancienne plaque photo (« la page tourne pour présenter le prochain tirage »).
+     * Le poste n'a plus de tirage à présenter (uPhotoOn = 0), mais `state.spin`
+     * continue d'inclure `turn · md.flat` que le poste soit posé ou pas.
+     *
+     * MESURÉ : poste posé (md.flat = 1), immobile, sans scroller — `s.spin` ne bouge
+     * pas d'un bit sur 6 s (18.8495559… constant), donc la dérive d'ambiance est déjà
+     * bien freinée par le mécanisme existant (`frz = max(holdEased, md.flat)` dans
+     * formClock). En revanche, en scrollant jusqu'à un CHANGEMENT D'ŒUVRE une fois
+     * posé, `s.spin` saute d'environ 2π sur quelques centaines de ms (mesuré : +4.8 puis
+     * +5.1 rad sur deux changements consécutifs, soit le tour de page en vol) — le
+     * poste tournait donc bel et bien sur lui-même à chaque œuvre, sans plus rien à
+     * montrer en tournant.
+     *
+     * Le correctif vit ICI plutôt que dans formClock (qui reste la même horloge pour
+     * toutes les sections) : `heldSpin` chasse `s.spin` à une vitesse qui retombe à
+     * zéro avec (1 − md.flat). À md.flat = 0 (encore un blob) elle vaut `s.spin` EXACTEMENT
+     * chaque frame — aucune latence, la dérive du blob n'est pas amputée pendant qu'il
+     * en est un. À md.flat = 1 (posé) le facteur de chasse est nul : `heldSpin` reste
+     * figé à l'angle qu'il tenait à cet instant-là — un multiple de 2π par construction
+     * de `state.spin` (voir `faced` dans formClock), donc un poste FACE À LA CAMÉRA,
+     * pas figé de travers — et aucun tour de page ultérieur ne le fait plus bouger.
+     * Entre les deux, la sensibilité décroît avec md.flat : la rotation s'éteint
+     * progressivement, elle n'est pas coupée au dernier centile comme `alive` (qui
+     * répond à une question différente : la vivacité du CHAMP, pas l'angle de l'OBJET).
+     */
+    heldSpin.current += (s.spin - heldSpin.current) * (1 - s.mood.flat);
+    g.rotation.set(0, heldSpin.current, 0);
     g.scale.setScalar(s.scale);
 
     // The DOM's hit link, published from here now — the field goes dark in Work and
