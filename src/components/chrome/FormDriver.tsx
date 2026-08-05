@@ -1,7 +1,7 @@
 "use client";
 
 import { useFrame } from "@react-three/fiber";
-import { advanceFormClock } from "@/lib/formClock";
+import { advanceFormClock, formState } from "@/lib/formClock";
 
 type Props = {
   /** 0..1 presence of the About section */
@@ -26,7 +26,7 @@ type Props = {
  * silhouette (workPlate). The clock reads all three directly.
  */
 export function FormDriver({ about, work, scroll, reduced }: Props) {
-  useFrame((_, delta) => {
+  useFrame(({ camera }, delta) => {
     advanceFormClock(
       delta,
       about?.current ?? 0,
@@ -34,6 +34,21 @@ export function FormDriver({ about, work, scroll, reduced }: Props) {
       scroll?.current ?? 0,
       !!reduced
     );
+    // LA CAMÉRA EST ÉCRITE ICI, et nulle part ailleurs.
+    //
+    // Après l'horloge et avant les formes : c'est le contrat de ce composant, et le
+    // raymarcher en profite gratuitement — il copie uCamPos/uCamRot depuis la caméra
+    // vivante à chaque frame, donc il suit sans une ligne de plus.
+    const s = formState();
+    camera.position.set(s.camX, s.camY, s.camZ);
+    // La perspective ne change pas toute seule : le fov n'entre dans la matrice de
+    // projection qu'une fois recalculée. Sans ceci, dialer le fov ne fait rien du tout —
+    // et c'est le genre d'oubli qui se diagnostique en une heure.
+    const cam = camera as typeof camera & { fov?: number };
+    if (cam.fov !== undefined && cam.fov !== s.camFov) {
+      cam.fov = s.camFov;
+      camera.updateProjectionMatrix();
+    }
   });
   return null;
 }
