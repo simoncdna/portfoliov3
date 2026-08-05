@@ -1,6 +1,7 @@
 "use client";
 
 import { getProject, types } from "@theatre/core";
+import state from "./cameraStage.state.json";
 
 /**
  * LA CAMÉRA, AUTEURÉE À LA MAIN — et le seul fichier du projet qui connaît Theatre.js.
@@ -35,7 +36,25 @@ export const SEQ_LENGTH = 1;
  */
 const REST = { z: 10, y: 0, x: 0, fov: 42 };
 
-const project = getProject("Portfolio — caméra");
+/**
+ * L'ÉTAT, TOUJOURS FOURNI — même vide.
+ *
+ * `getProject` sans `state` est une erreur de configuration aux yeux de Theatre, et il la
+ * signale par un `console.error` dès que le studio n'est pas là pour l'alimenter : « the state
+ * of project … will be empty ». En dev le studio est chargé, donc rien ne s'affiche ; c'est
+ * une erreur QUI N'APPARAÎT QU'EN PRODUCTION, chez chaque visiteur, et c'était le cas avant
+ * ce fichier JSON.
+ *
+ * Le fichier ci-contre est un état identité — `sheetsById: {}`, aucune keyframe — et il n'a
+ * pas été écrit à la main : il a été produit par `studio.createContentOfSaveFile()`, la seule
+ * autorité sur ce schéma (il porte un `definitionVersion` que Theatre fait évoluer). Le
+ * deviner aurait été un pari.
+ *
+ * Il sera REMPLACÉ par l'export du studio quand une trajectoire aura été trouvée. Le retour
+ * arrière n'est donc pas « supprimer le JSON » — ça ramènerait l'erreur — mais « revenir à
+ * cette version-ci », qui est inerte et silencieuse.
+ */
+const project = getProject("Portfolio — caméra", { state });
 const sheet = project.sheet("Work entrance");
 
 /**

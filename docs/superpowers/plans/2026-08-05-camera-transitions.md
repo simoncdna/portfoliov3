@@ -714,21 +714,21 @@ Dans le studio, sélectionner `Camera`, et poser des keyframes sur `z` (et `fov`
 
 Suggestion de départ pour éprouver l'idée — `z` de 10 à 7 sur toute la course : la moulure gagne en profondeur pendant que la plaque se forme. Puis essayer un dolly-zoom en montant `fov` de 42 à 52 sur la même course, ce qui garde la plaque à taille à peu près constante pendant que la perspective se tord.
 
-- [ ] **Step 3 : exporter et committer l'état**
+- [ ] **Step 3 : exporter et REMPLACER l'état**
 
-Dans le studio : bouton d'export du projet → un JSON est téléchargé. Le déplacer :
+Le câblage est déjà fait : `src/lib/cameraStage.ts` importe `./cameraStage.state.json` et le
+passe à `getProject`. Ce fichier contient aujourd'hui un état **identité** (`sheetsById: {}`),
+produit par `studio.createContentOfSaveFile()` — il existe parce que `getProject` sans état
+émet un `console.error` en production, où le studio n'est pas là pour l'alimenter.
+
+Il n'y a donc qu'à le remplacer. Dans le studio : bouton d'export du projet → un JSON est
+téléchargé.
 
 ```bash
 mv ~/Downloads/*.json src/lib/cameraStage.state.json
 ```
 
-Puis le charger dans `src/lib/cameraStage.ts`, en remplaçant la ligne `const project = getProject("Portfolio — caméra");` par :
-
-```ts
-import state from "./cameraStage.state.json";
-
-const project = getProject("Portfolio — caméra", { state });
-```
+Aucune modification de `cameraStage.ts` n'est nécessaire.
 
 - [ ] **Step 4 : vérifier en prod que la pose est rejouée**
 
@@ -783,6 +783,8 @@ git commit -m "feat(camera): la première pose du dolly sur l'entrée de Work"
 
 Trois niveaux, du moins au plus radical :
 
-1. **supprimer `cameraStage.state.json`** et retirer son import → l'identité reprend, le site est celui d'avant ;
+1. **revenir à la version identité de `cameraStage.state.json`** (`{"sheetsById": {}, …}`) →
+   l'identité reprend, le site est celui d'avant. NE PAS supprimer le fichier : `getProject`
+   sans état émet un `console.error` en production, chez chaque visiteur ;
 2. **coder `pose()` à `CAM_REST`** → Theatre reste installé mais totalement inerte ;
 3. **`pnpm remove @theatre/core @theatre/studio`** et supprimer `cameraStage.ts` → il ne reste que Task 1 (`--form-lift`) et Task 2 (`confine` + son test), qui sont des améliorations indépendantes et souhaitables en soi.
