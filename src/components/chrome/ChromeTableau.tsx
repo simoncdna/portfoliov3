@@ -19,7 +19,6 @@ import {
   SRGBColorSpace,
   ShaderMaterial,
   SphereGeometry,
-  CanvasTexture,
   Vector2,
   Vector3,
 } from "three";
@@ -31,6 +30,7 @@ import { PLATE_LOOK } from "@/lib/plateLook";
 import { posteTweak, usePosteEnv, usePosteSkinSrgb } from "@/lib/posteTweak";
 import { formState } from "@/lib/formClock";
 import { sequenceAt, type SequenceState } from "@/lib/tubeSequence";
+import { tubeScreen } from "@/lib/tubeScreen";
 import { works } from "@/data/site";
 
 type Props = {
@@ -114,12 +114,6 @@ const TV_LINES = ["wake up...", "The matrix has you.", "Follow the white rabbit.
 const TYPE_IDLE = 1.5;
 /** La demi-période du clignotement (530 ms allumé, 530 ms éteint — le battement VT). */
 const BLINK = 0.53;
-/**
- * L'interligne, en multiples du corps. 1.5 est le pas d'un terminal — assez d'air pour que
- * le halo de phosphore d'une ligne ne vienne pas manger la suivante, ce qui compte
- * d'autant plus que le halo est réglé haut (22.5).
- */
-const LINE_STEP = 1.5;
 
 /* -------------------------------------------------------------------------- */
 /* shaders                                                                    */
@@ -734,82 +728,15 @@ export function ChromeTableau({ reduced }: Props) {
   }, [frameScene]);
 
   /**
-   * L'IMAGE DU TUBE — un canvas 2D, pas de la géométrie de texte.
-   *
-   * Un terminal est du texte monospace sur fond noir : c'est exactement ce qu'un canvas 2D
-   * fait le mieux, et le faire en géométrie (drei Text, MSDF) coûterait un atlas de police,
-   * des draw calls de plus et le placement de chaque glyphe dans l'espace du poste — pour un
-   * rendu moins fidèle, parce qu'un phosphore n'a pas de contours nets.
-   *
-   * LE TEXTE S'ANIME, ET LE COÛT A ÉTÉ MESURÉ comme la version statique l'exigeait (« ce
-   * sera un coût à mesurer, pas à supposer ») : le canvas est redessiné au CHANGEMENT
-   * D'ÉTAT, jamais à la frame. L'état est (nombre de caractères tapés, curseur visible) —
-   * le clignotement re-uploade 512×384 RGBA (~0,8 Mo) deux fois par seconde, la frappe
-   * ~quatorze fois pendant les huit dixièmes de seconde qu'elle dure. Trois ordres de
-   * grandeur sous ce que la scène uploade par frame en dpr plein.
-   *
-   * La séquence vit dans le useFrame (voir le bloc du tube) ; ici il n'y a que le PINCEAU :
-   * draw(chars, cursorOn) repeint tout — fond, invite, texte tronqué, curseur en bout de
-   * ligne. Repeindre tout est ce qui rend l'état impossible à désynchroniser : il n'y a
-   * pas d'incrément, donc pas de dérive.
-   *
-   * 512×384 : le 4:3 du tube, et une résolution qui laisse le monospace net sans peser. Le
-   * vert est le P1 des phosphores de terminal, pas un vert d'écran moderne.
+   * LE CANVAS DU TUBE — sa fabrication et son pinceau (`draw`) ont déménagé dans
+   * src/lib/tubeScreen.ts, avec toute la justification (canvas 2D et non géométrie de texte,
+   * discipline de repeinture, résolution) : le tunnel de pixels (à venir) doit peindre et lire
+   * EXACTEMENT le même canvas que ce tube, donc ce n'est plus une ressource qu'un seul
+   * composant possède. `TV_LINES` — la constante qui vit dans CE fichier — tient lieu de
+   * `lines` ; tubeScreen ne consulte cet argument qu'à sa toute première invocation (voir son
+   * commentaire pour la précondition que ça impose).
    */
-  const screen = useMemo(() => {
-    const c = document.createElement("canvas");
-    c.width = 512;
-    c.height = 384;
-    const x = c.getContext("2d")!;
-    const tex = new CanvasTexture(c);
-    tex.flipY = false;
-    const draw = (line: number, chars: number, cursorOn: boolean) => {
-      // Le placement est lu ICI, à l'instant de peindre, et non capturé à la création du
-      // pinceau : le panneau bouge ces nombres pendant la session, et un pinceau qui
-      // aurait fermé sur eux peindrait l'ancienne position pour toujours. C'est le
-      // useFrame qui décide QUAND repeindre (le nonce du store) ; draw ne fait que lire.
-      const pt = posteTweak.get();
-      x.fillStyle = "#000";
-      x.fillRect(0, 0, c.width, c.height);
-      x.font = `600 ${pt.textSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-      x.textBaseline = "top";
-      // Du PHOSPHORE, pas du texte de canvas : un glyphe cathodique n'a pas de bord.
-      // L'ombre portée verte dessine le halo dans la même passe que le trait — le
-      // shader ajoutera l'halation du verre par-dessus, mais la douceur du glyphe
-      // lui-même doit être dans la texture, sinon le bord crénelé du canvas reste
-      // visible sous n'importe quel halo.
-      x.shadowColor = "rgba(77, 255, 122, 0.9)";
-      x.shadowBlur = pt.textGlow;
-      x.fillStyle = "#5aff85";
-      // En HAUT À GAUCHE — là où un terminal démarre. Le centre était un choix d'écran
-      // de veille ; une invite naît au coin.
-      //
-      // `stack` : les phrases déjà dites restent à l'écran sous forme de lignes, comme dans
-      // un vrai terminal. Sinon chacune EFFACE la précédente — le geste du film, où chaque
-      // message est seul sur un écran noir. Les deux se lisent, d'où la molette.
-      const step = pt.textSize * LINE_STEP;
-      const first = pt.textStack ? 0 : line;
-      for (let i = first; i <= line; i++) {
-        // Seule la ligne COURANTE est tronquée ; celles d'avant sont entières.
-        const txt = "> " + (i === line ? TV_LINES[i].slice(0, Math.max(0, chars)) : TV_LINES[i]);
-        const y = pt.textY + (i - first) * step;
-        x.fillText(txt, pt.textX, y);
-        // Le curseur, ce qui fait la différence entre du texte et un terminal — il SUIT la
-        // frappe : mesuré sur la ligne réellement affichée, pas sur la ligne finale. Ses
-        // dimensions suivent le corps du glyphe, sinon régler la taille du texte laisse un
-        // curseur de l'ancienne taille à côté.
-        if (cursorOn && i === line) {
-          const advance = x.measureText(txt + " ").width - x.measureText(" ").width;
-          const pad = pt.textSize * 0.27;
-          x.fillRect(pt.textX + advance + pad, y, pt.textSize * 0.53, pt.textSize);
-        }
-      }
-      x.shadowBlur = 0;
-      tex.needsUpdate = true;
-    };
-    draw(0, 0, true);
-    return { tex, draw };
-  }, []);
+  const screen = useMemo(() => tubeScreen(TV_LINES), []);
   /**
    * Le dernier état dessiné, et l'horloge du tube — voir la séquence dans le useFrame.
    * `nonce` est la mise en page du texte déjà peinte (le panneau la bouge), `replay` le
