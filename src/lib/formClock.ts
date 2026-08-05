@@ -1,7 +1,7 @@
 "use client";
 
 import { blobTweak, TIME_RATE, SPIN_RATE } from "./blobTweak";
-import { formChoreo, smoothstep, type FormChoreo } from "./formChoreo";
+import { formChoreo, smoothstep, confine, type FormChoreo } from "./formChoreo";
 import { aboutReveal } from "./aboutReveal";
 import { workReveal } from "./workReveal";
 import { workPlate, MOOD_REST, SHAPES, type Shape } from "./workPlate";
@@ -46,6 +46,27 @@ export type FormState = FormChoreo & {
    * sphere they exchange is the same object twice.
    */
   tableauOn: number;
+  /**
+   * LA CAMÉRA, confinée au corridor de Work.
+   *
+   * Le scale grossit un objet ; un dolly change la PERSPECTIVE, et c'est ce que la moulure
+   * du tableau — un mesh avec une épaisseur réelle et un biseau — a à montrer et qu'aucun
+   * scale n'atteint.
+   *
+   * Chacune est atténuée vers son identité par `tableauOn` (voir confine), qui vaut
+   * exactement 0 hors de Work. Donc Hero, About et Contact gardent au bit près le frustum
+   * contre lequel tout le CSS a été réglé — le 7.677 de globals.css est
+   * 2·tan(fov/2)·camZ, et il reste vrai partout ailleurs. Le confinement n'est pas une
+   * promesse, c'est une identité arithmétique.
+   *
+   * PAS DE ROTATION, jamais. Un plan perpendiculaire à l'axe de vue projette un rectangle
+   * quelle que soit la POSITION de la caméra ; c'est la rotation qui en fait un trapèze —
+   * et tout le mécanisme `faced`/snap de ce fichier existe pour l'empêcher.
+   */
+  camZ: number;
+  camY: number;
+  camX: number;
+  camFov: number;
   /**
    * The plates' wave phase — a SECOND clock, because the wind has to be able to stop while
    * the metal keeps breathing.
@@ -177,6 +198,16 @@ const MOOD_RATE = 0.4;
 const TURN_RATE = 0.06;
 
 /**
+ * La pose au repos — celle que ChromeCanvas déclare sur son `<Canvas camera={…}>`.
+ *
+ * Dupliquée ici volontairement plutôt que lue depuis la caméra vivante : c'est la valeur
+ * vers laquelle le confinement RAMÈNE, donc elle doit être une constante connue et non le
+ * résultat de ce que la frame précédente a écrit — sinon la caméra dérive par
+ * accumulation. MOVE THIS WITH ChromeCanvas's camera prop.
+ */
+const CAM_REST = { z: 10, y: 0, x: 0, fov: 42 } as const;
+
+/**
  * How tightly the sheet's flatness chases the entrance's scrub (workReveal.form), as
  * the fraction still to go after a second. Tight — the scrub IS the animation and a
  * lag here is a laggy wheel — but not a hard copy: the smoothing is what keeps the
@@ -203,6 +234,10 @@ const state: FormState = {
   wave: 0,
   spin: 0,
   tableauOn: 0,
+  camZ: CAM_REST.z,
+  camY: CAM_REST.y,
+  camX: CAM_REST.x,
+  camFov: CAM_REST.fov,
   mood: {
     sx: MOOD_REST.stretch[0],
     sy: MOOD_REST.stretch[1],
@@ -468,6 +503,15 @@ export function advanceFormClock(
     const claim = reduced ? 0 : smoothstep(0.55, 0.85, aboutReveal.exit);
     state.tableauOn = Math.max(tIn * tIn * (3 - 2 * tIn), claim) * (1 - easedAfter);
   }
+  // La caméra. Pose codée à l'identité pour l'instant — Theatre la fournira (voir
+  // cameraStage) ; la plomberie est branchée d'abord pour que ce câblage soit vérifiable
+  // sans que rien ne bouge à l'écran.
+  const pose = CAM_REST;
+  const on = state.tableauOn;
+  state.camZ = confine(CAM_REST.z, pose.z, on);
+  state.camY = confine(CAM_REST.y, pose.y, on);
+  state.camX = confine(CAM_REST.x, pose.x, on);
+  state.camFov = confine(CAM_REST.fov, pose.fov, on);
   // NOTE the hover's step forward is NOT here. It used to multiply this scale, which is the
   // whole form's — so pointing at one project's name grew every picture in the gallery,
   // neighbours included. It belongs to the slot being read, and it is applied there (uGrow in
