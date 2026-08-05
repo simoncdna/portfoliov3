@@ -30,6 +30,7 @@ import { FRAME_W, LINER_W, PHOTO_SHADE, PLATE_H, PLATE_T } from "@/lib/formPhoto
 import { PLATE_LOOK } from "@/lib/plateLook";
 import { posteTweak, usePosteEnv, usePosteSkinSrgb } from "@/lib/posteTweak";
 import { formState } from "@/lib/formClock";
+import { sequenceAt, type SequenceState } from "@/lib/tubeSequence";
 import { works } from "@/data/site";
 
 type Props = {
@@ -1121,58 +1122,26 @@ export function ChromeTableau({ reduced }: Props) {
       tb.replay = pt.replayNonce;
       tb.t = 0;
     }
-    const last = TV_LINES.length - 1;
-    let line: number;
-    let chars: number;
-    let cursorOn: boolean;
-    // `textFull` est la position de réglage : on cale un texte sur son état FINAL, pas
-    // sur une frappe en cours dont la largeur bouge sous la molette. Reduced motion
-    // atterrit au même endroit, pour une autre raison — le texte est une information,
-    // son arrivée est un mouvement.
+    // L'horloge est sortie du fichier (tubeSequence) : c'était de la logique pure enfouie
+    // dans un useFrame, donc intestable, dans un fichier qui n'avait pas besoin de grossir.
+    let seq: SequenceState;
     if (reduced || pt.textFull) {
-      line = last;
-      chars = TV_LINES[last].length;
-      cursorOn = true;
+      const l = TV_LINES.length - 1;
+      seq = { line: l, chars: TV_LINES[l].length, typing: false, done: true };
     } else {
-      // Le garde compare flat — le nombre qui SNAPPE exactement à 1 dans formClock —
-      // et jamais `dressed === 1` : la fenêtre dérivée (flat − 0.9) / 0.1 vaut
+      // Le garde compare flat — le nombre qui SNAPPE exactement à 1 dans formClock — et
+      // jamais `dressed === 1` : la fenêtre dérivée (flat − 0.9) / 0.1 vaut
       // 0.9999999999999998 en flottant quand flat vaut exactement 1, et l'horloge ne
       // démarrait jamais. Une égalité stricte n'est licite que sur une valeur snappée.
       if (s.mood.dev > 0.55 && s.mood.flat === 1) tb.t += delta;
       else tb.t = 0;
-      /*
-       * LE DÉROULÉ, dérivé d'UN SEUL temps. Attente, puis pour chaque phrase : la frappe,
-       * puis une pause — et sur la dernière, plus rien, l'état se pose.
-       *
-       * Une boucle sur tb.t plutôt qu'un index avancé à la frame, pour la même raison que
-       * le reste du fichier : l'état doit être une FONCTION de l'instant. Un compteur
-       * incrémenté par frame dériverait, ne saurait pas rejouer, et surtout ne saurait pas
-       * répondre deux fois la même chose au même temps — ce que le rembobinage du panneau
-       * et le scrub de la section exigent tous les deux.
-       */
-      line = 0;
-      chars = 0;
-      let rest = tb.t - TYPE_IDLE;
-      if (rest > 0) {
-        for (let i = 0; i <= last; i++) {
-          const dur = TV_LINES[i].length * pt.textChar;
-          line = i;
-          if (rest < dur) {
-            chars = Math.floor(rest / pt.textChar);
-            break;
-          }
-          chars = TV_LINES[i].length;
-          rest -= dur;
-          // La dernière ne cède pas la main : pas de pause à consommer, on reste dessus.
-          if (i === last || rest < pt.textHold) break;
-          rest -= pt.textHold;
-        }
-      }
-      // Le curseur ne clignote qu'au repos — pendant la frappe il reste allumé,
-      // comme un vrai terminal : c'est l'écho qui bat la mesure, pas le curseur.
-      const typing = chars > 0 && chars < TV_LINES[line].length;
-      cursorOn = typing || tb.t % (2 * BLINK) < BLINK;
+      seq = sequenceAt(tb.t, TV_LINES, { idle: TYPE_IDLE, char: pt.textChar, hold: pt.textHold });
     }
+    const line = seq.line;
+    const chars = seq.chars;
+    // Le curseur ne clignote qu'au repos — pendant la frappe il reste allumé, comme un vrai
+    // terminal : c'est l'écho qui bat la mesure, pas le curseur.
+    const cursorOn = seq.typing || (reduced || pt.textFull) || tb.t % (2 * BLINK) < BLINK;
     // L'état comprend maintenant la MISE EN PAGE : sans le nonce, traîner « Texte X »
     // ne se verrait qu'au clignotement suivant — jusqu'à une demi-seconde de retard sur
     // la molette, ce qui rend le réglage illisible. Le canvas reste repeint au seul
