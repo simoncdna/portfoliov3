@@ -17,6 +17,13 @@
  * shader place les instances, mais il n'est pas testable. Les garder identiques ici et
  * là-bas est ce qui fait que ce test couvre réellement ce que le GPU dessine. Toute
  * modification ici doit être reportée là-bas, et l'inverse.
+ *
+ * PRÉCONDITIONS, non gardées à dessein : `z0 > 0`, `g > 0`, `slices` entier > 0. Hors de
+ * ces bornes les fonctions rendent NaN ou Infinity plutôt que de planter (g = 0 divise par
+ * log(1) = 0 ; z0 = 0 passe log(0) à recycle). Aucune garde runtime : ces valeurs viennent
+ * de constantes de la scène, pas d'une entrée, et blinder un module sans appelant de
+ * production serait du travail spéculatif. Mais elles sont écrites, parce qu'un NaN qui
+ * traverse un vertex shader ne se signale que par une géométrie disparue.
  */
 
 /** La profondeur de la tranche k. z₀ est celle de l'image plate. */
@@ -39,10 +46,16 @@ export const sliceCount = (z0: number, g: number, far: number): number =>
  * logarithmique, un cycle est une longueur CONSTANTE (D·ln(1+g)) et le repli est un seul
  * modulo.
  *
- * Le double modulo n'est pas une superstition : `%` rend un résultat négatif pour un
- * opérande négatif en JavaScript, et `travel` DEVIENT négatif dès que le lecteur remonte —
- * le scrub de la plongée est réversible par construction. Sans le second modulo, remonter
- * envoie les tranches derrière la caméra.
+ * LE DOUBLE MODULO SERT AU CAS NORMAL, PAS AU CAS LIMITE — et la première rédaction de ce
+ * commentaire disait le contraire, ce qui est pire qu'un silence. Elle affirmait qu'il
+ * protégeait du `travel` négatif, celui du lecteur qui remonte. C'est faux : la quantité
+ * repliée vaut `(k − travel)·lg`, donc un `travel` ≤ 0 la rend PLUS grande, jamais négative.
+ *
+ * Ce qui la rend négative, c'est un `travel` POSITIF qui dépasse `k` — autrement dit dès que
+ * la caméra a avancé au-delà de la tranche, ce qui est le cas courant et non l'exception.
+ * `%` gardant en JavaScript le signe du dividende, un seul modulo laisserait alors `u`
+ * négatif et poserait la tranche DERRIÈRE la caméra. Retirer le second modulo « puisque le
+ * scrub peut être négatif » casserait donc exactement le sens qui compte.
  */
 export function recycle(z: number, travel: number, z0: number, g: number, slices: number): number {
   const lg = Math.log(1 + g);
