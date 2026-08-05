@@ -68,3 +68,33 @@ test("sequenceDuration somme attente, frappes et pauses intermédiaires", () => 
   // trois lignes : deux pauses
   assert.equal(sequenceDuration(["a", "b", "c"], R), 1 + 0.1 + 0.5 + 0.1 + 0.5 + 0.1);
 });
+
+// LE CAS DÉGÉNÉRÉ QUI PLANTAIT. `lines = []` faisait valoir -1 à `last` : la boucle ne
+// s'exécutait jamais et le repli de fin de fonction lisait `lines[-1].length` — une
+// exception, pas une valeur fausse. `done: true` quel que soit `t` : une séquence vide
+// n'a rien à finir, donc rien ne doit rester bloqué derrière elle.
+test("aucune ligne : done tout de suite, jamais de plantage", () => {
+  assert.deepEqual(sequenceAt(1, [], R), { line: 0, chars: 0, typing: false, done: true });
+  assert.deepEqual(sequenceAt(0, [], R), { line: 0, chars: 0, typing: false, done: true });
+  assert.deepEqual(sequenceAt(999, [], R), { line: 0, chars: 0, typing: false, done: true });
+});
+
+// UNE SEULE LIGNE. La branche `i === last` n'était exercée qu'à l'indice 1 d'un tableau
+// de deux (la ligne « cde » plus haut) — jamais à l'indice 0 d'un tableau d'une seule
+// ligne, où `last` vaut 0 dès la première itération de la boucle.
+test("une seule ligne : la pose arrive dès i === 0", () => {
+  const ONE = ["ab"]; // durée : idle(1) + 0.2 = 1.2, sans pause puisqu'il n'y a personne après
+  assert.equal(sequenceDuration(ONE, R), 1.2);
+  // mi-frappe
+  const mid = sequenceAt(1.1, ONE, R);
+  assert.equal(mid.line, 0);
+  assert.equal(mid.chars, 1);
+  assert.equal(mid.typing, true);
+  assert.equal(mid.done, false);
+  // Posée, LOIN de la durée plutôt que dessus : 1.2 − 1 vaut 0.19999999999999996 en
+  // flottant, pas 0.2 (même famille de piège que `flat === 1` dans ChromeTableau.tsx) —
+  // à t = 1.2 l'horloge se croit encore un cran avant la fin. Comme le test de pose des
+  // deux lignes plus haut (t = 2.5 et 60, jamais exactement `end`), on teste large.
+  assert.deepEqual(sequenceAt(1.3, ONE, R), { line: 0, chars: 2, typing: false, done: true });
+  assert.deepEqual(sequenceAt(50, ONE, R), { line: 0, chars: 2, typing: false, done: true });
+});

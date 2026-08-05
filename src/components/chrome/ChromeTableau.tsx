@@ -1124,8 +1124,16 @@ export function ChromeTableau({ reduced }: Props) {
     }
     // L'horloge est sortie du fichier (tubeSequence) : c'était de la logique pure enfouie
     // dans un useFrame, donc intestable, dans un fichier qui n'avait pas besoin de grossir.
+    //
+    // `forced` réunit deux conditions qui atterrissent au même endroit — la ligne finale,
+    // curseur fixe — mais par COÏNCIDENCE, pas par nécessité logique commune : `textFull`
+    // est la position de réglage, pour caler un texte sur son état FINAL plutôt que sur une
+    // frappe en cours dont la largeur bouge sous la molette (voir posteTweak.ts) ; reduced
+    // motion y atterrit pour une autre raison — le texte est une information, son arrivée
+    // est un mouvement (voir « LA SÉQUENCE DU TERMINAL » ci-dessus).
+    const forced = reduced || pt.textFull;
     let seq: SequenceState;
-    if (reduced || pt.textFull) {
+    if (forced) {
       const l = TV_LINES.length - 1;
       seq = { line: l, chars: TV_LINES[l].length, typing: false, done: true };
     } else {
@@ -1141,7 +1149,7 @@ export function ChromeTableau({ reduced }: Props) {
     const chars = seq.chars;
     // Le curseur ne clignote qu'au repos — pendant la frappe il reste allumé, comme un vrai
     // terminal : c'est l'écho qui bat la mesure, pas le curseur.
-    const cursorOn = seq.typing || (reduced || pt.textFull) || tb.t % (2 * BLINK) < BLINK;
+    const cursorOn = seq.typing || forced || tb.t % (2 * BLINK) < BLINK;
     // L'état comprend maintenant la MISE EN PAGE : sans le nonce, traîner « Texte X »
     // ne se verrait qu'au clignotement suivant — jusqu'à une demi-seconde de retard sur
     // la molette, ce qui rend le réglage illisible. Le canvas reste repeint au seul

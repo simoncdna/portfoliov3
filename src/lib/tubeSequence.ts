@@ -44,6 +44,13 @@ export function sequenceDuration(lines: readonly string[], r: Cadence): number {
 }
 
 export function sequenceAt(t: number, lines: readonly string[], r: Cadence): SequenceState {
+  // Aucune ligne : rien à frapper. Sans ce garde `last` vaut -1, la boucle ne tourne jamais
+  // et le repli du bas lit `lines[-1].length` — un plantage constaté par exécution, pas
+  // une panne silencieuse mais un plantage quand même sur un module qui se veut un contrat
+  // autonome. `done: true` et non `false` : une séquence vide n'a rien à finir, elle ne
+  // doit rien bloquer derrière elle — c'est exactement l'esprit de `done`, appliqué au cas
+  // dégénéré. Symétrique au traitement de `lines = []` dans sequenceDuration, plus haut.
+  if (lines.length === 0) return { line: 0, chars: 0, typing: false, done: true };
   const last = lines.length - 1;
   let rest = t - r.idle;
   if (rest <= 0) return { line: 0, chars: 0, typing: false, done: false };
