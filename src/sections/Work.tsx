@@ -361,6 +361,52 @@ export function Work() {
           ">-0.1"
         );
 
+      /*
+       * LA PLONGÉE. Un scrub de plus, sur sa propre bande de scroll, placé APRÈS le repos du
+       * poste et AVANT la sortie. `fromTo` et pas `to`, pour la même raison que les autres
+       * timelines de ce fichier : un `to` scrubbé se rend à progress 0 au refresh et
+       * enregistre la valeur courante comme point de départ, ce qui fige la plongée là où
+       * elle était au dernier rechargement.
+       *
+       * CES BORNES ONT ÉTÉ MESURÉES, ET ELLES SE CHEVAUCHENT — signalé plutôt que corrigé en
+       * silence, sur consigne explicite de la tâche qui les a posées sans les mesurer.
+       *
+       * Le piège : dans "bottom-=140% bottom", le "%" du PREMIER mot (le côté trigger) est un
+       * pourcentage de la hauteur du TRIGGER LUI-MÊME (`_offsetToPx`, appelé avec
+       * `bounds.height` — voir node_modules/gsap/ScrollTrigger.js), donc des 480vh de LA BANDE
+       * ENTIÈRE (.plate-band, globals.css), pas des 100vh du viewport comme le "92%" de
+       * "top 92%" plus haut (qui, lui, est le second mot — le côté scroller — et SE calcule sur
+       * le viewport). "bottom-=140%" vaut donc bandBottom − 1,4×480vh, pas bandBottom − 140vh.
+       *
+       * Conséquence, en fraction du travel de la bande (p=0 quand elle s'épingle, p=1 quand
+       * elle se libère — le même p que dans geometry() ci-dessus, vérifié en rejouant à la main
+       * la formule de _parsePosition) :
+       *   diveTl                       p ∈ [−0,768 ; 0,495]
+       *   entrée : inTl                p ∈ [0 ; 0,14]
+       *   entrée : roll-out (form)     p ∈ [−0,242 ; 0]
+       *   sortie : outTl (away)        p ∈ [0,78 ; 1]
+       *
+       * Donc AUCUN chevauchement avec la sortie — l'hypothèse qu'on redoutait le plus — mais
+       * deux qu'on ne redoutait pas : diveTl CONTIENT tout le roll-out et toute l'entrée (à
+       * p=0,14, `dive` est déjà à ~72 % pendant que le poste finit à peine de se former, avant
+       * que le terminal ait tapé une seule lettre), et il recouvre plus de la moitié de la zone
+       * [ENTER, 1−EXIT] que le handler `onScroll` plus haut utilise encore pour faire défiler
+       * les plaques 0 à 2. Repositionner cette bande (par ex. en px absolus mesurés depuis la
+       * fin de l'entrée, plutôt qu'en % du trigger) est une décision de chorégraphie qui reste
+       * à prendre — pas un accident à corriger au fil de l'eau. Les bornes ci-dessous sont donc
+       * EXACTEMENT celles du plan, non ajustées.
+       */
+      workReveal.dive = 0;
+      const diveTl = gsap.timeline({
+        scrollTrigger: {
+          trigger: el,
+          start: "bottom-=140% bottom",
+          end: "bottom-=40% bottom",
+          scrub: 1,
+        },
+      });
+      diveTl.fromTo(workReveal, { dive: 0 }, { dive: 1, ease: "none" }, 0);
+
       // The release gate. Reversible in both directions, like the entrance gate —
       // scrolling back up out of Contact has to hand the plate back, and the plate it
       // hands back is the one that was left (not the first), so the section resumes

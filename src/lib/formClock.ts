@@ -47,6 +47,12 @@ export type FormState = FormChoreo & {
    */
   tableauOn: number;
   /**
+   * La plongée, 0..1 — la traversée de l'écran. Lue par ChromeTableau (fondu du poste,
+   * détail macro) et par PixelTunnel (l'avance dans le corridor). Atténuée par tableauOn
+   * comme le reste : hors du corridor de Work, il n'y a pas de plongée.
+   */
+  dive: number;
+  /**
    * LA CAMÉRA, confinée au corridor de Work.
    *
    * Le scale grossit un objet ; un dolly change la PERSPECTIVE, et c'est ce que la moulure
@@ -235,6 +241,7 @@ const state: FormState = {
   wave: 0,
   spin: 0,
   tableauOn: 0,
+  dive: 0,
   camZ: CAM_REST.z,
   camY: CAM_REST.y,
   camX: CAM_REST.x,
@@ -493,6 +500,11 @@ export function advanceFormClock(
     const claim = reduced ? 0 : smoothstep(0.55, 0.85, aboutReveal.exit);
     state.tableauOn = Math.max(tIn * tIn * (3 - 2 * tIn), claim) * (1 - easedAfter);
   }
+  // La plongée est un scrub PUR : aucune inertie, aucun chase. Contrairement à la formation
+  // (que l'horloge lisse pour donner du poids à la matière), une traversée doit coller à la
+  // molette au pixel — c'est un déplacement du point de vue, pas de la matière, et un point
+  // de vue qui traîne derrière la main lit comme une latence.
+  state.dive = state.tableauOn * Math.max(0, Math.min(1, workReveal.dive));
   // La caméra. Le playhead EST le scrub de l'entrée (workReveal.form) — celui qui déroule
   // déjà le métal — donc la trajectoire de caméra est le MÊME geste que la métamorphose,
   // pas un second événement par-dessus. Et piloté par la valeur brute, pas par la lissée

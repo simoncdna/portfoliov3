@@ -23,5 +23,14 @@
  * advance under the reader's hand — each notch of the wheel rolls the metal a little
  * further, backing up melts it back. The clock chases this with a tight ease (see
  * formClock), so the matter keeps its weight without lagging the gesture.
+ *
+ * `dive` (0..1) est la PLONGÉE : la traversée de l'écran du poste, après que le terminal a
+ * fini de parler. Quatrième scrub de la section, du même genre que les trois autres — écrit
+ * par une timeline GSAP, lu une fois par frame par l'horloge de la forme.
+ *
+ * Il ne démarre PAS tant que la séquence du terminal n'est pas finie : la section est
+ * épinglée et Lenis arrêté jusque-là (voir Work.tsx). C'est le seul endroit du site où le
+ * scroll est retenu, et c'est un choix assumé — atténué par le fait que scroller accélère
+ * la frappe au lieu de ne rien faire.
  */
-export const workReveal = { away: 0, form: 0 };
+export const workReveal = { away: 0, form: 0, dive: 0 };
