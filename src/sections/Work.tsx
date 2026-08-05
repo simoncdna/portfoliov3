@@ -391,17 +391,34 @@ export function Work() {
        * p=0,14, `dive` est déjà à ~72 % pendant que le poste finit à peine de se former, avant
        * que le terminal ait tapé une seule lettre), et il recouvre plus de la moitié de la zone
        * [ENTER, 1−EXIT] que le handler `onScroll` plus haut utilise encore pour faire défiler
-       * les plaques 0 à 2. Repositionner cette bande (par ex. en px absolus mesurés depuis la
-       * fin de l'entrée, plutôt qu'en % du trigger) est une décision de chorégraphie qui reste
-       * à prendre — pas un accident à corriger au fil de l'eau. Les bornes ci-dessous sont donc
-       * EXACTEMENT celles du plan, non ajustées.
+       * les plaques 0 à 2.
+       *
+       * CONFIRMÉ AU NAVIGATEUR, pas seulement au calcul : relevé par paliers, `dive` valait
+       * 0,29 alors que `flat` était encore à 0 (le poste pas même commencé), et 0,93 quand
+       * `dev` n'était qu'à 0,06 — la plongée finissait AVANT que le terminal ait parlé.
+       *
+       * LES BORNES CI-DESSOUS SONT PROVISOIRES, et volontairement. Elles placent la plongée
+       * dans p ∈ [0,55 ; 0,75] — après que la planéité est atteinte (p≈0,46) et avant que la
+       * sortie s'empare du scroll (p=0,78) — ce qui suffit à rendre les tâches suivantes
+       * VÉRIFIABLES : sans ça, le tunnel et le relais se régleraient contre un `dive` déjà à 1
+       * au moment où le poste se forme, et leurs captures ne voudraient rien dire.
+       *
+       * Elles ne sont PAS la position définitive, parce que celle-ci ne peut pas être décidée
+       * ici : la séquence du terminal dure une dizaine de SECONDES là où cette fenêtre ne fait
+       * que ~960 px de scroll. C'est précisément ce que l'épinglage de la section doit résoudre
+       * (T7), et c'est lui qui fixera la bande pour de bon — la plongée prendra le scroll que
+       * le pin relâche, ce qui ne s'exprime pas en pourcentage du trigger.
+       *
+       * Conversion, pour qui reprendra ces nombres : le côté trigger étant un % de la HAUTEUR
+       * de la bande (3792 px mesurés) et p une fraction de son TRAVEL (3002 px), le facteur est
+       * travel/hauteur ≈ 0,792. D'où 0,55 → 43,5 % et 0,75 → 59,4 %.
        */
       workReveal.dive = 0;
       const diveTl = gsap.timeline({
         scrollTrigger: {
           trigger: el,
-          start: "bottom-=140% bottom",
-          end: "bottom-=40% bottom",
+          start: "top+=43.5% top",
+          end: "top+=59.4% top",
           scrub: 1,
         },
       });
