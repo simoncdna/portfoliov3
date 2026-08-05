@@ -27,8 +27,16 @@ import { posteTweak } from "./posteTweak";
  * 512×384 : le 4:3 du tube, et une résolution qui laisse le monospace net sans peser. Le vert
  * est le P1 des phosphores de terminal, pas un vert d'écran moderne.
  *
- * Créé PARESSEUSEMENT : ce module est importé par des composants rendus côté serveur, et
- * `document` n'y existe pas.
+ * CRÉÉ PARESSEUSEMENT, et pas pour la raison que le plan avançait. Il disait « ce module est
+ * importé par des composants rendus côté serveur » : c'est FAUX aujourd'hui — ChromeMount
+ * monte toute la scène en `ssr: false`, donc rien de ce graphe n'est évalué côté serveur.
+ *
+ * La vraie raison est plus solide que celle-là : un `document.createElement` au niveau du
+ * module s'exécuterait à l'IMPORT, ce qui ferait dépendre la simple importabilité de ce
+ * fichier de la présence d'un DOM. Cette garantie existe bien, mais elle vit dans un AUTRE
+ * fichier (le `ssr: false` de ChromeMount) — un module n'a pas à hypothéquer sa propre
+ * sûreté sur une configuration distante que personne ne pense à consulter en le déplaçant.
+ * La paresse la rend locale et gratuite.
  */
 
 /**
