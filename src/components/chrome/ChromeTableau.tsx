@@ -24,13 +24,15 @@ import {
 } from "three";
 import type { Texture } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
+import { smoothstep } from "@/lib/formChoreo";
 import { SNOISE, FORM_DISPLACE, CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { FRAME_W, LINER_W, PHOTO_SHADE, PLATE_H, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
 import { posteTweak, usePosteEnv, usePosteSkinSrgb } from "@/lib/posteTweak";
-import { formState } from "@/lib/formClock";
+import { CAM_REST, formState } from "@/lib/formClock";
 import { sequenceAt, sequenceDuration, type SequenceState } from "@/lib/tubeSequence";
 import { tubeGate } from "@/lib/tubeGate";
+import { tubeMouth } from "@/lib/tubeMouth";
 import { tubeScreen } from "@/lib/tubeScreen";
 import { works } from "@/data/site";
 
@@ -93,6 +95,38 @@ const TV_YAW = 0;
  */
 /** La demi-étendue du poste en espace de forme, à la largeur de moulure de référence. */
 const SCR_H = PLATE_H + LINER_W + 2 * FRAME_W;
+
+/*
+ * L'INVARIANT DU FONDU — T6. Les matériaux du poste sont en `side: DoubleSide` (voir
+ * `canvasMat`/`frameMats` plus bas) : une coque vue de l'intérieur reste dessinée, sa
+ * normale simplement retournée vers la caméra (`if (dot(n,rd)>0.0) n=-n;` dans les deux
+ * fragments) — donc si le poste n'est pas ENTIÈREMENT éteint (uFade = 0, ET g.visible =
+ * false une fois `on` retombé, voir le useFrame) quand la caméra se retrouve à l'intérieur
+ * de sa coque, on voit l'intérieur du boîtier, mal éclairé pour ça.
+ *
+ * DIVE_FADE_START/END BORNENT CE FONDU EN DESSOUS DU CROISEMENT RÉEL, calculé et pas
+ * supposé : formClock pousse la caméra de CAM_REST.z=10 vers `tubeMouth.frontZ -
+ * CAM_DIVE_PAST_GLASS` par un smoothstep(0, CAM_DIVE_ARRIVE=0.5, dive) — voir son grand
+ * commentaire sur CAM_DIVE_ARRIVE. En résolvant numériquement à quel `dive` le plan proche
+ * de la caméra (position − near, near=0.1 par défaut sur une PerspectiveCamera three.js)
+ * atteint `tubeMouth.frontZ` (mesuré ≈ 2.22 unités monde au viewport de bureau testé —
+ * voir tvExt.glassZ et le rapport de tâche), le croisement tombe entre 0,336 et 0,349 selon
+ * l'aspect du viewport (bureau large, tablette portrait, mobile portrait — testé aux trois).
+ * DIVE_FADE_END=0.30 laisse donc au moins 0,036 de marge sur les trois — réel, vérifié au
+ * navigateur à dive=0.32 (le point le plus tendu de cette marge) et pas seulement calculé.
+ * DIVE_FADE_START=0.20 laisse les deux premiers cinquièmes de l'approche (0→
+ * CAM_DIVE_ARRIVE=0.5 dans formClock) pleinement solides avant que le fondu commence — une
+ * fenêtre plus précoce
+ * (0.14) a été essayée et écartée : elle entamait le poste alors qu'il grossissait encore,
+ * ce que la table du plan ne demande pas.
+ *
+ * SI CAM_DIVE_ARRIVE OU CAM_DIVE_PAST_GLASS CHANGENT DANS formClock.ts, OU SI Z0 CHANGE DANS
+ * PixelTunnel.tsx (qui contraint CAM_DIVE_PAST_GLASS, voir son commentaire), CE MARGIN DOIT
+ * ÊTRE REVÉRIFIÉ — elle n'est pas recalculée automatiquement, elle a été vérifiée une fois
+ * pour les valeurs actuelles des trois fichiers.
+ */
+const DIVE_FADE_START = 0.2;
+const DIVE_FADE_END = 0.3;
 
 /*
  * LA SÉQUENCE DU TERMINAL. Le poste apparaît, le curseur clignote À VIDE — l'attente est
@@ -826,18 +860,65 @@ export function ChromeTableau({ reduced }: Props) {
    * (La doublure interne participe au scan et ne change pas les maxima : ses sièges
    * sont un ellipsoïde enfoui sous la coque.)
    */
+  /*
+   * `glassZ` — LE FRONT DU VERRE SOUS LE RECTANGLE DU TUBE, PAS LE FRONT DE L'OBJET.
+   * Nécessaire pour T6 (l'invariant du fondu : le poste doit être ENTIÈREMENT éteint avant
+   * que le plan proche de la caméra ne franchisse le verre — voir tubeMouth.ts et le
+   * useFrame plus bas).
+   *
+   * DEUX FAUSSES PISTES MESURÉES avant celle-ci, gardées en note parce qu'elles ne se
+   * voient qu'au calcul, jamais à l'œil sur le poste au repos :
+   *
+   *  - le maximum sur TOUTES les parties (comme halfW/halfH ci-dessus) vaut ~6.18, contre
+   *    un halfW de 4.38 : le point le plus proche de la caméra sur l'objet ENTIER n'est pas
+   *    le verre, c'est le bord avant du clavier, qui déborde vers +Z sous le moniteur.
+   *  - filtrer sur le SEUL matériau `default_1003` (la pièce que le shader appelle « verre »
+   *    — même test que `uTube` un peu plus bas) ne suffit pas non plus : ce mesh à lui seul
+   *    va de z=−1.79 à z=6.10, quasiment la même plage que l'objet entier. Le glb assigne ce
+   *    matériau à plus que la vitre du tube (probablement une autre surface sombre du
+   *    boîtier) ; s'y fier aurait repris exactement le même défaut sous un autre nom.
+   *
+   * CE QUI MARCHE : filtrer par POSITION (x, y), pas par matériau — les mêmes bornes
+   * scrX/scrY/scrW/scrH que le rectangle lumineux (voir posteTweak et uScrMin/uScrMax plus
+   * bas), en ne gardant QUE le Z maximum parmi les sièges qui tombent dans ce rectangle. À
+   * l'intérieur de l'empreinte du tube, ce qui est le plus proche de la caméra est
+   * nécessairement le verre — tout le reste (l'intérieur du boîtier, l'électronique) est
+   * plus loin. MESURÉ ainsi : z≈3.19, porté par un vrai plateau (les vingt sommets les plus
+   * proches du maximum s'étalent sur moins de 0.03, pas un sommet isolé) — voir le rapport
+   * de tâche pour le relevé complet.
+   *
+   * FIGÉ AU CHARGEMENT DU GLB (ce memo ne dépend que de `frameGeos`), PAS RÉACTIF au
+   * panneau dev : si quelqu'un déplace Centre X/Y ou Largeur/Hauteur en direct, cette
+   * mesure ne suit pas avant un rechargement — lire `posteTweak` par un hook ici
+   * re-rendrait ChromeTableau à chaque glissement de N'IMPORTE quelle barre du panneau
+   * (posteTweak est lu IMPÉRATIVEMENT par frame ailleurs dans ce fichier précisément pour
+   * éviter ça — voir son en-tête). Un décalage entre cette mesure et le rectangle vivant
+   * n'existe donc que pendant une session de réglage active du panneau — jamais en usage
+   * normal ni en prod, où le rectangle est un défaut figé.
+   */
   const tvExt = useMemo(() => {
-    if (!frameGeos) return { halfW: PLATE_H, halfH: PLATE_H };
+    if (!frameGeos) return { halfW: PLATE_H, halfH: PLATE_H, glassZ: PLATE_T };
+    const pt0 = posteTweak.get();
+    const minX = pt0.scrX - pt0.scrW / 2;
+    const maxX = pt0.scrX + pt0.scrW / 2;
+    const minY = pt0.scrY - pt0.scrH / 2;
+    const maxY = pt0.scrY + pt0.scrH / 2;
     let hw = 0;
     let hh = 0;
+    let glassZ = 0;
     for (const g of frameGeos) {
       const a = g.getAttribute("aTarget");
-      for (let i = 0; i < a.count; i++) {
-        hw = Math.max(hw, Math.abs(a.getX(i)));
-        hh = Math.max(hh, Math.abs(a.getY(i)));
+      for (let j = 0; j < a.count; j++) {
+        const x = a.getX(j);
+        const y = a.getY(j);
+        hw = Math.max(hw, Math.abs(x));
+        hh = Math.max(hh, Math.abs(y));
+        if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
+          glassZ = Math.max(glassZ, a.getZ(j));
+        }
       }
     }
-    return { halfW: hw, halfH: hh };
+    return { halfW: hw, halfH: hh, glassZ };
   }, [frameGeos]);
 
   const { canvasMat, frameMats } = useMemo(() => {
@@ -975,6 +1056,7 @@ export function ChromeTableau({ reduced }: Props) {
       min: frameMats[0]?.uniforms.uScrMin.value,
       max: frameMats[0]?.uniforms.uScrMax.value,
       ext: tvExt,
+      mouth: tubeMouth,
       mats: () =>
         frameMats.map((m, i) => ({
           name: (() => {
@@ -1005,7 +1087,12 @@ export function ChromeTableau({ reduced }: Props) {
     // sphere disguise, takes the stage from there. It TRAVELS as that sphere (the dock
     // below is the clock's), and only unrolls where the roll-out scrub says so.
     const workOn = reduced ? (s.tableauOn > 0.5 ? 1 : 0) : s.tableauOn;
-    const fade = (reduced ? 1 : appear.current) * modeVis.current * workOn;
+    // LA PLONGÉE ÉTEINT LE POSTE — voir DIVE_FADE_START/END et l'invariant du fondu
+    // ci-dessus. `on` en découle (comme du reste des facteurs de `fade`), donc au-delà de
+    // DIVE_FADE_END ce mesh n'est même plus rendu (`g.visible = false`) : double
+    // protection, alpha ET présence, pas seulement l'une des deux.
+    const diveFade = 1 - smoothstep(DIVE_FADE_START, DIVE_FADE_END, s.dive);
+    const fade = (reduced ? 1 : appear.current) * modeVis.current * workOn * diveFade;
     const on = fade > 0.004;
     g.visible = on;
     if (!on) return;
@@ -1018,13 +1105,48 @@ export function ChromeTableau({ reduced }: Props) {
      * Ici le poste occupe pt.fill de la dimension visible qui le contraint le plus,
      * mesuré sur ses étendues réelles (tvExt) — exact par construction, dans les
      * deux orientations d'écran. (pt.fill est l'ancien TV_FILL, passé au panneau.)
+     *
+     * GELÉ SUR CAM_REST, PAS SUR LA CAMÉRA VIVANTE — changement de T6. Avant la plongée,
+     * `camera.position.z`/`fov` valaient TOUJOURS CAM_REST.z/CAM_REST.fov (la pose Theatre
+     * de l'entrée est inerte — voir formClock), donc ce gel ne change RIEN à l'image
+     * d'avant T6 : même résultat, au bit près, partout hors du corridor de plongée.
+     *
+     * DANS le corridor, en revanche, la différence est le point entier du changement.
+     * `k` (uSeatK) est l'échelle GÉOMÉTRIQUE du poste, appliquée à sa géométrie avant même
+     * `s.scale` — donc si `k` suit la caméra vivante, il se RÉTRÉCIT exactement quand la
+     * caméra avance (`halfHeightLocal` est proportionnel à `camera.position.z`), ce qui
+     * ANNULE le grossissement de perspective qu'une caméra qui avance produit normalement :
+     * `atan(tvExt.halfH · k · s.scale / camera.position.z)` reste constant quel que soit
+     * `camera.position.z` si `k` en est une fonction linéaire — c'est LITTÉRALEMENT ce que
+     * ce cadrage a toujours fait, et c'est voulu tant que rien ne bouge la caméra à part de
+     * petites variations d'entrée. Une plongée n'est pas une petite variation : c'est le
+     * mouvement qu'on veut voir. Geler `k` sur CAM_REST laisse la caméra produire une VRAIE
+     * perspective (le poste grossit parce qu'on s'en approche, pas par un zoom déguisé) —
+     * voir le commentaire de CAM_REST dans formClock.ts pour le même argument de l'autre
+     * bout.
      */
-    const fov = (camera as { fov?: number }).fov ?? 42;
-    const tanHalf = Math.tan((fov * Math.PI) / 180 / 2);
-    const halfHeightLocal = (tanHalf * camera.position.z) / Math.max(0.01, s.scale);
+    const tanHalf = Math.tan((CAM_REST.fov * Math.PI) / 180 / 2);
+    const halfHeightLocal = (tanHalf * CAM_REST.z) / Math.max(0.01, s.scale);
     const halfWidthLocal = halfHeightLocal * (size.width / size.height);
     const k =
       pt.fill * Math.min(halfHeightLocal / tvExt.halfH, halfWidthLocal / tvExt.halfW);
+
+    /*
+     * PUBLIE LE RECTANGLE-MONDE DE L'ÉCRAN — voir tubeMouth.ts pour le pourquoi (formClock
+     * vise la caméra de plongée dessus, PixelTunnel y fait naître le corridor). `pt.scrX/Y`
+     * sont en espace de forme (aTarget brut, comme `vSeat` dans le shader — voir uScrMin/Max
+     * plus bas) : `s.scale · k · pt.scrX` les porte en monde, sans `uAspX` (figé à 1, voir
+     * plus bas) et sans rotation (le tube n'est lisible que quand `s.spin` est un multiple
+     * exact de 2π — voir formClock, state.spin — donc une rotation identité est correcte ici
+     * par construction, pas par approximation). `s.dockX/dockY` valent 0 dans tout Work
+     * (DOCK_X_WORK/DOCK_Y_WORK — voir formChoreo), mais lus plutôt que supposés : ce calcul
+     * reste vrai si l'un des deux change un jour.
+     */
+    tubeMouth.cx = s.dockX + s.scale * k * pt.scrX;
+    tubeMouth.cy = s.dockY + s.scale * k * pt.scrY;
+    tubeMouth.hw = s.scale * k * (pt.scrW / 2);
+    tubeMouth.hh = s.scale * k * (pt.scrH / 2);
+    tubeMouth.frontZ = s.scale * k * tvExt.glassZ;
 
     /*
      * LE VERROU DE SORTIE. uTv seul ne suffit pas : à la sortie de Work, md.flat

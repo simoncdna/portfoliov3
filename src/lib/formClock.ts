@@ -6,6 +6,7 @@ import { aboutReveal } from "./aboutReveal";
 import { workReveal } from "./workReveal";
 import { workPlate, MOOD_REST, SHAPES, type Shape } from "./workPlate";
 import { pose as camPose, seek as camSeek } from "./cameraStage";
+import { tubeMouth } from "./tubeMouth";
 
 /**
  * The central form's live state: one clock, one turntable, one eased scroll
@@ -211,8 +212,76 @@ const TURN_RATE = 0.06;
  * vers laquelle le confinement RAMÈNE, donc elle doit être une constante connue et non le
  * résultat de ce que la frame précédente a écrit — sinon la caméra dérive par
  * accumulation. MOVE THIS WITH ChromeCanvas's camera prop.
+ *
+ * EXPORTÉE depuis T6 : ChromeTableau s'en sert aussi, pour geler son cadrage (`uSeatK`)
+ * sur cette pose plutôt que sur la caméra vivante — voir le commentaire au-dessus du
+ * calcul de `k` dans son useFrame pour la raison (sans ce gel, la plongée ne ferait pas
+ * grossir le poste : le cadrage existant COMPENSE déjà tout changement de z/fov de la
+ * caméra pour garder le poste à une taille d'écran constante, ce qui est exactement
+ * l'effet qu'une poussée de caméra ne doit PAS avoir ici).
  */
-const CAM_REST = { z: 10, y: 0, x: 0, fov: 42 } as const;
+export const CAM_REST = { z: 10, y: 0, x: 0, fov: 42 } as const;
+
+/*
+ * LA POSE DE PLONGÉE — écrite en dur ici, PAS déléguée à une seconde feuille Theatre.js.
+ *
+ * Le plan (T6) prévoyait par défaut une seconde feuille Theatre pour cette trajectoire,
+ * avec un repli vers une interpolation directe si le studio se révélait inutilisable. Il
+ * l'est : cameraStage documente que son JSON committé est un état IDENTITÉ (sheetsById:
+ * {}, aucune keyframe) — la trajectoire de l'ENTRÉE elle-même n'a jamais été auteurée à la
+ * main, et rien ne changerait cela. Theatre n'a de valeur que pour un réglage AU DOIGT dans
+ * son studio graphique ; une plongée est une poussée DROITE le long de l'axe de vue, vers
+ * un point connu par le calcul (le rectangle de l'écran, voir tubeMouth) — une
+ * interpolation entre deux poses, pas une courbe qui mérite d'être dessinée image par
+ * image.
+ *
+ * COMPOSÉE PAR-DESSUS LA POSE THEATRE, PAS À SA PLACE : les trois `confine(CAM_REST.*,
+ * pose.*, on)` plus bas restent la première couche (l'entrée) ; la plongée réutilise
+ * `confine` une seconde fois, EN PARTANT de ce que cette première couche a produit. Si
+ * Theatre gagne un jour une vraie trajectoire d'entrée auteurée à la main, la plongée
+ * continuera de s'y ADDITIONNER au lieu de l'écraser. Aujourd'hui la première couche vaut
+ * toujours CAM_REST à l'identique (pose Theatre inerte), donc la plongée est la SEULE chose
+ * qui bouge la caméra dans Work — mais rien dans le code ci-dessous ne suppose ça.
+ *
+ * UNE SEULE VARIABLE (`state.dive`, déjà confinée au corridor de Work — voir plus bas),
+ * PAS TROIS SIGNAUX pour les trois phases de la table du plan :
+ *
+ *   0    → 0.5   l'approche : la caméra glisse de la pose d'entrée vers un point choisi
+ *                UN PEU AU-DELÀ du verre (CAM_DIVE_PAST_GLASS de plus, en profondeur, que
+ *                le rectangle de l'écran) — elle grossit en chemin par PERSPECTIVE RÉELLE
+ *                (voir le gel de `k` dans ChromeTableau), pas par un zoom déguisé, et
+ *                traverse le verre quelque part au milieu (≈0,336-0,349 selon le viewport
+ *                — voir le calcul dans ChromeTableau, DIVE_FADE_START/END, qui en dépend).
+ *                Le fondu du poste doit être terminé avant CE point-là, pas avant 0.5.
+ *   0.5  → 1     le corridor : la caméra NE BOUGE PLUS — elle est déjà à sa place, à
+ *                l'intérieur. Le sentiment de défilement vient du recyclage des tranches
+ *                du tunnel (uTravel, dans PixelTunnel), pas d'un long trajet caméra à
+ *                travers ~24 unités de profondeur : tunnelGeom recycle exprès seize
+ *                tranches pour couvrir une profondeur « infinie » SANS que la caméra ait à
+ *                parcourir cette distance.
+ *
+ * Une seule courbe (smoothstep sur `dive`, borné à [0, CAM_DIVE_ARRIVE]) porte les deux
+ * phases : rien ne bascule brutalement entre elles, le point où la caméra s'immobilise est
+ * simplement celui où la courbe a fini de monter.
+ */
+/** La part de la plongée (0..1) que la caméra passe à AVANCER. Au-delà, elle est arrivée. */
+const CAM_DIVE_ARRIVE = 0.5;
+/**
+ * De combien la caméra dépasse le front du verre, une fois arrivée (monde, unités Z).
+ *
+ * DOIT DÉPASSER LE Z0 DE PixelTunnel (2.2 — la profondeur locale de sa tranche 0, le seuil
+ * du tunnel), sans quoi la caméra s'arrête AVANT même d'avoir franchi la première tranche
+ * du corridor : elle resterait au bord du seuil plutôt que dedans. Deux valeurs plus
+ * petites (0.5, puis 1.8 avant la recalibration de Z0 dans PixelTunnel) ont été essayées et
+ * rejetées pour cette raison même — la vraie correction n'était pas la profondeur de la
+ * caméra mais l'angle d'ouverture du cône lui-même, voir le commentaire de Z0 là-bas.
+ *
+ * 2.5 place la caméra un peu après ce seuil (profondeur locale 2.5 contre 2.2), à
+ * l'intérieur du corridor sans s'y enfoncer inutilement — le sentiment de défilement vient
+ * du recyclage (uTravel), pas d'un long trajet caméra à travers les ~24 unités du cycle
+ * (Z0·(1+g)^16), donc rien n'est gagné à aller plus loin.
+ */
+const CAM_DIVE_PAST_GLASS = 2.5;
 
 /**
  * How tightly the sheet's flatness chases the entrance's scrub (workReveal.form), as
@@ -504,7 +573,20 @@ export function advanceFormClock(
   // (que l'horloge lisse pour donner du poids à la matière), une traversée doit coller à la
   // molette au pixel — c'est un déplacement du point de vue, pas de la matière, et un point
   // de vue qui traîne derrière la main lit comme une latence.
-  state.dive = state.tableauOn * Math.max(0, Math.min(1, workReveal.dive));
+  //
+  // ATTÉNUÉE PAR `dressed`, EN PLUS DE `tableauOn` — et c'est un ajout de T6, pas seulement
+  // une reprise de T3. `tableauOn` ne retombe qu'à la TOUTE fin de la sortie de Work (une
+  // fois le texte parti ET le métal relâché — voir son commentaire), donc SANS `dressed` un
+  // lecteur qui continue de scroller après avoir fini la plongée (`workReveal.dive` reste à 1,
+  // rien ne le rebobine) traverserait toute la sortie de Work — le texte qui s'efface, le
+  // métal qui se libère en sphère — avec `dive` toujours à 1 : le poste resterait éteint par
+  // le fondu de ChromeTableau (voir DIVE_FADE_END là-bas) pendant que la matière qu'il est
+  // censé montrer se détache dessous, invisible. `dressed` est LE MÊME garde-fou que celui
+  // que ChromeTableau applique déjà à uReveal/uGlow pour la même raison (« le chrome reprend
+  // la matière AVANT qu'elle ne fonde ») — dupliqué ici plutôt que partagé : si l'un des deux
+  // calculs change, l'autre doit suivre.
+  const dressed = Math.max(0, Math.min(1, (md.flat - 0.9) / 0.1));
+  state.dive = state.tableauOn * dressed * Math.max(0, Math.min(1, workReveal.dive));
   // La caméra. Le playhead EST le scrub de l'entrée (workReveal.form) — celui qui déroule
   // déjà le métal — donc la trajectoire de caméra est le MÊME geste que la métamorphose,
   // pas un second événement par-dessus. Et piloté par la valeur brute, pas par la lissée
@@ -517,10 +599,21 @@ export function advanceFormClock(
   camSeek(reduced ? 0 : workReveal.form);
   const pose = reduced ? CAM_REST : camPose();
   const on = state.tableauOn;
-  state.camZ = confine(CAM_REST.z, pose.z, on);
-  state.camY = confine(CAM_REST.y, pose.y, on);
-  state.camX = confine(CAM_REST.x, pose.x, on);
+  const entranceZ = confine(CAM_REST.z, pose.z, on);
+  const entranceY = confine(CAM_REST.y, pose.y, on);
+  const entranceX = confine(CAM_REST.x, pose.x, on);
   state.camFov = confine(CAM_REST.fov, pose.fov, on);
+  // LA PLONGÉE, PAR-DESSUS L'ENTRÉE — voir le grand commentaire sur CAM_DIVE_ARRIVE plus
+  // haut dans ce fichier. `confine` une seconde fois, en partant cette fois de la pose
+  // d'entrée déjà confinée (`entranceZ/X/Y`) plutôt que de CAM_REST directement : composée,
+  // pas substituée. `t` vaut exactement 0 à `state.dive` = 0 (hors du corridor, ou avant que
+  // la plongée ne commence, ou pendant qu'elle retombe en sortie de Work — voir `dressed` au-
+  // dessus), donc `state.camZ/X/Y` valent alors `entranceZ/X/Y` AU BIT PRÈS : l'identité
+  // arithmétique que confine() garantit déjà se recompose sans rien perdre.
+  const t = smoothstep(0, CAM_DIVE_ARRIVE, state.dive);
+  state.camZ = confine(entranceZ, tubeMouth.frontZ - CAM_DIVE_PAST_GLASS, t);
+  state.camX = confine(entranceX, tubeMouth.cx, t);
+  state.camY = confine(entranceY, tubeMouth.cy, t);
   // NOTE the hover's step forward is NOT here. It used to multiply this scale, which is the
   // whole form's — so pointing at one project's name grew every picture in the gallery,
   // neighbours included. It belongs to the slot being read, and it is applied there (uGrow in

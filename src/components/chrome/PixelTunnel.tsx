@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { BoxGeometry, InstancedBufferAttribute, ShaderMaterial } from "three";
 import type { InstancedMesh } from "three";
 import { formState } from "@/lib/formClock";
+import { tubeMouth } from "@/lib/tubeMouth";
 import { tubeScreen } from "@/lib/tubeScreen";
 import { TV_LINES } from "./ChromeTableau";
 
@@ -36,14 +37,20 @@ import { TV_LINES } from "./ChromeTableau";
  * bande de texte flottant dans le vide plutôt qu'un tunnel dont on voit les parois.
  *
  * PAS DE PANNEAU DEV ICI. Les constantes géométriques ci-dessous (G, Z0, CELL, …) sont
- * des points de départ RAISONNABLES, réglés par le calcul (voir leurs commentaires) — un
- * navigateur a servi, en fin de tâche, à vérifier qu'AUCUNE géométrie n'avait disparu
- * (voir le rapport de tâche pour la capture), mais pas à les affiner à l'œil sous la
- * caméra et le cadrage que T6 posera. REST (dans le fragment shader), en revanche, A été
- * recalibrée contre le rendu réel : la première valeur, choisie au jugé, était invisible
- * sous `toneMappingExposure: 0.3` de la scène — le masque de phosphore éteint disparaissait
- * dans le fond, exactement le défaut que ce fichier était censé éviter. Le reste demeure
- * des candidates au réglage visuel, pas des valeurs mesurées sous la caméra finale.
+ * des points de départ RAISONNABLES, réglés par le calcul (voir leurs commentaires). REST
+ * (dans le fragment shader) A été recalibrée contre le rendu réel dès T5 : la première
+ * valeur, choisie au jugé, était invisible sous `toneMappingExposure: 0.3` de la scène — le
+ * masque de phosphore éteint disparaissait dans le fond, exactement le défaut que ce fichier
+ * était censé éviter.
+ *
+ * L'ALIGNEMENT SUR L'ÉCRAN, LUI, EST DE T6 — pas un réglage à l'œil non plus, un calcul :
+ * la grille RÉFÉRENCE ci-dessous (COLS×CELL par ROWS×CELL, au repos) est mise à l'échelle
+ * et déplacée, à chaque frame où le corridor existe, pour que sa tranche 0 coïncide avec le
+ * rectangle-monde du tube que ChromeTableau publie (`tubeMouth` — voir ce fichier et le
+ * useFrame plus bas). Avant ce calcul, le corridor était une grille posée à l'origine du
+ * monde, sans rapport de taille ni de position avec l'écran du poste : une paroi plate
+ * derrière lui plutôt qu'un corridor qui en prolonge le rectangle — voir le rapport de T6
+ * pour les captures avant/après.
  */
 
 /**
@@ -70,37 +77,79 @@ const COUNT = COLS * ROWS * SLICES;
  */
 const G = 0.35;
 /**
- * La profondeur (unités monde) de la tranche 0 — le plan le plus proche du sommet du
- * cône. Choisie PETITE pour deux raisons qui se recoupent : (1) « à l'origine » au sens
- * le plus littéral — le sommet du cône (z local → 0) est à l'origine du repère du mesh,
- * donc un Z0 petit garde la tranche 0 tout près de ce point ; (2) c'est Z0 qui fixe, avec
- * CELL et G, le rapport entre l'écart séparant deux tranches et la taille d'un bloc (voir
- * CELL ci-dessous) — un Z0 trop grand aurait ouvert des vides entre les tranches.
- */
-const Z0 = 0.2;
-/**
- * Taille d'une cellule (unités monde) à l'échelle de référence (tranche 0). Choisie pour
- * que la grille au repos (48 × 0.08 ≈ 3,8 × 2,9) soit du même ordre de grandeur que les
- * autres objets de la scène (PLATE_H = 3.4 dans formPhoto.ts) et donc VISIBLE à la pose
- * de caméra par défaut (z=10, fov=42) sans la dominer.
+ * La profondeur (unités monde) de la tranche 0 — le plan le plus proche du sommet du cône.
  *
- * CELL, FILL_XY, FILL_Z ET G SONT LIÉS : l'écart entre les centres de deux tranches
- * consécutives, à l'échelle de la tranche k, vaut Z0·g·sc_k (la dérivée discrète de
- * sliceZ) ; la demi-profondeur d'un bloc à cette même échelle vaut CELL·FILL_Z·sc_k/2.
- * Pour que les blocs d'une tranche touchent ceux de la suivante plutôt que de laisser un
- * vide, on veut (demi-profondeur_k + demi-profondeur_k+1) ≳ écart, soit
- * CELL·FILL_Z·(2+g)/2 ≳ Z0·g — avec les valeurs ci-dessous (0.08 · 0.85 · 2.35/2 ≈ 0.08)
- * contre (0.2 · 0.35 = 0.07), l'inégalité tient : léger recouvrement plutôt qu'un vide.
- * Ce calcul est vérifié algébriquement, PAS à l'œil — un navigateur confirmera ou non
- * qu'il se voit comme prévu.
+ * RECALIBRÉE PAR T6, ET POUR UNE RAISON QUI N'EXISTAIT PAS AVANT L'ALIGNEMENT SUR L'ÉCRAN.
+ * Z0=0.2 (la valeur de T5) donnait un cône dont le DEMI-ANGLE D'OUVERTURE — l'angle, vu
+ * depuis le sommet, sous lequel une tranche est vue, CONSTANT par construction (voir
+ * l'invariant de tunnelGeom) — valait environ 72° : bien plus large que le demi-champ de
+ * la caméra (fov=42° ⇒ 21°). Conséquence mesurée : la caméra, une fois à l'intérieur (voir
+ * formClock, CAM_DIVE_PAST_GLASS), ne voyait jamais le cône « de loin » — elle butait
+ * toujours sur la tranche la plus proche de sa propre profondeur, qui remplissait tout
+ * l'écran (le rapport de tâche montre les captures : quatre cellules géantes plutôt qu'un
+ * corridor qui s'éloigne).
+ *
+ * CE DEMI-ANGLE NE DÉPEND PAS DE CELL NI DE COLS — seulement de Z0 et du rectangle-monde de
+ * l'écran (tubeMouth.hw). La preuve tient en une ligne : la demi-largeur MONDE d'une
+ * tranche à l'échelle sc vaut `sx · (COLS/2) · CELL · FILL_XY · sc`, et `sx` (le useFrame
+ * plus bas) vaut PAR CONSTRUCTION `tubeMouth.hw / ((COLS/2) · CELL)` — le produit
+ * `(COLS/2) · CELL` s'annule donc exactement, et il reste `tubeMouth.hw · FILL_XY · sc`. Le
+ * rapport à la profondeur `Z0 · sc` (puisque sc = sliceZ(k)/Z0) est alors
+ * `tubeMouth.hw · FILL_XY / Z0`, SANS CELL NI COLS. Choisir CELL ne change donc que la
+ * RÉSOLUTION de la grille (combien de cellules subdivisent le même rectangle), jamais la
+ * forme du cône — c'est Z0 qui la fixe, et Z0 seul.
+ *
+ * 2.2 vise un demi-angle d'environ 16° au viewport de bureau testé (tubeMouth.hw ≈ 0.75,
+ * FILL_XY = 0.85 ⇒ atan(0.75 · 0.85 / 2.2) ≈ 16°), confortablement sous les 21° de la
+ * caméra : la plupart des tranches, vues depuis l'intérieur, tiennent alors dans le champ
+ * plutôt que de le dépasser. PAS UNIVERSEL : `tubeMouth.hw` varie avec le viewport (le
+ * cadrage `k`, voir ChromeTableau), donc ce demi-angle varie aussi — plus étroit sur un
+ * viewport où l'écran du poste paraît plus petit (mobile portrait, mesuré ≈ 5°), jamais
+ * plus large que sur le viewport testé ici. Un cône trop ÉTROIT lit encore comme un
+ * corridor (juste plus serré) ; c'est un cône trop LARGE qui lit comme un mur — voir plus
+ * haut. Réserve du rapport de tâche.
  */
-const CELL = 0.08;
+const Z0 = 2.2;
+/**
+ * Taille d'une cellule (unités monde) à l'échelle de référence (tranche 0) — SEULEMENT LA
+ * RÉSOLUTION de la grille désormais (voir Z0 ci-dessus : elle s'annule dans la forme du
+ * cône), pas sa taille apparente. Choisie pour satisfaire le recouvrement entre tranches
+ * ci-dessous avec le NOUVEAU Z0 ; l'ancien repère (« du même ordre que PLATE_H ») ne
+ * s'applique plus, puisque la grille est maintenant TOUJOURS remise à l'échelle (`sx`/`sy`,
+ * voir le useFrame) pour rejoindre `tubeMouth.hw`/`hh`, quelle que soit sa taille de
+ * référence.
+ *
+ * CELL, FILL_Z ET G SONT LIÉS : l'écart entre les centres de deux tranches consécutives, à
+ * l'échelle de la tranche k, vaut Z0·g·sc_k (la dérivée discrète de sliceZ) ; la
+ * demi-profondeur d'un bloc à cette même échelle vaut CELL·FILL_Z·sc_k/2. Pour que les
+ * blocs d'une tranche touchent ceux de la suivante plutôt que de laisser un vide, on veut
+ * (demi-profondeur_k + demi-profondeur_k+1) ≳ écart, soit CELL·FILL_Z·(2+g)/2 ≳ Z0·g — avec
+ * les valeurs ci-dessous (0.9 · 0.85 · 2.35/2 ≈ 0.899) contre (2.2 · 0.35 = 0.77),
+ * l'inégalité tient, avec une marge proportionnellement un peu plus large que celle de T5
+ * (0.899 vs 0.77, +17 % ; T5 avait 0.0799 vs 0.07, +14 %). Vérifié algébriquement, PAS à
+ * l'œil — voir le rapport de tâche pour la confirmation au navigateur.
+ */
+const CELL = 0.9;
 /** Fraction de la maille qu'occupe un bloc, XY — le reste est l'interstice du masque de
  *  phosphore (comme les liserés noirs entre les luminophores d'un vrai tube). */
 const FILL_XY = 0.85;
 /** Même fraction en profondeur, pour que les blocs restent à peu près cubiques — voir le
  *  calcul de recouvrement sous Z0. */
 const FILL_Z = 0.85;
+
+/**
+ * Demi-largeur / demi-hauteur de la grille RÉFÉRENCE (tranche 0, échelle 1), en unités
+ * locales — ce que le useFrame met à l'échelle pour rejoindre `tubeMouth.hw`/`hh` (le
+ * rectangle-monde de l'écran, publié par ChromeTableau). PAS carrée (COLS/ROWS = 4:3, voir
+ * ci-dessus) alors que le rectangle du tube ne l'est pas non plus exactement (2.15/1.842 ≈
+ * 1.167 par défaut, dans posteTweak) : l'échelle non-uniforme posée sur l'objet (mesh.scale
+ * dans le useFrame) étire donc très légèrement les cellules pour combler l'écart plutôt que
+ * de laisser une bande de grille dépasser d'un côté du rectangle — un compromis choisi
+ * plutôt que mesuré : ~14 % d'écart d'aspect entre les deux, invisible à l'œil sur une
+ * grille de cette taille de cellule.
+ */
+const REF_HW = (COLS / 2) * CELL;
+const REF_HH = (ROWS / 2) * CELL;
 
 /**
  * Combien de « tranches » on traverse sur la PLONGÉE ENTIÈRE (dive 0→1). Choisi égal à
@@ -131,6 +180,7 @@ attribute vec2 aCell;
 attribute float aSlice;
 varying vec2 vUvCell;
 varying float vSc;
+varying float vDepth;
 
 const float G = ${G};
 const float Z0 = ${Z0};
@@ -199,6 +249,11 @@ void main() {
 
   vUvCell = aCell;
   vSc = sc;
+  // La profondeur RECYCLÉE, en unités locales — voir uCamDepth dans FRAG : le fondu de
+  // proximité en a besoin pour savoir à quelle distance de la caméra (le long du SEUL axe
+  // qui varie ici, l'axe du corridor) cette instance se trouve, sans reconstruire une
+  // distance 3D complète pour un fondu qui n'a besoin que de la profondeur.
+  vDepth = z;
   vec4 wp = modelMatrix * vec4(p, 1.0);
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
@@ -206,8 +261,11 @@ void main() {
 
 const FRAG = /* glsl */ `
 uniform sampler2D uScreen;
+uniform float uDive;
+uniform float uCamDepth;
 varying vec2 vUvCell;
 varying float vSc;
+varying float vDepth;
 
 // Couleur de repos du masque de phosphore éteint — voir l'en-tête du fichier : sans elle
 // le corridor n'est qu'une bande de texte dans le vide. Vert-gris, du même esprit que le
@@ -223,6 +281,66 @@ const vec3 REST = vec3(0.22, 0.38, 0.30);
 // toutes premières tranches. Choisi à l'œil sans navigateur — voir l'en-tête du fichier.
 const float ATTEN_K = 0.15;
 
+/*
+ * L'ARC DE LUMINOSITÉ DU CORRIDOR (0.5→1 de la plongée) — T6, table du plan : « le
+ * corridor défile, la luminosité monte puis retombe au noir ». p REMET À ZÉRO au début du
+ * corridor (dive=CAM_DIVE_ARRIVE=0.5, voir formClock) plutôt que de repartir de dive brut,
+ * pour que cet arc ne dépende que de « où on est dans le corridor », pas de la valeur exacte
+ * du point où la caméra s'est arrêtée d'avancer.
+ *
+ * mult vaut EXACTEMENT 1 à p=0 (rise=0, fall=0 donc (1+0)·(1−0)=1) : pas de saut à l'instant
+ * où cet arc prend le relais de « pas d'arc du tout » (dive<0.5, où le corridor est déjà
+ * visible à luminosité normale depuis le fondu du poste) — seulement une continuité, pas un
+ * flash. Il monte ensuite vers PEAK (une sensation de vitesse, la traversée qui s'intensifie)
+ * puis retombe à 0 exactement à p=1 (dive=1) : « retombe au noir » au sens propre, tout le
+ * fragment (REST compris) s'éteint plutôt que de simplement s'assombrir vers une couleur de
+ * repos qui resterait visible.
+ */
+const float PEAK = 1.6;
+
+/*
+ * LE FONDU DE PROXIMITÉ — pourquoi il existe, ce que le rapport de tâche a MESURÉ, pas
+ * supposé.
+ *
+ * La caméra de plongée (formClock, CAM_DIVE_PAST_GLASS) s'immobilise à une profondeur
+ * locale FIXE, à l'INTÉRIEUR de la plage recyclée des seize tranches — pas loin d'elle, à
+ * l'intérieur. Le recyclage fait continûment défiler chacune des seize devant cette
+ * profondeur fixe (c'est tout le sens de « le corridor défile ») : un script Node
+ * (tunnelGeom, rejoué avec Z0/CAM_DIVE_PAST_GLASS actuels) montre que la tranche la plus
+ * proche de la caméra oscille entre ~0.02 et ~0.43 unité de profondeur locale au fil d'un
+ * seul cycle de recyclage (une fraction de dive de 1/16) — et à 0.02, cette tranche est
+ * presque SUR la caméra.
+ *
+ * OR L'ANGLE D'OUVERTURE DU CÔNE (voir Z0 dans l'en-tête du fichier) NE PROTÈGE PAS DE ÇA.
+ * Ce demi-angle (~16° au viewport testé) n'est vrai qu'EN CHAMP LOINTAIN, c'est-à-dire pour
+ * une tranche dont la distance à la caméra est grande devant sa propre profondeur — ce qui
+ * est FAUX ici par construction : la caméra vit au milieu de tranches toutes proches les
+ * unes des autres (facteur 1.35 d'une tranche à la suivante). Une tranche à une distance de
+ * 0.02 avec une demi-largeur monde de l'ordre de 0.7 (voir Z0) subtend un angle qui
+ * dépasse 90°, quel que soit le demi-angle « de loin » qu'on a réglé — le rapport de tâche
+ * montre les captures avant ce fondu : le même mur de deux ou trois cellules qu'avec
+ * l'ancien Z0, malgré l'angle recalculé.
+ *
+ * LA CORRECTION EST DONC LOCALE À LA TRANCHE, PAS GLOBALE AU CÔNE : chaque cellule
+ * s'assombrit en fonction de SA PROPRE distance (le long du seul axe qui varie, la
+ * profondeur — voir vDepth) à la caméra, et non plus seulement de son échelle globale
+ * (ATTEN_K, qui répondait déjà au point de fuite mais pas au passage rapproché). Vers le
+ * noir plutôt que vers une couleur de secours : le matériau est OPAQUE (voir sa création
+ * plus bas), donc une cellule qui « disparaît » doit rendre du noir, pas juste cesser
+ * d'émettre, sinon elle resterait un panneau plat couleur REST — la même paroi plate que ce
+ * fondu existe pour supprimer.
+ *
+ * NEAR_FADE, EN UNITÉS DE PROFONDEUR LOCALE, RÉGLÉ SUR LA PLAGE MESURÉE CI-DESSUS (0.02 à
+ * 0.43) — et VÉRIFIÉ PAR LE CALCUL, pas seulement choisi : à 0.6, le MEILLEUR cas du cycle
+ * (0.43, la tranche la plus proche de la caméra n'est alors qu'à cette distance-là, jamais
+ * moins ce jour-là) ne perd presque rien (smoothstep(0,0.6,0.43) ≈ 0.80 — quasi pleine
+ * intensité, ce qu'on veut : rien à corriger quand rien n'est trop proche) tandis que le
+ * PIRE cas (0.02, une tranche presque SUR la caméra) tombe à smoothstep(0,0.6,0.02) ≈ 0.003,
+ * pratiquement noir. Le fondu n'agit donc que sur la fraction du cycle où une tranche est
+ * réellement collée à la caméra, pas sur le cycle entier.
+ */
+const float NEAR_FADE = 0.6;
+
 void main() {
   vec3 lit = texture2D(uScreen, vUvCell).rgb;
   // ADDITIF, jamais mélangé — un phosphore ÉMET (même doctrine que ChromeTableau) :
@@ -232,6 +350,12 @@ void main() {
   // recyclée (voir le vertex shader), donc l'atténuer directement évite de reconvertir
   // une distance qui n'existe déjà plus une fois recyclée dans [Z0, Z0·(1+g)^D).
   col *= 1.0 / (1.0 + ATTEN_K * (vSc - 1.0));
+  col *= smoothstep(0.0, NEAR_FADE, abs(vDepth - uCamDepth));
+  float p = clamp((uDive - 0.5) / 0.5, 0.0, 1.0);
+  float rise = smoothstep(0.0, 0.45, p);
+  float fall = smoothstep(0.45, 1.0, p);
+  float mult = (1.0 + (PEAK - 1.0) * rise) * (1.0 - fall);
+  col *= mult;
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -295,6 +419,8 @@ export function PixelTunnel() {
         uniforms: {
           uTravel: { value: 0 },
           uScreen: { value: screenTex },
+          uDive: { value: 0 },
+          uCamDepth: { value: 0 },
         },
         vertexShader: VERT,
         fragmentShader: FRAG,
@@ -323,6 +449,31 @@ export function PixelTunnel() {
     }
     mesh.visible = true;
     /*
+     * L'ALIGNEMENT SUR L'ÉCRAN — voir tubeMouth.ts et l'en-tête de ce fichier. `mesh.position`
+     * / `mesh.scale` PLUTÔT QU'UN CALCUL DANS LE VERTEX SHADER : c'est exactement à ça que
+     * sert `modelMatrix`, que le vertex shader multiplie déjà (`wp = modelMatrix * vec4(p,
+     * 1.0)`) — poser le rectangle-monde ici évite d'ajouter deux uniformes (origine, échelle
+     * XY) qui referaient à la main ce que l'objet fait pour rien.
+     *
+     * Échelle NON UNIFORME (X et Y séparément, Z à 1) : X/Y rejoignent le rectangle du tube
+     * (tubeMouth.hw/hh contre la demi-étendue de RÉFÉRENCE de la grille, REF_HW/REF_HH) ;
+     * Z reste à 1 pour que la cadence du corridor (Z0, G — la profondeur RESSENTIE tranche
+     * après tranche) ne se mette pas à dépendre de la taille de l'écran du poste, qui n'a
+     * rien à voir avec elle.
+     *
+     * max(…, 1e-4) AVANT LA PLONGÉE : ChromeTableau publie `tubeMouth` par frame dès que le
+     * poste est affiché (bien avant que `dive` ne bouge — voir son en-tête), donc en usage
+     * normal hw/hh sont déjà non nuls ici. Le garde-fou n'est que pour l'instant théorique
+     * où ce useFrame tournerait avant le premier de ChromeTableau (StrictMode, ordre de
+     * montage) : une échelle nulle aplatirait toute la grille sur un plan, invisible SANS
+     * AUCUNE erreur — même famille de piège que le `max(span, ε)` du shader du tube dans
+     * ChromeTableau.
+     */
+    const sx = Math.max(tubeMouth.hw, 1e-4) / REF_HW;
+    const sy = Math.max(tubeMouth.hh, 1e-4) / REF_HH;
+    mesh.position.set(tubeMouth.cx, tubeMouth.cy, tubeMouth.frontZ);
+    mesh.scale.set(sx, sy, 1);
+    /*
      * ÉCRIT VIA LE REF (mesh.material), JAMAIS PAR FERMETURE DIRECTE SUR `material` —
      * bien que ce soit RIGOUREUSEMENT le même objet (three.js pose ainsi this.material
      * au constructeur ; JSX le confirme deux lignes plus bas). La différence n'est pas
@@ -336,7 +487,14 @@ export function PixelTunnel() {
      * exactement le chemin par lequel `mesh.visible` est déjà écrit deux lignes plus
      * haut, sans jamais être relevé.
      */
-    (mesh.material as ShaderMaterial).uniforms.uTravel.value = s.dive * TRAVEL_PER_DIVE;
+    const uniforms = (mesh.material as ShaderMaterial).uniforms;
+    uniforms.uTravel.value = s.dive * TRAVEL_PER_DIVE;
+    uniforms.uDive.value = s.dive;
+    // La profondeur LOCALE de la caméra dans le repère du corridor — voir le fondu de
+    // proximité dans FRAG. mesh.position.z vaut tubeMouth.frontZ (ci-dessus) et l'axe local
+    // recule vers -Z (voir le vertex shader) : la caméra, à s.camZ en monde, est donc à
+    // (mesh.position.z − s.camZ) de profondeur locale devant l'origine du corridor.
+    uniforms.uCamDepth.value = mesh.position.z - s.camZ;
   });
 
   return (
