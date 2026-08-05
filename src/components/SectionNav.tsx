@@ -619,8 +619,8 @@ export function SectionNav() {
   // the open state — Escape, the wheel, a row, the ✕ — releases the page through
   // exactly one line of code.
   useEffect(() => {
-    lockPageScroll(open);
-    return () => lockPageScroll(false);
+    lockPageScroll("menu", open);
+    return () => lockPageScroll("menu", false);
   }, [open]);
 
   useEffect(() => {
@@ -670,7 +670,7 @@ export function SectionNav() {
     if (!el) return; // let the browser do whatever it does with a dead anchor
     e.preventDefault();
     closeMenu();
-    lockPageScroll(false);
+    lockPageScroll("menu", false);
     scrollPageTo(el.getBoundingClientRect().top + window.scrollY);
   };
 

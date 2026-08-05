@@ -29,7 +29,8 @@ import { FRAME_W, LINER_W, PHOTO_SHADE, PLATE_H, PLATE_T } from "@/lib/formPhoto
 import { PLATE_LOOK } from "@/lib/plateLook";
 import { posteTweak, usePosteEnv, usePosteSkinSrgb } from "@/lib/posteTweak";
 import { formState } from "@/lib/formClock";
-import { sequenceAt, type SequenceState } from "@/lib/tubeSequence";
+import { sequenceAt, sequenceDuration, type SequenceState } from "@/lib/tubeSequence";
+import { tubeGate } from "@/lib/tubeGate";
 import { tubeScreen } from "@/lib/tubeScreen";
 import { works } from "@/data/site";
 
@@ -1059,19 +1060,68 @@ export function ChromeTableau({ reduced }: Props) {
     // motion y atterrit pour une autre raison — le texte est une information, son arrivée
     // est un mouvement (voir « LA SÉQUENCE DU TERMINAL » ci-dessus).
     const forced = reduced || pt.textFull;
+    // Sortie une fois, réutilisée par sequenceAt ET sequenceDuration ci-dessous : les
+    // construire séparément marcherait tout aussi bien aujourd'hui, mais laisserait la
+    // porte ouverte à ce que l'un des deux dérive de l'autre au premier réglage du
+    // panneau touché d'un seul côté.
+    const cadence = { idle: TYPE_IDLE, char: pt.textChar, hold: pt.textHold };
     let seq: SequenceState;
     if (forced) {
       const l = TV_LINES.length - 1;
       seq = { line: l, chars: TV_LINES[l].length, typing: false, done: true };
+      // Le rembobinage du panneau ou un reduced motion arrivé pendant que le lecteur
+      // molettait laisserait sinon un boost accumulé, prêt à faire sauter tb.t en avant
+      // dès que `forced` retombe — un rembobinage n'est pas rembobiné s'il repart déjà
+      // en marche avant.
+      tubeGate.boost = 0;
     } else {
       // Le garde compare flat — le nombre qui SNAPPE exactement à 1 dans formClock — et
       // jamais `dressed === 1` : la fenêtre dérivée (flat − 0.9) / 0.1 vaut
       // 0.9999999999999998 en flottant quand flat vaut exactement 1, et l'horloge ne
       // démarrait jamais. Une égalité stricte n'est licite que sur une valeur snappée.
-      if (s.mood.dev > 0.55 && s.mood.flat === 1) tb.t += delta;
-      else tb.t = 0;
-      seq = sequenceAt(tb.t, TV_LINES, { idle: TYPE_IDLE, char: pt.textChar, hold: pt.textHold });
+      //
+      // CETTE CONDITION EST DUPLIQUÉE dans Work.tsx (la retenue du scroll), et c'est
+      // délibéré plutôt qu'oublié : les deux fichiers répondent à des questions
+      // différentes de la même horloge — ici « dois-je avancer tb.t ? », là-bas « dois-je
+      // tenir le verrou ? » — et formClock n'a pas de raison d'exposer un booléen pour un
+      // test qui n'existe que pour ces deux appelants. Si l'un des deux membres change,
+      // l'autre doit suivre.
+      if (s.mood.dev > 0.55 && s.mood.flat === 1) {
+        /*
+         * L'ACCÉLÉRATION AU SCROLL — voir tubeGate. Bornée par ce qu'il reste jusqu'à la
+         * fin de la séquence (sequenceDuration), JAMAIS au-delà, sur consigne explicite :
+         * Work.tsx ne DÉCOUVRE `tubeGate.done` que sur son prochain passage de ticker, pas
+         * à l'instant où il devient vrai ici — donc au moins une frame après que tb.t a
+         * franchi la fin, le verrou est encore tenu et un cran de molette peut encore
+         * arriver. À cet instant tb.t DÉPASSE déjà `sequenceDuration` (le `delta` seul,
+         * jamais borné, l'y a poussé dès la frame du franchissement) : sans le
+         * `Math.max(0, …)`, `remaining` serait négatif et `Math.min(boost, remaining)`
+         * ferait RECULER tb.t d'un coup — la frappe reviendrait en arrière au moment même
+         * où elle se termine.
+         */
+        const remaining = Math.max(0, sequenceDuration(TV_LINES, cadence) - tb.t);
+        tb.t += delta + Math.min(tubeGate.boost, remaining);
+      } else {
+        tb.t = 0;
+      }
+      tubeGate.boost = 0;
+      seq = sequenceAt(tb.t, TV_LINES, cadence);
     }
+    // LE PONT VERS LA RETENUE — voir tubeGate. Écrit que la branche ait été `forced` ou
+    // non : Work.tsx doit voir `done` passer vrai aussi bien quand la séquence s'est
+    // réellement terminée que quand le panneau ou reduced motion l'a forcée à sa ligne
+    // finale, sinon un dev qui bascule `textFull` en cours de route verrouillerait la
+    // page sur un `done` resté faux.
+    //
+    // NE COURT QUE SI CE MESH EST `on` (voir le `if (!on) return;` plus haut dans cette
+    // fonction) : hors de ce cas — en pratique, seulement le panneau dev qui pousse
+    // `blobTweak.mode` hors de "blob" pendant le corridor — `done` reste figé à sa
+    // dernière valeur écrite plutôt que d'être mis à jour. Sans danger pour un lecteur
+    // normal : `flat` ne peut atteindre 1 (la condition que Work.tsx teste avant de
+    // regarder `done`) qu'après que `tableauOn` a substantiellement grimpé, ce qui
+    // maintient `on` vrai par construction. Le seul chemin qui casse cette implication
+    // est un réglage dev délibéré, réversible dès qu'il repasse sur "blob".
+    tubeGate.done = seq.done;
     const line = seq.line;
     const chars = seq.chars;
     // Le curseur ne clignote qu'au repos — pendant la frappe il reste allumé, comme un vrai

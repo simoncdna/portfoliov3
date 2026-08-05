@@ -38,30 +38,46 @@ export function scrollPageTo(y: number, smooth = true) {
  * The modal lock
  * ------------------------------------------------------------------------- */
 
-let locked = false;
-
 /**
- * Hold the page still for a modal (the section menu).
+ * Hold the page still — for a modal (the section menu) or for the Work terminal's
+ * retenue (see tubeGate).
  *
  * A stopped Lenis swallows wheel and touch and preventDefaults them, so stopping it IS
  * the lock — no overflow:hidden, and therefore no scrollbar-width reflow of the whole
  * document behind the overlay. Under prefers-reduced-motion Lenis never starts, so the
  * fallback has to be the blunt one.
  *
- * The flag is readable because SmoothScroll ALSO drives Lenis for the blob panel, on a
- * delayed start: without a shared source of truth, that timer could land while a menu
- * is open and hand the page back underneath it. See isPageLocked's caller.
+ * NOMINATIF DEPUIS QUE LE TERMINAL EXISTE. C'était un simple booléen, correct tant
+ * qu'un seul verrouilleur existait (le menu). Il y en a désormais deux, et un booléen
+ * ne peut pas dire QUI le tient : si le menu et la retenue du terminal étaient
+ * ouverts en même temps, le premier des deux à relâcher (`lockPageScroll(false)`)
+ * relâchait la page pour l'autre aussi — le commentaire d'origine de ce fichier
+ * anticipait déjà la même faille pour le panneau ("without a shared source of truth,
+ * that timer could land while a menu is open…") sans la résoudre, parce qu'il n'y
+ * avait alors rien à confondre. `owner` est donc un nom, l'état un Set : la page
+ * n'est rendue que si CE Set est vide, donc relâcher son propre nom ne peut jamais
+ * relâcher celui d'un autre.
  */
-export function lockPageScroll(next: boolean) {
-  locked = next;
+const lockedBy = new Set<string>();
+
+export function lockPageScroll(owner: string, next: boolean) {
+  if (next) lockedBy.add(owner);
+  else lockedBy.delete(owner);
+  const locked = lockedBy.size > 0;
   if (lenis) {
-    if (next) lenis.stop();
+    if (locked) lenis.stop();
     else lenis.start();
     return;
   }
-  document.documentElement.style.overflow = next ? "hidden" : "";
+  document.documentElement.style.overflow = locked ? "hidden" : "";
 }
 
+/**
+ * Readable because SmoothScroll ALSO drives Lenis for the blob panel, on a delayed
+ * start: without a shared source of truth, that timer could land while a menu (or the
+ * terminal's retenue) is open and hand the page back underneath it. See this
+ * function's caller in SmoothScroll.
+ */
 export function isPageLocked() {
-  return locked;
+  return lockedBy.size > 0;
 }

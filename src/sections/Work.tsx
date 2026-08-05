@@ -7,7 +7,9 @@ import { useGSAP } from "@gsap/react";
 import { works } from "@/data/site";
 import { workPlate } from "@/lib/workPlate";
 import { workReveal } from "@/lib/workReveal";
-import { scrollPageTo } from "@/lib/pageScroll";
+import { formState } from "@/lib/formClock";
+import { tubeGate } from "@/lib/tubeGate";
+import { lockPageScroll, scrollPageTo } from "@/lib/pageScroll";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -103,6 +105,46 @@ const BEAT = { name: 0.64, tail: 0.25 };
  * answering the wheel; the scramble sped up with it, so the invariant holds.
  */
 const DWELL = 900;
+
+/**
+ * Les touches qu'un scroll natif consulterait — copiées de SmoothScroll (qui les
+ * garde privées, une par verrouilleur plutôt qu'une exportée à partager) plutôt que
+ * factorisées : ce fichier n'a que ça à emprunter, et l'exporter de SmoothScroll pour
+ * une seule autre lecture aurait couplé deux verrous qui n'ont pas à se connaître.
+ */
+const SCROLL_KEYS = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+  " ",
+  "Spacebar",
+]);
+
+/**
+ * L'ACCÉLÉRATION DE LA RETENUE — voir tubeGate. Secondes ajoutées à l'horloge du tube
+ * PAR ÉVÈNEMENT wheel pendant que le verrou tient — pas une fraction de son deltaY :
+ * les unités de deltaY ne sont pas comparables entre souris et trackpad (mode ligne ou
+ * pixel, accélération propre au pilote), donc une échelle proportionnelle aurait fait
+ * dépendre la vitesse perçue du matériel du lecteur plutôt que de son geste. Compter
+ * les évènements reste dépendant de l'appareil (un trackpad en émet beaucoup plus
+ * qu'une molette pour un geste comparable), mais c'est la dépendance que la tâche
+ * assume déjà en parlant de « chaque cran », pas de « chaque pixel ».
+ *
+ * NON MESURÉ AU NAVIGATEUR — rien ici ne peut compter les évènements wheel qu'émet un
+ * geste réel. Ce qui suit est un calcul, pas une observation :
+ *
+ * La séquence dure 8,01 s aux réglages par défaut de posteTweak (1,5 s d'attente +
+ * (10 + 19 + 24) caractères × 0,07 s + 2 pauses × 1,4 s — voir sequenceDuration). À
+ * 0.5 s le cran, une dizaine de crans — quelques gestes déterminés à la molette, ou un
+ * flick de trackpad — suffisent à faire tomber l'attente de 8 s à 2-3 s, la fourchette
+ * demandée. Et AUCUN cran isolé ne peut sauter une phrase entière : le plus petit reste
+ * à frapper après la première phrase (« wake up... », 0,7 s de frappe puis 1,4 s de
+ * pause) pèse encore 2,1 s, plus de quatre fois l'incrément.
+ */
+const BOOST_STEP = 0.5;
 
 export function Work() {
   const ref = useRef<HTMLElement>(null);
@@ -207,6 +249,108 @@ export function Work() {
       workPlate.clear();
     };
   }, [geometry, walk]);
+
+  /**
+   * LA RETENUE, ET SON ACCÉLÉRATION — voir tubeGate et pageScroll. `workReveal.dive`
+   * (plus bas, diveTl) est le scrub qui traverse l'écran, et il ne doit pas avancer
+   * avant que le terminal ait fini ses trois phrases : la molette scrubbe déjà tout le
+   * reste de la section, donc sans retenue un simple flick pendant l'attente saute le
+   * dialogue et arrive dans la plongée avant qu'un mot n'ait été lu.
+   *
+   * LE VERROU tombe sur lockPageScroll("tube", …), pas sur un lenis.stop() en direct :
+   * c'est le mécanisme déjà établi (voir pageScroll, et SectionNav pour le menu, l'autre
+   * verrouilleur) plutôt qu'un second qui l'ignorerait. Tenu quand le poste est posé ET
+   * développé — `s.mood.flat === 1 && s.mood.dev > 0.55`, LA MÊME garde que le useFrame
+   * de ChromeTableau teste avant d'avancer tb.t (dupliquée là-bas avec un renvoi ici : si
+   * l'une change, l'autre doit suivre) — et que la séquence n'est pas finie
+   * (`!tubeGate.done`). Relâché dès que `done` passe vrai.
+   *
+   * PAS de pin ScrollTrigger : un Lenis arrêté avale déjà wheel et touch et les
+   * preventDefault (vérifié dans node_modules/lenis — onVirtualScroll, `if
+   * (this.isStopped || this.isLocked) { if (event.cancelable) event.preventDefault();
+   * return; }`), donc l'arrêter EST la retenue. Un pin en plus changerait la mise en
+   * page (un pin reflow le document) pour un bénéfice nul.
+   *
+   * UN TICKER, PAS UN ABONNEMENT : formState() et tubeGate sont des singletons mutables
+   * lus par valeur, comme workReveal et workPlate — rien n'émet d'évènement quand
+   * `mood.flat` franchit 1 ou quand `tubeGate.done` bascule, donc quelque chose doit les
+   * RELIRE à intervalle régulier. gsap.ticker plutôt qu'un requestAnimationFrame maison :
+   * c'est déjà l'horloge unique qui pousse Lenis et ScrollTrigger (voir SmoothScroll,
+   * « Single clock »), donc s'y greffer n'ouvre pas une troisième boucle indépendante
+   * côté DOM — seulement une frame de plus, au pire, avant qu'un `done` écrit par le
+   * useFrame de ChromeTableau (une boucle R3F séparée, sans garantie d'ordre avec celle-
+   * ci dans la même frame navigateur) ne soit vu ici.
+   *
+   * L'ACCÉLÉRATION répond au même problème par l'autre bout : retenir SANS rien répondre
+   * au geste lirait comme une page cassée (voir BOOST_STEP), donc pendant que le verrou
+   * tient, chaque évènement wheel avance l'horloge du tube (tubeGate.boost) au lieu de
+   * ne rien faire. L'écouteur est câblé comme celui qui referme le panneau toile dans
+   * SmoothScroll (même options : `passive`, pas de capture) — Lenis arrêté preventDefault
+   * déjà l'évènement, donc celui-ci n'a besoin que de LIRE deltaY, jamais de le bloquer
+   * lui-même.
+   *
+   * LE CLAVIER EST UNE AUTRE PORTE, et une que la tâche qui a posé ce fichier ne nommait
+   * pas : Lenis n'intercepte QUE wheel et touch (SmoothScroll le documente déjà pour son
+   * propre verrou — « Lenis governs wheel and touch but not the keyboard »), donc
+   * PageDown, Espace ou une flèche ferait défiler le document nativement pendant que
+   * Lenis se croit arrêté, ce qui avancerait les ScrollTrigger de la section (le roll-out
+   * puis diveTl) SOUS le clavier alors même que la molette est bien retenue — l'exact
+   * défaut que cet effet existe pour empêcher, par une porte restée ouverte. SCROLL_KEYS
+   * et sa garde reprennent donc le motif déjà validé par SmoothScroll pour le panneau,
+   * appliqué au verrou "tube" à la place du panneau toile.
+   *
+   * TOUS LES CHEMINS DE SORTIE RELÂCHENT "tube" SANS CONDITION : le tick dès que `want`
+   * retombe (séquence finie, ou tout ce qui ferait retomber flat/dev), et le nettoyage
+   * de cet effet — démontage du composant — sans regarder `locked`. lockPageScroll est un
+   * Set.delete : relâcher un nom qu'on ne tenait pas ne coûte rien, donc pas besoin de
+   * savoir lequel de ces deux chemins a réellement tenu le verrou pour appeler l'autre
+   * sans risque.
+   */
+  useEffect(() => {
+    // Comme le reduced-motion check du useGSAP plus bas : vérifié une fois au montage,
+    // pas réactif à un changement live de la préférence système — cohérent avec le reste
+    // de ce fichier plutôt qu'une exception qui se justifierait à elle seule. En reduced
+    // motion, ni retenue ni accélération : cet effet entier se retire.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    /** Le verrou "tube" est-il tenu par CE composant en ce moment — écrit par le seul
+     *  tick, lu par la molette et le clavier pour savoir s'ils ont quoi que ce soit à
+     *  faire. */
+    let locked = false;
+
+    const tick = () => {
+      const s = formState();
+      const want = s.mood.flat === 1 && s.mood.dev > 0.55 && !tubeGate.done;
+      if (want === locked) return;
+      locked = want;
+      lockPageScroll("tube", want);
+    };
+    gsap.ticker.add(tick);
+
+    const onWheel = () => {
+      if (!locked) return;
+      tubeGate.boost += BOOST_STEP;
+    };
+    window.addEventListener("wheel", onWheel, { passive: true });
+
+    const onKey = (e: KeyboardEvent) => {
+      if (!locked || !SCROLL_KEYS.has(e.key)) return;
+      // Comme SmoothScroll : ne pas voler une touche qu'un contrôle attend
+      // légitimement. Rien n'est focusable pendant la retenue aujourd'hui (l'index des
+      // plaques est `hidden` — voir le rendu plus bas), mais la garde ne coûte rien et
+      // évite une régression silencieuse si ça change.
+      if ((e.target as HTMLElement)?.closest?.('[role="dialog"],input,button')) return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      gsap.ticker.remove(tick);
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKey);
+      lockPageScroll("tube", false);
+    };
+  }, []);
 
   /** Scroll to the middle of plate i's bin — see the binning in the handler above. */
   const go = (i: number) => {
@@ -404,10 +548,18 @@ export function Work() {
        * au moment où le poste se forme, et leurs captures ne voudraient rien dire.
        *
        * Elles ne sont PAS la position définitive, parce que celle-ci ne peut pas être décidée
-       * ici : la séquence du terminal dure une dizaine de SECONDES là où cette fenêtre ne fait
-       * que ~960 px de scroll. C'est précisément ce que l'épinglage de la section doit résoudre
-       * (T7), et c'est lui qui fixera la bande pour de bon — la plongée prendra le scroll que
-       * le pin relâche, ce qui ne s'exprime pas en pourcentage du trigger.
+       * ici : la séquence du terminal dure quelques secondes de temps réel (voir tubeGate) là
+       * où cette fenêtre ne fait que ~960 px de scroll.
+       *
+       * CE PARAGRAPHE ATTENDAIT UN PIN ScrollTrigger SUR LA SECTION POUR RÉSOUDRE ÇA (« la
+       * plongée prendra le scroll que le pin relâche ») — FAUX depuis que T7 a tranché POUR
+       * L'ARRÊT DE LENIS plutôt que pour un pin (voir la retenue plus haut dans ce fichier, et
+       * pageScroll.ts) : il n'y a pas de pin, donc pas de scroll-distance relâchée nulle part.
+       * La page se fige simplement à la position `p` qu'elle avait atteinte quand le verrou a
+       * pris — quelques millièmes après que `flat` atteint 1, selon la vitesse de la molette
+       * juste avant que `dev` franchisse 0,55 — pour la durée réelle (accélérable) du terminal,
+       * puis reprend EXACTEMENT là. Positionner `diveTl` pour de bon demande donc de mesurer CE
+       * `p`-là au navigateur, pas une fraction d'un pin qui n'existe pas.
        *
        * Conversion, pour qui reprendra ces nombres : le côté trigger étant un % de la HAUTEUR
        * de la bande (3792 px mesurés) et p une fraction de son TRAVEL (3002 px), le facteur est
