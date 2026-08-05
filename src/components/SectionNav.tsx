@@ -29,8 +29,10 @@ import { stageLoad } from "@/lib/stageLoad";
 
    ROW ORDER AND THE STAGGER. Rows arrive top→bottom and leave bottom→top: the list
    builds in reading order and is put away from the far end back, the same reversal the
-   ControlPanel uses for its "piano" (see its transitionDelay). It is what makes the
-   close read as tidying up rather than as the open played backwards.
+   ControlPanel uses for its "piano" (see its transitionDelay). The close is the open played
+   backwards — not approximately, and not only in the order: the easing, the direction the
+   letters travel, the ✕, the curtain's place in the queue and the corner eye's are each the
+   reflection of an entrance window about the moment the entrance ends. See the way out below.
 
    The active row is marked from sectionStore.index, which the scroll already maintains
    for the blob's morph. It is read once, at open — the value cannot change while the
@@ -78,27 +80,28 @@ const CHAR_MS = 38;
  *   - rows leave bottom→top and letters right→left, last-in-first-out.
  *   - the char term counts from LONGEST, not from this row's own length. The entrance ends on
  *     CONTACT's seventh letter, so that glyph is the pivot and every shorter row is pushed
- *     later by the letters it does not have. It is why ABOUT's A is the very last thing gone
- *     (388ms), which is also the right place to end: the top row, where a reader tidying
- *     bottom→top finishes.
+ *     later by the letters it does not have. It is why ABOUT's A is the last letter to go
+ *     (starting at 388ms), which is also the right place to end: the top row, where a reader
+ *     tidying bottom→top finishes.
  *
- * WHAT IS NOT MIRRORED, and why. Two departures, both deliberate:
- *   - THE EASING STAYS --ease-out. Its true inverse is --ease-in (they are each other's
- *     reflection — the tokens are literally cubic-bezier(0.16,1,0.3,1) and (0.7,0,0.84,0)),
- *     and it fails twice over. Back-loaded, a letter is still 98% present at 800 of its
- *     820ms, so it is on screen for its whole travel and the curtain cannot help dragging
- *     it — the exact bug this replaced. And it puts the slow end of the ramp against the
- *     click, which reads as a control that has not registered being pressed. Front-loaded is
- *     what a dismissal owes: the first glyph moves within a frame.
- *   - THE CURTAIN DOES NOT WAIT AS LONG as the mirror says. Strictly it should lift at
- *     1068ms; it lifts at 830 (--nav-exit-hold), the moment the last glyph is under the mask.
- *     The mirror's 1068 is inherited from the entrance's overlap — letters climbing out of a
- *     curtain still falling — and reflected onto the exit that same overlap lands at the END
- *     of the letters' travel instead of the start, where it is a drag rather than an
- *     entanglement. 830 keeps it one continuous cascade with no hole and nothing dragged.
+ * THE REST OF THE CHAIN IS MIRRORED IN CSS, and this is where a list of exceptions to the
+ * mirror used to live. There are none left:
+ *   - the letters go back DOWN below the line they came from, which is their resting
+ *     transform — so the exit needs no state of its own, and a `closing` flag that existed
+ *     only to send them out through the TOP is gone with it;
+ *   - on --ease-in, which is --ease-out's literal reflection through (0.5, 0.5);
+ *   - the ✕ leaves over [358, 638], the reflection of its [1050, 1330] arrival;
+ *   - the curtain lifts last, at --nav-exit-hold's 1068 — the reflection of the fall it
+ *     opened with;
+ *   - the corner eye returns on the lift's final 200ms, the reflection of the 200ms in which
+ *     it left.
+ * Each is T − b of an entrance window, and each carries at its own site in globals.css the
+ * reasoning for whatever departure it replaced. The one thing that stays asymmetric is
+ * reduced motion, which collapses both directions to 1ms and has no shape to mirror.
  *
- * Total: ~1450ms against the entrance's 1688. Shorter, as a dismissal should be, and shorter
- * for a reason rather than by taste — it is the same chain with the overlap taken out. */
+ * Total: 1688ms, exactly the entrance's. It was ~1360 while the curtain left early, and a
+ * dismissal being the shorter gesture is a real thing to want — but a reversal costs what it
+ * reverses. That is the price of the close BEING the open backwards instead of resembling it. */
 const LONGEST_LABEL = Math.max(...SECTIONS.map((s) => s.label.length));
 const EXIT_DELAY_MS = (i: number, c: number) =>
   (SECTIONS.length - 1 - i) * STAGGER_MS + (LONGEST_LABEL - 1 - c) * CHAR_MS;
@@ -118,15 +121,17 @@ const EXIT_DELAY_MS = (i: number, c: number) =>
  * mid-close, reduced motion collapsing the transition, a lift interrupted by a resize.
  * Without it the rows would stay in the tab order for ever.
  *
- * The exit is due at 1450ms — 830ms of hold while the letters retreat, then the curtain's own
- * 620ms — and this is deliberately well clear of it rather than just past it. 1800 was tried
- * and is wrong for the reason above: the event was measured landing at 1757ms under main-
- * thread pressure, because the blob is running by then and `transitionend` is dispatched on
- * the main thread. A fallback that can beat the real event is not a safety net, it is the
- * mid-lift `visibility: hidden` bug reintroduced through the back door. Anything the event
- * genuinely never arrives for is not in a hurry, so the headroom is free.
+ * The exit is due at 1688ms — --nav-exit-hold's 1068 while the letters retreat, then the
+ * curtain's own 620 — and this is deliberately well clear of it rather than just past it.
+ * 1800 was tried against the older, shorter exit and is wrong for the reason above: the event
+ * was measured landing at 1757ms under main-thread pressure, some 400ms behind a due time of
+ * ~1360, because the blob is running by then and `transitionend` is dispatched on the main
+ * thread. A fallback that can beat the real event is not a safety net, it is the mid-lift
+ * `visibility: hidden` bug reintroduced through the back door. 2800 keeps the same margin over
+ * 1688 + 400 that the old 2400 kept over 1360 + 400. Anything the event genuinely never
+ * arrives for is not in a hurry, so the headroom is free.
  */
-const CLOSE_FALLBACK_MS = 2400;
+const CLOSE_FALLBACK_MS = 2800;
 
 /*
  * THE BLOB IS ALIVE FROM THE FIRST FRAME OF THE CLOSE — at reduced resolution, not paused.
@@ -509,13 +514,16 @@ export function SectionNav() {
   const [open, setOpen] = useState(false);
   /** Kept true through the close transition: the veil may only become `visibility:
    *  hidden` — which is what takes the rows out of the tab order — once they have
-   *  finished leaving. */
+   *  finished leaving.
+   *
+   *  It is the only extra state the close needs. There was a second one, `closing`, for as
+   *  long as the letters left through the top of the mask: that destination was neither their
+   *  resting position nor their open one, so it had to be described somewhere. Now that the
+   *  exit is the entrance reversed they go back to exactly where they came from, `!open` says
+   *  it in full, and the class of bug the flag brought with it — the snap back to rest having
+   *  to be hidden behind `show`, and a re-open mid-close having to clear one flag before
+   *  setting the other — is gone rather than handled. */
   const [show, setShow] = useState(false);
-  /** Distinct from `!open`: the letters exit upward, which is neither their resting
-   *  position (below the line) nor their open one, so it needs a state of its own.
-   *  Cleared with `show`, i.e. once the veil is already hidden — so the snap back to the
-   *  resting position below the line is never on screen. */
-  const [closing, setClosing] = useState(false);
   const [here, setHere] = useState(-1);
 
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -529,15 +537,11 @@ export function SectionNav() {
   const openMenu = () => {
     setHere(sectionStore.index);
     setShow(true);
-    // Re-opening mid-close: without this both flags are set at once and the exit rule
-    // keeps the letters pinned above the line.
-    setClosing(false);
     setOpen(true);
   };
 
   const closeMenu = () => {
     setOpen(false);
-    setClosing(true);
 
     // Focus would otherwise be sitting on a row that is about to become
     // `visibility: hidden`, which drops it to <body> and loses the reader's place.
@@ -551,10 +555,10 @@ export function SectionNav() {
    * Arriving: the screen is now fully covered, so the stage cannot be seen at all and its
    * loop is stopped outright.
    *
-   * Leaving: full resolution comes back, the rows leave the tab order, and the exit state is
-   * dropped — that last one only now, or the letters would be seen snapping from above the
-   * line back to below it. ("cheap" was already set when the close began, so the blob has
-   * been alive throughout the lift.)
+   * Leaving: full resolution comes back and the rows leave the tab order. ("cheap" was
+   * already set when the close began, so the blob has been alive throughout the lift.)
+   * Nothing has to be hidden behind this hide any more — the letters are parked at their
+   * resting transform by the time it runs, which is where `!open` already had them going.
    */
   useEffect(() => {
     const veil = veilRef.current;
@@ -566,7 +570,6 @@ export function SectionNav() {
       done = true;
       stageLoad.set("live");
       setShow(false);
-      setClosing(false);
     };
 
     const onEnd = (e: TransitionEvent) => {
@@ -588,7 +591,7 @@ export function SectionNav() {
     } else {
       // The blob is alive for the whole lift, at reduced resolution — see the compositor
       // note above OPEN_MS. Full resolution returns in finish(), once the veil is off.
-      // Since the curtain now holds for --nav-exit-hold, this resume lands 830ms BEFORE
+      // Since the curtain holds for --nav-exit-hold, this resume lands a full 1068ms BEFORE
       // the lift, behind a screen that is still entirely black: the form is warm and
       // running by the time any of it can be seen, which is what that note was trying to
       // buy with a 0ms delay. Left at the top of the close rather than moved onto a timer
@@ -694,7 +697,6 @@ export function SectionNav() {
         id="section-nav"
         className="nav-veil"
         data-open={open || undefined}
-        data-closing={closing || undefined}
         style={{ visibility: show ? "visible" : "hidden" }}
         aria-hidden={!open}
       >

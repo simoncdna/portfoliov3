@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEnvironment, useGLTF } from "@react-three/drei";
 import {
@@ -8,7 +8,6 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
-  ClampToEdgeWrapping,
   Color,
   DataTexture,
   DoubleSide,
@@ -16,17 +15,18 @@ import {
   Matrix3,
   Matrix4,
   Mesh,
+  NoColorSpace,
   ShaderMaterial,
   SphereGeometry,
-  TextureLoader,
+  CanvasTexture,
+  Vector2,
   Vector3,
 } from "three";
 import type { Texture } from "three";
 import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { SNOISE, FORM_DISPLACE, CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
-import { FRAME_OUT, FRAME_T, FRAME_W, LINER_W, PHOTO_SHADE, PLATE_ASP0, PLATE_H, PLATE_T } from "@/lib/formPhoto";
+import { FRAME_W, LINER_W, PHOTO_SHADE, PLATE_H, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
-import { toileTweak, useToileTweak } from "@/lib/toileTweak";
 import { formState } from "@/lib/formClock";
 import { works } from "@/data/site";
 
@@ -35,25 +35,27 @@ type Props = {
 };
 
 /**
- * The WORK, as a mesh — the skull's technique applied whole: canvas AND moulding are
- * real vertices, each paired with a home on the resting sphere, so the roll-out is a
- * vertex morph and the raymarcher never marches a plate again. In Work the field only
- * ever draws the travelling blob, hands the frame over inside the first few percent of
- * the morph — where this mesh is still wearing the same noise-displaced sphere — and
- * goes dark. Everything after that is rasterised: the entrance's cost stops scaling
- * with pixels-times-steps and becomes a vertex program.
+ * LE POSTE, as a mesh — the skull's technique applied whole: the television's body is
+ * real vertices, each paired with a home on the resting sphere, so the formation is a
+ * vertex morph and the raymarcher never marches here. In Work the field only ever
+ * draws the travelling blob, hands the frame over inside the first few percent of the
+ * morph — where this mesh is still wearing the same noise-displaced sphere — and goes
+ * dark. Everything after that is rasterised.
  *
- * The same shared field (formOffset) lumps the disguised sphere, so the crossfade has
- * nothing to show — and its flow term stays alive at full presence, which is what
- * keeps the settled canvas breathing without a line of extra code.
+ * The shared field (formOffset) lumps the disguised sphere so the crossfade has
+ * nothing to show — and it DIES with the formation ((1 − uPres) in the vertex
+ * shader) : a television is not living matter, the formed poste is rigid. The old
+ * canvas kept the flow alive at full presence because a canvas breathes; a cabinet
+ * does not.
  *
- * The moulding's carving is REAL GEOMETRY here: the drawn trim (frame-trim.png)
- * displaces the bars' front faces at build time, normals recomputed — chrome shows
- * sculpture through normals, and a mesh pays for its detail once.
+ * The sequence, three beats on two signals: the chrome sphere becomes a CHROME
+ * television (the morph, scrubbed by md.flat), the developer strips the chrome to
+ * reveal the set's real skin (uReveal, on md.dev — the section's only un-scrubbed
+ * event), and the tube lights up with its terminal text on dev's second half (uGlow).
  *
- * The photograph rides the canvas's own UVs through the same PHOTO_SHADE pipeline the
- * field used (developer grain, exposure coming up, the hover's colour) — addressed by
- * the same worn slot (mood.car), developed by the same mood.dev.
+ * The photograph pipeline (PHOTO_SHADE, uPhoto*) is still compiled into the hidden
+ * canvas slab's shader but forced dark (uPhotoOn = 0) : the projects' display is a
+ * question deliberately left open — see the per-frame block.
  */
 
 /** Assembly staggering — the canvas gathers first, the moulding is raised last. */
@@ -66,8 +68,42 @@ const FLY = 0.22;
  * lean toward the reader. What answers the hover is the PICTURE — the colour
  * fading in (uColour below) — not the object's size.
  */
-/** How far the picture may fill the room the dock leaves it — mirrors PLATE_FILL. */
-const FILL = 0.92;
+/**
+ * Le cap du poste, radians autour de Y — CALCULÉ, jamais réglé à l'œil : la normale
+ * moyenne (pondérée par l'aire) des triangles dont l'UV tombe dans la zone de l'écran,
+ * repérée sur l'albedo du mesh verre. Pour cet ordinateur elle vaut (0.000, +0.080,
+ * +0.997) : l'écran regarde déjà +Z (le +0.08 vertical est l'inclinaison du moniteur,
+ * qu'on garde — un CRT regarde légèrement au-dessus de l'horizon). Zéro, donc, mais le
+ * mécanisme reste : le prochain glb n'aura aucune raison d'être aligné.
+ */
+const TV_YAW = 0;
+/**
+ * La fraction de la demi-hauteur visible que le poste occupe, une fois posé au
+ * centre. Le plafond de taille d'origine mesurait « la place que laisse le dock »,
+ * ce qui n'a plus de sens pour un objet centré : ici c'est un CADRAGE, celui d'un
+ * objet posé devant l'objectif.
+ */
+const TV_FILL = 0.5;
+/** La demi-étendue du poste en espace de forme, à la largeur de moulure de référence. */
+const SCR_H = PLATE_H + LINER_W + 2 * FRAME_W;
+
+/*
+ * LA SÉQUENCE DU TERMINAL. Le poste apparaît, le curseur clignote À VIDE — l'attente est
+ * un état qu'on doit voir, d'où presque trois clignotements avant la première lettre —
+ * puis le texte se FRAPPE, curseur en bout de ligne, et l'invite reste à clignoter.
+ *
+ * La cadence de frappe est CONSTANTE, et c'est voulu : un texte reçu par un terminal
+ * arrive au rythme de la ligne, pas au rythme d'une main — la frappe humaine irrégulière
+ * aurait demandé du hasard, et le hasard par frame est interdit ici (deux lectures du
+ * même instant doivent dessiner la même image).
+ */
+const TV_TEXT = "hello world";
+/** L'attente au curseur nu, secondes — presque trois clignotements. */
+const TYPE_IDLE = 1.5;
+/** Une lettre toutes les… — le débit d'une ligne série, pas d'une main. */
+const TYPE_CHAR = 0.07;
+/** La demi-période du clignotement (530 ms allumé, 530 ms éteint — le battement VT). */
+const BLINK = 0.53;
 
 /* -------------------------------------------------------------------------- */
 /* shaders                                                                    */
@@ -81,12 +117,13 @@ uniform float uPres;
 uniform float uFly;
 uniform float uAspX;
 uniform float uSeatK;
-uniform float uFit;
 attribute vec3 aTarget;
 attribute float aSeed;
 varying vec3 vNrm;
 varying vec3 vWPos;
 varying vec2 vUv;
+varying vec2 vSeat;
+varying vec3 vFormN;
 ${SNOISE}
 ${FORM_DISPLACE}
 
@@ -119,10 +156,10 @@ void main(){
   float w = clamp((uPres - aSeed * 0.35) / 0.65, 0.0, 1.0);
   w = w * w * (3.0 - 2.0 * w);
 
-  // uFit: the dev panel's "collée" — grows the CANVAS's seat only (the frame's
-  // material keeps it at 1), walking the picture's edge across the liner band
-  // toward the moulding.
-  vec3 seat = aTarget * vec3(uAspX, 1.0, 1.0) * uSeatK * uFit;
+  // The seat as BUILT. A "collée" factor lived here — the dev panel's dial that walked
+  // the canvas's edge across the liner band onto the moulding — and the answer it found
+  // was 1: the band of bare chrome between picture and frame stays.
+  vec3 seat = aTarget * vec3(uAspX, 1.0, 1.0) * uSeatK;
   vec3 p0 = baseAt(position, seat, w);
   vec3 nrm = normalize(mix(normalize(position + vec3(1e-4)), normal, w));
 
@@ -131,20 +168,57 @@ void main(){
   // places and the handover has nothing to show.
   float f = formOffset(p0);
   f = formOffset(p0 + nrm * f);
-  vec3 ps = p0 + nrm * f;
+  /*
+   * LA MATIÈRE MEURT AVEC LA FORMATION. Le champ partagé est ce qui fait porter à la
+   * sphère déguisée les mêmes grumeaux que le liquide — indispensable au départ, le
+   * relais avec le crâne se joue là — mais un téléviseur n'est pas de la matière
+   * vivante : formé, il est RIGIDE. L'ancienne toile gardait le flow à pleine
+   * présence (« keeps the settled canvas breathing ») parce qu'une toile respire ;
+   * un boîtier ne respire pas, et un objet dur qui ondule lit comme une erreur.
+   * (1 − uPres) éteint le déplacement ET sa correction de normale ensemble — l'un
+   * sans l'autre, c'est une surface plate éclairée comme si elle ondulait.
+   */
+  float alive = 1.0 - uPres;
+  // f BRUT dans la différence du gradient, alive appliqué UNE fois au résultat. La
+  // première version faisait f *= alive avant la soustraction : le gradient valait
+  // alors alive·(F(ps±e) − alive·f)/e, soit un biais isotrope alive·(1−alive)·f/e sur
+  // les trois composantes — à mi-morph, de l'ordre de la normale unité : le chrome
+  // s'éclairait comme si toute la surface penchait vers (1,1,1), en scintillant avec
+  // le champ. ∇(alive·F) = alive·∇F exige le F brut des deux côtés de la différence.
+  vec3 ps = p0 + nrm * (f * alive);
 
   float e = 0.06;
   vec3 grad = (vec3(formOffset(ps + vec3(e, 0.0, 0.0)),
                     formOffset(ps + vec3(0.0, e, 0.0)),
-                    formOffset(ps + vec3(0.0, 0.0, e))) - f) / e;
+                    formOffset(ps + vec3(0.0, 0.0, e))) - f) / e * alive;
   vec3 nOut = normalize(nrm - (grad - nrm * dot(grad, nrm)));
 
   vec4 wp = modelMatrix * vec4(ps, 1.0);
   vWPos = wp.xyz;
   vNrm = normalize(mat3(modelMatrix) * nOut);
+  // LE SIÈGE BRUT (aTarget), pas la position cadrée : c'est l'espace de l'OBJET.
+  // Le rectangle du tube a d'abord été comparé à ps — la position après uSeatK — et
+  // uSeatK bouge avec le viewport, le cadrage (TV_FILL) et la caméra : le rectangle,
+  // cuit sous un k donné, se décalait de l'écran à chaque changement de l'un des
+  // trois — « le texte a disparu » était ça. aTarget ne dépend de rien : il est
+  // mesuré par tvExt, publié par le rect DOM, et gate le tube — un seul espace,
+  // trois consommateurs, aucune conversion pour se tromper.
+  vSeat = aTarget.xy;
+  vFormN = nOut;
   vUv = uv;
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
+`;
+
+/**
+ * LA COULEUR DE LA DALLE ÉTEINTE — le seul nombre de couleur restant ici : le boîtier
+ * est texturé (uSkin), il n'a plus de couleur à régler. TV_GLASS ne sert qu'au shader
+ * de l'ancienne dalle procédurale, cachée mais compilée : un gris de verre, plus clair
+ * que le noir, parce qu'un tube éteint renvoie la pièce. (TV_BODY, le plastique noir de
+ * l'étape intermédiaire supprimée, est parti avec elle.)
+ */
+const TV_CONSTS = /* glsl */ `
+const vec3 TV_GLASS = vec3(0.128, 0.132, 0.138);
 `;
 
 const FRAG_FRAME = /* glsl */ `
@@ -156,15 +230,115 @@ uniform float uFade;
 uniform vec3 uLo;
 uniform vec3 uHi;
 uniform vec3 uCamPos;
+uniform float uTv;
+uniform sampler2D uSkin;
+uniform float uReveal;
+uniform sampler2D uScreen;
+uniform float uGlow;
+uniform float uTube;
+uniform vec2 uScrMin;
+uniform vec2 uScrMax;
 varying vec3 vNrm;
 varying vec3 vWPos;
 varying vec2 vUv;
+varying vec2 vSeat;
+varying vec3 vFormN;
+${TV_CONSTS}
 ${CHROME_SHADE}
 void main(){
   vec3 rd = normalize(vWPos - uCamPos);
   vec3 n = normalize(vNrm);
   if (dot(n, rd) > 0.0) n = -n;
-  gl_FragColor = vec4(chromeShade(n, rd), uFade);
+  vec3 col = chromeShade(n, rd);
+
+  /*
+   * LE POSTE SE FORME EN CHROME, ET RESTE CHROME UNE FOIS FORMÉ.
+   *
+   * Une étape intermédiaire — chrome → plastique noir pendant la formation, puis
+   * plastique → peau au dévoilement — a existé et a été retirée : elle venait du
+   * design précédent (un poste sans texture), et elle intercalait une matière que
+   * personne n'avait demandée entre les deux qui comptent. La séquence est « la
+   * forme d'abord, la matière ensuite » : le crâne lâche une sphère chrome, la
+   * sphère devient un téléviseur CHROME — le relais mesh-à-mesh reste invisible
+   * puisque les deux mains tiennent le même chrome — et c'est le révélateur
+   * (uReveal, sur md.dev) qui retire le chrome pour découvrir la vraie peau.
+   *
+   * Le fresnel reste : la peau garde un vernis (un boîtier n'est pas mat comme du
+   * papier), et c'est lui qui raccroche la texture à l'éclairage de la scène.
+   */
+  float fres = pow(1.0 - abs(dot(n, rd)), 3.5);
+
+  /*
+   * ET LE CHROME S'EFFACE — la vraie peau du poste apparaît dessous.
+   *
+   * TROIS ÉTATS, DEUX SIGNAUX, dans cet ordre : le chrome prend la forme d'un poste (uTv, sur
+   * md.flat), puis le chrome se retire pour révéler le plastique (uReveal, sur md.dev). Les
+   * deux ne sont pas un seul mouvement : la forme d'abord, la matière ensuite. C'est la
+   * dramaturgie que ce fichier tient déjà pour le tirage — « the metal settles, chrome and
+   * still, THEN the print rises out of it » — appliquée au poste au lieu de la photographie.
+   *
+   * md.dev est le bon signal parce qu'il ne démarre QUE quand la plaque est exactement plate,
+   * et qu'il court sur son propre temps et non sur la molette. Le dévoilement est donc un
+   * événement, pas un scrub : c'est la seule chose de cette traversée que le lecteur ne pilote
+   * pas image par image.
+   *
+   * La texture garde un peu du fresnel du chrome par-dessus : un boîtier de télé n'est pas mat
+   * comme du papier, il a un vernis. Sans ce reste de réflexion la peau lit comme un décalque.
+   */
+  vec3 skin = texture2D(uSkin, vUv).rgb;
+  skin += skin * fres * 0.55;
+  col = mix(col, skin, uReveal * uTv);
+
+  /*
+   * LE TUBE — hello world, projeté À PLAT dans l'espace de la forme.
+   *
+   * Pas d'UV et pas de second mesh : on ne connaît pas l'îlot UV de l'écran dans
+   * l'atlas du glb, et l'ancienne dalle procédurale (le porte-photographie) ne
+   * coïncide pas avec l'inset du poste. Une projection planaire bornée par un
+   * rectangle en espace de forme n'a besoin de rien savoir du modèle — le
+   * rectangle est réglé à l'œil sur l'inset (uScrMin/uScrMax, ajustables en dev
+   * via window.__scr), et la normale de face (vFormN.z) empêche la projection de
+   * traverser le boîtier et de s'imprimer sur le dos.
+   *
+   * ADDITIF, jamais mélangé : un phosphore ÉMET. Mélanger le vert dans la peau
+   * l'éteindrait là où la peau est sombre — c'est-à-dire sur l'écran, là où le
+   * texte est. Les lignes de balayage et la vignette ne modulent que l'émission :
+   * elles n'existent que dans la lumière du tube.
+   */
+  // max(span, ε) : un rectangle dégénéré posé par la poignée dev (__scr) donnerait
+  // 0/0 → NaN, toutes les comparaisons faussées, et un tube éteint SANS SYMPTÔME —
+  // indiscernable d'un uGlow à zéro pour celui qui règle.
+  vec2 suv = (vSeat - uScrMin) / max(uScrMax - uScrMin, vec2(1e-4));
+  if (uGlow > 0.001 && uTube > 0.5 && vFormN.z > 0.35 &&
+      suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0) {
+    /*
+     * COUSU AU VERRE, pas superposé. Trois termes, et chacun manquait quand le texte
+     * lisait comme un calque posé sur l'écran :
+     *
+     *  - l'UV est TIRÉE PAR LA NORMALE LOCALE (vFormN.xy) : là où le verre bombe, le
+     *    texte et les lignes de balayage se courbent avec lui — c'est la réfraction
+     *    d'un phosphore vu à travers un verre épais, et c'est le geste que formPhoto
+     *    fait déjà pour ses tirages (« drag along the surface's own tilt locks it to
+     *    the relief the way a wet print is ») ;
+     *  - l'HALATION : quatre taps autour du point, faibles — le phosphore bave dans
+     *    le verre, en plus du halo du glyphe déjà dans la texture ;
+     *  - l'émission MEURT OÙ LE VERRE TOURNE (vFormN.z^2.5) : un tube vu de biais
+     *    s'éteint, un calque non. C'est ce terme qui colle le texte à la géométrie.
+     */
+    vec2 tuv = vec2(suv.x, 1.0 - suv.y) + vFormN.xy * vec2(0.10, -0.10);
+    vec3 lit = texture2D(uScreen, tuv).rgb;
+    lit += (texture2D(uScreen, tuv + vec2(0.006, 0.0)).rgb +
+            texture2D(uScreen, tuv - vec2(0.006, 0.0)).rgb +
+            texture2D(uScreen, tuv + vec2(0.0, 0.008)).rgb +
+            texture2D(uScreen, tuv - vec2(0.0, 0.008)).rgb) * 0.22;
+    float scan = 0.85 + 0.15 * sin(tuv.y * 220.0 * 3.14159);
+    vec2 sc = suv * 2.0 - 1.0;
+    float vig = 1.0 - 0.30 * dot(sc, sc);
+    float behind = pow(max(vFormN.z, 0.0), 2.5);
+    col += lit * scan * vig * behind * uGlow * uTv;
+  }
+
+  gl_FragColor = vec4(col, uFade);
 }
 `;
 
@@ -177,6 +351,9 @@ uniform float uFade;
 uniform vec3 uLo;
 uniform vec3 uHi;
 uniform vec3 uCamPos;
+uniform float uTv;
+uniform sampler2D uScreen;
+uniform float uGlow;
 uniform float uTime;
 uniform float uCar;
 uniform float uDevZoom;
@@ -186,6 +363,7 @@ varying vec3 vWPos;
 varying vec2 vUv;
 ${SNOISE}
 float fbm(vec3 p){ return snoise(p) * 0.7 + snoise(p * 2.1) * 0.3; }
+${TV_CONSTS}
 ${CHROME_SHADE}
 ${PHOTO_SHADE}
 void main(){
@@ -193,11 +371,9 @@ void main(){
   vec3 n = normalize(vNrm);
   if (dot(n, rd) > 0.0) n = -n;
   vec3 col = chromeShade(n, rd);
-  // The photograph, on the canvas's own uv. The ARRIVAL is dialled from the CPU
-  // (see toileTweak + the useFrame below): uPhotoOn carries the shaped density,
-  // uDevZoom an optional approach-from-behind (1 = none — the default; it was
-  // tried baked-in and rejected), uDevDim an optional frame's-shadow dim (1 =
-  // none). All three are scalars per frame, so trying looks costs no recompile.
+  // The photograph, on the canvas's own uv. uPhotoOn carries the shaped density,
+  // uDevZoom an optional approach-from-behind and uDevDim an optional frame's-shadow
+  // dim — both tried, both rejected, both now pinned at 1 (see the uniforms).
   // Faces only: the print's edge stays bare metal.
   if (uPhotoOn > 0.002 && abs(vNrm.z) > 0.0) {
     float slot = floor(uCar + 0.5);
@@ -208,6 +384,47 @@ void main(){
       }
     }
   }
+  /*
+   * LA DALLE ÉTEINTE — chrome → verre gris, sur le même uTv que le boîtier.
+   *
+   * Un tube cathodique éteint n'est pas noir et n'est pas un miroir : c'est du verre bombé
+   * devant un phosphore gris. Donc deux termes et pas un.
+   *
+   * Le fresnel est BIEN PLUS raide que celui du boîtier (7.0 contre 3.5) et sa réflexion bien
+   * plus forte : c'est du verre, il renvoie franchement la pièce sur les bords et presque rien
+   * de face. C'est cette différence de courbe entre les deux matériaux qui les fait lire comme
+   * deux matières distinctes plutôt que comme un objet d'une seule couleur — et c'est aussi ce
+   * qui donnera l'illusion du bombé même sur une dalle géométriquement plate.
+   *
+   * La vignette assombrit les bords de l'écran. Un tube n'éclaire jamais ses coins de la même
+   * façon que son centre, et sans ça la dalle lit comme un rectangle de peinture grise.
+   */
+  float gf = pow(1.0 - abs(dot(normalize(vNrm), normalize(vWPos - uCamPos))), 7.0);
+  vec2 sc = vUv * 2.0 - 1.0;
+  float vig = 1.0 - 0.42 * dot(sc, sc);
+  vec3 glass = TV_GLASS * vig + col * (0.05 + 0.95 * gf);
+  col = mix(col, glass, uTv);
+
+  /*
+   * LE TUBE S'ALLUME. Trois choses, et aucune n'est décorative.
+   *
+   * ADDITIF, jamais mélangé : un phosphore ÉMET, il ne peint pas la dalle. Mélanger le vert
+   * dans le verre l'aurait éteint là où le verre est sombre, c'est-à-dire au centre — là où
+   * le texte est. Additionner le laisse traverser, et la dalle continue de refléter la pièce
+   * par-dessus, ce qui est ce qu'on voit sur un vrai tube.
+   *
+   * LES LIGNES DE BALAYAGE, en modulant l'émission et pas la dalle : elles n'existent que
+   * dans la lumière du tube. 384 lignes pour 384 pixels de texture, c'est-à-dire une par
+   * ligne réelle — au-dessus on obtient du moiré, en dessous ça lit comme des rayures.
+   *
+   * ET LA LUEUR : le phosphore bave. Un seul tap décalé suffit ici, parce que le texte est
+   * gros et que le vrai halo viendra du terme additif lui-même une fois le tube lumineux.
+   */
+  vec3 lit = texture2D(uScreen, vUv).rgb;
+  lit += texture2D(uScreen, vUv + vec2(0.0, 0.004)).rgb * 0.5;
+  float scan = 0.82 + 0.18 * sin(vUv.y * 384.0 * 3.14159);
+  col += lit * scan * uGlow * uTv;
+
   gl_FragColor = vec4(col, uFade);
 }
 `;
@@ -260,41 +477,64 @@ function buildCanvas(): BufferGeometry {
   return toMorph(g, (x, y) => (Math.hypot(x, y) / rMax) * CANVAS_SEED);
 }
 
-/**
- * The moulding is a DOWNLOADED SCULPTURE now — "Ornate Gold Vintage Frame" by
- * journeyk (Sketchfab, CC Attribution 4.0 — see ATTRIBUTIONS.md), 574k triangles of
- * real carved ornament, meshopt-compressed to 3.5 MB with its gold textures
- * neutralised: the chrome is ours. Normalised the way the
- * skull is (centre, fit, bake node transforms into the vertices), non-uniformly to
- * the REFERENCE SQUARE — the model is landscape, the reference is aspect 1, and
- * uAspX then wears each photograph's aspect on top. A carved frame stretched off its
- * native proportions distorts its ornament; between our photos' aspects it stays
- * within what a gallery eye forgives, and real frames do not resize at all.
+/*
+ * LE POSTE. Un ordinateur des années 80 — moniteur, boîtier, clavier — et non plus un
+ * téléviseur. SEPT meshes, un par matériau UDIM (les peaux default_1001…1007), d'où
+ * l'architecture multi-parties de ce fichier : partsFrame les normalise dans un repère
+ * commun, chaque partie a son matériau et sa peau.
+ *
+ * Le fichier livré pesait 68,7 Mo (21 textures PBR, 174 778 sommets). Servi : 1,0 Mo —
+ * baseColor seules (le shader n'échantillonne qu'elles), WebP 1k, simplification
+ * meshopt à 0,35 (67 089 sommets), compression meshopt. Les noms TV_* restent : le
+ * rôle est le même, renommer trente symboles n'aurait documenté que le churn.
+ *
+ * Un NOUVEAU nom de fichier plutôt qu'un ?v=3 : les en-têtes de cache du projet
+ * donnent trente jours à /models/* et un nom neuf ne peut pas être servi périmé. Le
+ * preload de layout.tsx doit rester identique à l'octet près.
+ *
+ * LICENCE À ÉTABLIR AVANT PUBLICATION. Export Sketchfab sans champ copyright — voir
+ * l'entrée « ⚠ » d'ATTRIBUTIONS.md, qui bloque le déploiement tant qu'elle n'est pas
+ * complétée ou le modèle remplacé.
  */
-const FRAME_SRC = "/models/frame.glb";
+const FRAME_SRC = "/models/computer.glb";
 
 /**
- * @param cadre the dev panel's moulding-width factor (toileTweak.cadre): scales the
- * band the sculpture spans past the canvas, so the toile/frame PROPORTION is dialled
- * — the size cap then refits the whole work, so fatter frame reads as smaller toile.
+ * LE REPÈRE PARTAGÉ DES PARTIES. Le poste n'est plus un mesh : l'ordinateur en a SEPT
+ * (moniteur, verre, boîtier, clavier…), un par matériau UDIM. La normalisation —
+ * centre, échelle, cap — doit être calculée sur l'UNION de leurs boîtes et appliquée
+ * à toutes : normaliser chaque partie sur sa propre boîte les aurait empilées au
+ * centre, toutes à la même taille.
+ *
+ * Le cap (TV_YAW) s'applique AVANT la mesure : une échelle prise sur une boîte de
+ * travers cisaillerait l'objet. Et UNE seule échelle pour les trois axes — les
+ * proportions de l'objet sont les siennes.
  */
-function buildFrameFrom(src: Mesh, cadre: number): BufferGeometry {
-  src.updateWorldMatrix(true, false);
-  // The work's outer size at the reference aspect: canvas + liner + the band.
-  const frameRef = 2 * (PLATE_H + LINER_W + 2 * FRAME_W * cadre);
+function partsFrame(srcs: Mesh[]): Matrix4[] {
+  const frameRef = 2 * (PLATE_H + LINER_W + 2 * FRAME_W);
+  const orient = new Matrix4().makeRotationY(TV_YAW);
+  const union = new Box3();
+  const per: Matrix4[] = [];
+  const box = new Box3();
+  for (const src of srcs) {
+    src.updateWorldMatrix(true, false);
+    const m = new Matrix4().copy(orient).multiply(src.matrixWorld);
+    per.push(m);
+    box.setFromBufferAttribute(src.geometry.getAttribute("position") as BufferAttribute);
+    box.applyMatrix4(m);
+    union.union(box);
+  }
+  const centre = union.getCenter(new Vector3());
+  const span = union.getSize(new Vector3());
+  const s1 = frameRef / Math.max(span.x || 1, span.y || 1);
+  const norm = new Matrix4()
+    .makeScale(s1, s1, s1)
+    .multiply(new Matrix4().makeTranslation(-centre.x, -centre.y, -centre.z));
+  return per.map((m) => new Matrix4().copy(norm).multiply(m));
+}
+
+function buildPart(src: Mesh, toForm: Matrix4): BufferGeometry {
   const srcPos = src.geometry.getAttribute("position") as BufferAttribute;
   const srcNrm = src.geometry.getAttribute("normal") as BufferAttribute;
-  const wb = new Box3().setFromBufferAttribute(srcPos).applyMatrix4(src.matrixWorld);
-  const centre = wb.getCenter(new Vector3());
-  const span = wb.getSize(new Vector3());
-  const sx = frameRef / (span.x || 1);
-  const sy = frameRef / (span.y || 1);
-  // Depth follows the HEIGHT's scale: squashing z with x would pancake the relief
-  // exactly on the photographs that stretch the least.
-  const toForm = new Matrix4()
-    .makeScale(sx, sy, sy)
-    .multiply(new Matrix4().makeTranslation(-centre.x, -centre.y, -centre.z))
-    .multiply(src.matrixWorld);
   const toFormNrm = new Matrix3().getNormalMatrix(toForm);
 
   const n = srcPos.count;
@@ -322,7 +562,7 @@ function buildFrameFrom(src: Mesh, cadre: number): BufferGeometry {
   );
   if (src.geometry.index) g.setIndex(src.geometry.index.clone());
 
-  const inr = PLATE_H + LINER_W + FRAME_W * cadre;
+  const inr = PLATE_H + LINER_W + FRAME_W;
   return toMorph(g, (x, y) => 0.55 + 0.45 * Math.min(1, (Math.abs(x) + Math.abs(y)) / (2 * inr)));
 }
 
@@ -424,41 +664,174 @@ export function ChromeTableau({ reduced }: Props) {
   const appear = useRef(0);
   const modeVis = useRef(0);
   const colScratch = useMemo(() => new Color(), []);
-  const aspNow = useRef(PLATE_ASP0);
-  const sizeNow = useRef(1);
   const frameBox = useRef({ w: 0, h: 0, cx: 0 });
 
   const canvasGeo = useMemo(() => buildCanvas(), []);
 
   // meshopt-compressed glb (EXT_meshopt_compression) — the decoder ships with drei.
   const { scene: frameScene } = useGLTF(FRAME_SRC, false, true);
-  const frameSrc = useMemo<Mesh | null>(() => {
-    let found: Mesh | null = null;
+  // TOUTES les parties — l'ordinateur est sept meshes (un par matériau UDIM), et n'en
+  // prendre que le premier, l'habitude du modèle mono-mesh, n'affichait qu'un septième
+  // de l'objet.
+  const frameSrcs = useMemo<Mesh[]>(() => {
+    const out: Mesh[] = [];
     frameScene.traverse((o) => {
       const m = o as Mesh;
-      if (!found && m.isMesh && m.geometry) found = m;
+      if (m.isMesh && m.geometry) out.push(m);
     });
-    return found;
+    return out;
   }, [frameScene]);
-  // The moulding factor rebuilds 132k vertices — debounced, so dragging the Cadre
-  // bar re-carves the frame at rest points rather than on every segment.
-  const cadreLive = useToileTweak().cadre;
-  const [cadre, setCadre] = useState(cadreLive);
-  useEffect(() => {
-    const id = window.setTimeout(() => setCadre(cadreLive), 150);
-    return () => window.clearTimeout(id);
-  }, [cadreLive]);
-  const frameGeo = useMemo(
-    () => (frameSrc ? withLining(buildFrameFrom(frameSrc, cadre)) : null),
-    [frameSrc, cadre]
-  );
-  // A swapped-out frame geometry is not auto-disposed: R3F frees on unmount, and
-  // this mesh never unmounts — without this, every Cadre notch leaks 132k verts.
-  useEffect(() => () => frameGeo?.dispose(), [frameGeo]);
 
-  const { canvasMat, frameMat } = useMemo(() => {
+  /**
+   * L'IMAGE DU TUBE — un canvas 2D, pas de la géométrie de texte.
+   *
+   * Un terminal est du texte monospace sur fond noir : c'est exactement ce qu'un canvas 2D
+   * fait le mieux, et le faire en géométrie (drei Text, MSDF) coûterait un atlas de police,
+   * des draw calls de plus et le placement de chaque glyphe dans l'espace du poste — pour un
+   * rendu moins fidèle, parce qu'un phosphore n'a pas de contours nets.
+   *
+   * LE TEXTE S'ANIME, ET LE COÛT A ÉTÉ MESURÉ comme la version statique l'exigeait (« ce
+   * sera un coût à mesurer, pas à supposer ») : le canvas est redessiné au CHANGEMENT
+   * D'ÉTAT, jamais à la frame. L'état est (nombre de caractères tapés, curseur visible) —
+   * le clignotement re-uploade 512×384 RGBA (~0,8 Mo) deux fois par seconde, la frappe
+   * ~quatorze fois pendant les huit dixièmes de seconde qu'elle dure. Trois ordres de
+   * grandeur sous ce que la scène uploade par frame en dpr plein.
+   *
+   * La séquence vit dans le useFrame (voir le bloc du tube) ; ici il n'y a que le PINCEAU :
+   * draw(chars, cursorOn) repeint tout — fond, invite, texte tronqué, curseur en bout de
+   * ligne. Repeindre tout est ce qui rend l'état impossible à désynchroniser : il n'y a
+   * pas d'incrément, donc pas de dérive.
+   *
+   * 512×384 : le 4:3 du tube, et une résolution qui laisse le monospace net sans peser. Le
+   * vert est le P1 des phosphores de terminal, pas un vert d'écran moderne.
+   */
+  const screen = useMemo(() => {
+    const c = document.createElement("canvas");
+    c.width = 512;
+    c.height = 384;
+    const x = c.getContext("2d")!;
+    const tex = new CanvasTexture(c);
+    tex.flipY = false;
+    const draw = (chars: number, cursorOn: boolean) => {
+      x.fillStyle = "#000";
+      x.fillRect(0, 0, c.width, c.height);
+      x.font = "600 30px ui-monospace, SFMono-Regular, Menlo, monospace";
+      x.textBaseline = "top";
+      // Du PHOSPHORE, pas du texte de canvas : un glyphe cathodique n'a pas de bord.
+      // L'ombre portée verte dessine le halo dans la même passe que le trait — le
+      // shader ajoutera l'halation du verre par-dessus, mais la douceur du glyphe
+      // lui-même doit être dans la texture, sinon le bord crénelé du canvas reste
+      // visible sous n'importe quel halo.
+      x.shadowColor = "rgba(77, 255, 122, 0.9)";
+      x.shadowBlur = 7;
+      x.fillStyle = "#5aff85";
+      // En HAUT À GAUCHE — là où un terminal démarre. Le centre était un choix d'écran
+      // de veille ; une invite naît au coin.
+      const line = "> " + TV_TEXT.slice(0, Math.max(0, chars));
+      x.fillText(line, 26, 22);
+      // Le curseur, ce qui fait la différence entre du texte et un terminal — il SUIT la
+      // frappe : mesuré sur la ligne réellement affichée, pas sur la ligne finale.
+      if (cursorOn) x.fillRect(26 + x.measureText(line + " ").width - x.measureText(" ").width + 8, 22, 16, 30);
+      x.shadowBlur = 0;
+      tex.needsUpdate = true;
+    };
+    draw(0, true);
+    return { tex, draw };
+  }, []);
+  /** Le dernier état dessiné, et l'horloge du tube — voir la séquence dans le useFrame. */
+  const tube = useRef({ t: 0, chars: -1, cursor: false });
+
+  /**
+   * LA TEXTURE DU POSTE, prise sur le matériau du glb.
+   *
+   * Le reste du projet n'utilise jamais les textures des modèles — le crâne et l'ancien
+   * cadre étaient re-chromés, géométrie seule. Le poste est le premier objet dont la
+   * MATIÈRE est le sujet : ce qui apparaît sous le chrome est le vrai boîtier, ses usures
+   * et ses sérigraphies. D'où les textures conservées dans le fichier (WebP 1k :
+   * 11,7 Mo livrés → 231 Ko).
+   *
+   * Le memo LIT seulement ; les mutations (colorSpace) vivent dans l'effet dessous —
+   * muter un objet sorti d'un hook dans un useMemo est ce que le lint interdit, à raison.
+   * Et pas de flipY ici : GLTFLoader pose déjà flipY = false (la convention glTF) ;
+   * c'est la CanvasTexture du tube, plus haut, qui a besoin du sien.
+   */
+  const tvTexs = useMemo<(Texture | null)[]>(
+    () =>
+      frameSrcs.map((m) => {
+        const raw = m.material;
+        const mat = (Array.isArray(raw) ? raw[0] : raw) as { map?: Texture } | undefined;
+        return mat?.map ?? null;
+      }),
+    [frameSrcs]
+  );
+  useEffect(() => {
+    for (const tex of tvTexs) {
+      if (!tex) continue;
+      tex.colorSpace = NoColorSpace;
+      tex.needsUpdate = true;
+    }
+  }, [tvTexs]);
+  const frameGeos = useMemo(() => {
+    if (!frameSrcs.length) return null;
+    const forms = partsFrame(frameSrcs);
+    const parts = frameSrcs.map((src, i) => buildPart(src, forms[i]));
+    /*
+     * PAS DE DOUBLURE. Elle bouchait la calotte que la plaque — un slab et un anneau,
+     * OUVERTS — laissait nue derrière sa coquille de homes projetés. L'ordinateur est
+     * sept coques FERMÉES autour de l'origine : leur projection radiale couvre la
+     * sphère entière, et la doublure ne servait plus qu'à dépasser — son siège,
+     * l'ellipsoïde taillé pour la plaque, sortait du moniteur (le « disque » visible
+     * à droite du poste : la souris élargit la boîte, le moniteur n'est pas au
+     * centre). withLining reste défini pour le jour où un modèle ouvert reviendra.
+     */
+    return parts;
+  }, [frameSrcs]);
+  // A swapped-out frame geometry is not auto-disposed: R3F frees on unmount, and this
+  // mesh never unmounts — without this, a glb arriving late leaks the old 132k verts.
+  useEffect(() => () => frameGeos?.forEach((g) => g.dispose()), [frameGeos]);
+
+  /**
+   * Les demi-étendues RÉELLES du poste posé, mesurées sur ses sièges (aTarget), en
+   * unités de forme. Tout ce qui doit coller à l'objet en découle — le cadrage
+   * (TV_FILL) et le rectangle DOM publié — au lieu de constantes qui supposaient
+   * l'ancienne plaque : la revue a montré la hit-box ~60 % trop large et le cadrage
+   * dérivé de la mauvaise dimension (le glb est normalisé sur sa LARGEUR, l'axe le
+   * plus long, pas sur sa hauteur). Mesuré, il ne peut pas dériver du glb.
+   * (La doublure interne participe au scan et ne change pas les maxima : ses sièges
+   * sont un ellipsoïde enfoui sous la coque.)
+   */
+  const tvExt = useMemo(() => {
+    if (!frameGeos) return { halfW: PLATE_H, halfH: PLATE_H };
+    let hw = 0;
+    let hh = 0;
+    for (const g of frameGeos) {
+      const a = g.getAttribute("aTarget");
+      for (let i = 0; i < a.count; i++) {
+        hw = Math.max(hw, Math.abs(a.getX(i)));
+        hh = Math.max(hh, Math.abs(a.getY(i)));
+      }
+    }
+    return { halfW: hw, halfH: hh };
+  }, [frameGeos]);
+
+  const { canvasMat, frameMats } = useMemo(() => {
     const blank = new DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
     blank.needsUpdate = true;
+    /*
+     * Le rectangle du tube en instances PARTAGÉES : shared() fabrique des objets
+     * frais par matériau, et il y a désormais SEPT matériaux de coque — sept
+     * Vector2 distincts, et la poignée dev n'en aurait déplacé qu'un. Un seul
+     * couple d'objets, référencé partout : une écriture les règle tous.
+     */
+    /*
+     * CALCULÉ, pas réglé : bords du verre relevés sur capture, convertis en unités
+     * de forme par le rectangle DOM publié (--plate-px-*) et les étendues mesurées
+     * (tvExt) — la conversion est exacte par construction puisque les deux dérivent
+     * des mêmes nombres. Retrait de 5 % pour ne pas lécher le biseau. À recalculer
+     * si le glb change (la méthode est en commentaire d'historique de session).
+     */
+    const scrMin = new Vector2(-2.464, -0.303);
+    const scrMax = new Vector2(1.254, 2.701);
     const shared = () => ({
       uTime: { value: 0 },
       uDistort: { value: 0.25 },
@@ -467,9 +840,19 @@ export function ChromeTableau({ reduced }: Props) {
       uFly: { value: FLY },
       uAspX: { value: 1 },
       uSeatK: { value: 1 },
-      uFit: { value: 1 },
       uFade: { value: 0 },
       uRough: { value: 0.12 },
+      uTv: { value: 0 },
+      /* Tout sampler est LIÉ dès la construction, au gris 1×1 ci-dessus : un sampler2D non
+         lié est un comportement non défini que certains pilotes refusent de valider — le
+         programme devient invalide et la scène disparaît. Même doctrine que LiquidDna, qui
+         documente le même piège pour ses uPhoto. Le placeholder n'est jamais VU : uReveal et
+         uGlow valent zéro tant que rien n'est révélé. */
+      uReveal: { value: 0 },
+      uScreen: { value: blank as Texture },
+      uGlow: { value: 0 },
+      uScrMin: { value: scrMin },
+      uScrMax: { value: scrMax },
       uEnv: { value: null as Texture | null },
       uEnvInt: { value: ENV_INTENSITY },
       uEnvRot: { value: ENV_ROT_Y },
@@ -482,6 +865,10 @@ export function ChromeTableau({ reduced }: Props) {
         ...shared(),
         uCar: { value: 0 },
         uPhotoOn: { value: 0 },
+        /* NEUTRES, et plus écrits : l'approche-par-derrière et l'ombre du cadre étaient
+           les molettes « recul » / « ombre » du panneau toile, toutes deux essayées et
+           rejetées (1 = aucun effet). Elles survivent à 1 parce qu'elles appartiennent au
+           pipeline photo laissé intact derrière uPhotoOn = 0, ci-dessous. */
         uDevZoom: { value: 1 },
         uDevDim: { value: 1 },
         uPrint: { value: new Vector3(PLATE_LOOK.exposure, PLATE_LOOK.sheen, PLATE_LOOK.gloss) },
@@ -499,42 +886,76 @@ export function ChromeTableau({ reduced }: Props) {
       transparent: true,
       side: DoubleSide,
     });
-    const frameMat = new ShaderMaterial({
-      uniforms: shared(),
-      vertexShader: VERT,
-      fragmentShader: FRAG_FRAME,
-      transparent: true,
-      side: DoubleSide,
-    });
-    return { canvasMat, frameMat };
-  }, []);
-
-  /** The photographs and their aspects — this mesh owns them now (the field's copies
-   *  go dark in Work); the trim carves the moulding the moment its pixels land. */
-  const asps = useRef(works.map(() => PLATE_ASP0));
-  useEffect(() => {
-    const loader = new TextureLoader();
-    const loaded: Texture[] = [];
-    works.forEach((w, i) => {
-      if (!w.image) return;
-      loader.load(w.image, (t) => {
-        t.wrapS = ClampToEdgeWrapping;
-        t.wrapT = ClampToEdgeWrapping;
-        asps.current[i] = t.image.width / t.image.height;
-        canvasMat.uniforms[`uPhoto${i}`].value = t;
-        (canvasMat.uniforms.uPhotoReady.value as number[])[i] = 1;
-        loaded.push(t);
+    /*
+     * UN MATÉRIAU PAR PARTIE — la seule chose qui les distingue est uSkin, la peau de
+     * cette partie, cuite ici à la création : elle ne change jamais, donc l'écrire
+     * par frame dans setShared (qui est partagé) aurait de toute façon été faux dès
+     * la deuxième partie. Tout le reste des uniformes est identique et setShared les
+     * balaie tous.
+     */
+    const frameMats = tvTexs.map((tex, i) => {
+      /*
+       * uTube : le « hello world » n'appartient qu'à la pièce VERRE (le matériau
+       * default_1003 du glb — l'atlas au grand rectangle sombre). Sans ce verrou, la
+       * projection planaire s'imprimait en fantôme sur tout fragment d'une autre
+       * pièce tourné vers +Z dans le rectangle — le biseau du moniteur, en pente,
+       * en attrapait une copie décalée par le warp de normale.
+       */
+      const raw = frameSrcs[i]?.material;
+      const name = ((Array.isArray(raw) ? raw[0] : raw) as { name?: string } | undefined)?.name;
+      return new ShaderMaterial({
+        uniforms: {
+          ...shared(),
+          uSkin: { value: tex ?? blank },
+          uTube: { value: name === "default_1003" ? 1 : 0 },
+        },
+        vertexShader: VERT,
+        fragmentShader: FRAG_FRAME,
+        transparent: true,
+        side: DoubleSide,
       });
     });
-    return () => loaded.forEach((t) => t.dispose());
-  }, [canvasMat]);
+    return { canvasMat, frameMats };
+  }, [tvTexs, frameSrcs]);
+
+  /*
+   * Le rectangle de l'écran, réglable depuis la console — la méthode du repo pour
+   * trouver des nombres (voir blobTweak) :
+   *   __scr.min.set(x, y) / __scr.max.set(x, y)   en unités de forme
+   * Les valeurs retenues se cuisent ensuite dans shared(). Mort en prod.
+   *
+   * Dans un EFFET, pas dans le memo qui crée les matériaux : StrictMode exécute le
+   * render deux fois, donc le memo fabrique DEUX paires de matériaux et n'en
+   * committe qu'une — une poignée posée dans le memo peut pointer la paire fantôme,
+   * jamais rendue, jamais écrite. Une heure de diagnostic est partie dans une sonde
+   * qui mesurait le mauvais objet ; l'effet, lui, ne court que sur la valeur
+   * commitée.
+   */
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    (window as unknown as Record<string, unknown>).__scr = {
+      min: frameMats[0]?.uniforms.uScrMin.value,
+      max: frameMats[0]?.uniforms.uScrMax.value,
+      ext: tvExt,
+      mats: () =>
+        frameMats.map((m, i) => ({
+          name: (() => {
+            const raw = frameSrcs[i]?.material;
+            return ((Array.isArray(raw) ? raw[0] : raw) as { name?: string } | undefined)?.name;
+          })(),
+          tube: m.uniforms.uTube.value as number,
+          glow: +(m.uniforms.uGlow.value as number).toFixed(3),
+          screenW: (m.uniforms.uScreen.value as { image?: { width?: number } })?.image?.width,
+        })),
+    };
+  }, [frameMats, tvExt, frameSrcs]);
+
 
   useFrame((_, delta) => {
     const g = group.current;
     if (!g) return;
     const s = formState();
     const tw = blobTweak.get();
-    const tt = toileTweak.get();
 
     appear.current += (1 - appear.current) * (1 - Math.pow(0.04, delta));
     const modeTarget = tw.mode === "blob" ? 1 : 0;
@@ -550,27 +971,76 @@ export function ChromeTableau({ reduced }: Props) {
     g.visible = on;
     if (!on) return;
 
-    // The size cap — the room the dock leaves the work, the same sum the field used.
+    /*
+     * LE CADRAGE, borné par l'axe LIMITANT. La première version cadrait sur la seule
+     * demi-hauteur visible — la revue a montré qu'en viewport portrait (aspect < la
+     * fraction demandée) le poste débordait des deux bords, tronqué en permanence :
+     * le glb est normalisé sur sa LARGEUR (son axe le plus long), pas sur sa hauteur.
+     * Ici le poste occupe TV_FILL de la dimension visible qui le contraint le plus,
+     * mesuré sur ses étendues réelles (tvExt) — exact par construction, dans les
+     * deux orientations d'écran.
+     */
     const fov = (camera as { fov?: number }).fov ?? 42;
     const tanHalf = Math.tan((fov * Math.PI) / 180 / 2);
-    const halfWorld = tanHalf * (size.width / size.height) * camera.position.z;
-    const halfLocal = halfWorld / Math.max(0.01, s.scale);
-    const dockXl = Math.abs(s.dockX) / Math.max(0.01, s.scale);
-    const roomLocal = Math.max(0.5, halfLocal - dockXl);
-    let widest = 0;
-    // FRAME_OUT wears the dev panel's moulding factor, so the size cap counts the
-    // frame the geometry actually has this frame.
-    const frameOut = LINER_W + 2 * FRAME_W * tt.cadre;
-    for (const a of asps.current) widest = Math.max(widest, PLATE_H * a + frameOut);
-    const k = Math.min(1, (roomLocal * FILL) / widest);
+    const halfHeightLocal = (tanHalf * camera.position.z) / Math.max(0.01, s.scale);
+    const halfWidthLocal = halfHeightLocal * (size.width / size.height);
+    const k =
+      TV_FILL * Math.min(halfHeightLocal / tvExt.halfH, halfWidthLocal / tvExt.halfW);
 
-    // The worn aspect AND the worn hanging size glide to the worn slot's — the swap
-    // happens edge-on (see formClock), never under a readable print. Size is per-work
-    // (plateScale in the data): a gallery does not hang everything at one gabarit.
-    const slot = Math.max(0, Math.min(asps.current.length - 1, Math.round(s.mood.car)));
-    const ease = 1 - Math.pow(1e-3, delta);
-    aspNow.current += (asps.current[slot] - aspNow.current) * ease;
-    sizeNow.current += ((works[slot].plateScale ?? 1) - sizeNow.current) * ease;
+    /*
+     * LE VERROU DE SORTIE. uTv seul ne suffit pas : à la sortie de Work, md.flat
+     * fond sous le scrub en ~100 ms pendant que md.dev décroît sur SON temps
+     * (~1 s, DEV_RATE dans formClock) — sans fenêtre, la peau et le texte vert restaient à
+     * mi-valeur des dizaines de frames et s'imprimaient sur la forme en pleine
+     * fonte. `dressed` n'ouvre la peau et le tube que sur le dernier dixième de la
+     * planéité : à l'entrée il vaut déjà 1 quand dev démarre (dev n'existe qu'à
+     * flat === 1), donc l'arrivée est inchangée ; à la sortie il tombe pendant que
+     * la forme est encore visuellement un poste — le chrome reprend la matière
+     * AVANT qu'elle ne fonde.
+     */
+    const dressed = Math.max(0, Math.min(1, (s.mood.flat - 0.9) / 0.1));
+
+    /*
+     * LA SÉQUENCE DU TERMINAL — une horloge, un état, un pinceau.
+     *
+     * L'horloge ne court que tube allumé (dev au-delà du seuil où l'écran commence
+     * à luire) et se REMBOBINE sinon : re-rentrer dans la section, ou rejouer le
+     * révélateur au panneau, rejoue l'attente puis la frappe. Elle est avancée ici
+     * — une fois par frame, jamais dans setShared qui tourne deux fois — et le
+     * canvas n'est repeint QUE si (caractères, curseur) a changé (voir le pinceau).
+     *
+     * En reduced motion il n'y a ni attente ni frappe ni clignotement : la ligne
+     * complète, curseur fixe — le texte est une information, son arrivée est un
+     * mouvement.
+     */
+    const tb = tube.current;
+    if (reduced) {
+      if (tb.chars !== TV_TEXT.length || !tb.cursor) {
+        tb.chars = TV_TEXT.length;
+        tb.cursor = true;
+        screen.draw(tb.chars, true);
+      }
+    } else {
+      // Le garde compare flat — le nombre qui SNAPPE exactement à 1 dans formClock —
+      // et jamais `dressed === 1` : la fenêtre dérivée (flat − 0.9) / 0.1 vaut
+      // 0.9999999999999998 en flottant quand flat vaut exactement 1, et l'horloge ne
+      // démarrait jamais. Une égalité stricte n'est licite que sur une valeur snappée.
+      if (s.mood.dev > 0.55 && s.mood.flat === 1) tb.t += delta;
+      else tb.t = 0;
+      const typed =
+        tb.t <= TYPE_IDLE
+          ? 0
+          : Math.min(TV_TEXT.length, Math.floor((tb.t - TYPE_IDLE) / TYPE_CHAR));
+      // Le curseur ne clignote qu'au repos — pendant la frappe il reste allumé,
+      // comme un vrai terminal : c'est l'écho qui bat la mesure, pas le curseur.
+      const typing = typed > 0 && typed < TV_TEXT.length;
+      const cursorOn = typing || tb.t % (2 * BLINK) < BLINK;
+      if (typed !== tb.chars || cursorOn !== tb.cursor) {
+        tb.chars = typed;
+        tb.cursor = cursorOn;
+        screen.draw(typed, cursorOn);
+      }
+    }
 
     const setShared = (m: ShaderMaterial) => {
       const u = m.uniforms;
@@ -579,9 +1049,28 @@ export function ChromeTableau({ reduced }: Props) {
       u.uDistort.value = tw.distort * DISTORT_MAX;
       u.uFreq.value = tw.freq;
       u.uRough.value = tw.roughness;
+      u.uTv.value = s.mood.flat;
+      u.uReveal.value = s.mood.dev * dressed;
       u.uFly.value = reduced ? 0 : FLY;
-      u.uAspX.value = aspNow.current;
-      u.uSeatK.value = k * sizeNow.current;
+      /*
+       * 1 : uAspX étirait la toile aux proportions de chaque photographie, et le
+       * poste — mis à l'échelle uniformément dans buildFrameFrom — se faisait
+       * déformer par l'aspect d'une image qui n'est plus à l'écran. La machinerie
+       * qui glissait aspect et taille d'accrochage par œuvre (aspNow, sizeNow, le
+       * loader des photos) a été RETIRÉE, pas seulement contournée : la revue a
+       * montré qu'elle publiait encore la hit-box DOM aux dimensions de l'ancienne
+       * plaque 16:9 — un lien cliquable ~60 % plus large que le poste — et
+       * téléchargeait quatre photos par visite pour un mesh invisible. Le pipeline
+       * photo SHADER (formPhoto, uPhoto*) reste compilé derrière uPhotoOn = 0.
+       */
+      u.uAspX.value = 1;
+      u.uSeatK.value = k;
+      // Le tube, allumé sur la SECONDE moitié du révélateur : la peau d'abord
+      // (uReveal, 0→1 sur tout dev), l'écran ensuite — trois beats sur un signal,
+      // échelonnés par des fenêtres, le motif du fichier (voir uPhotoOn et son ramp).
+      u.uScreen.value = screen.tex;
+      const lit = Math.max(0, (s.mood.dev - 0.5) / 0.5);
+      u.uGlow.value = lit * lit * (3 - 2 * lit) * dressed;
       u.uFade.value = fade;
       u.uEnv.value = envMap;
       (u.uCamPos.value as Vector3).copy(camera.position);
@@ -590,31 +1079,46 @@ export function ChromeTableau({ reduced }: Props) {
       (u.uLo.value as Color).setRGB(colScratch.r * 0.5, colScratch.g * 0.5, colScratch.b * 0.5);
     };
     setShared(canvasMat);
-    setShared(frameMat);
+    for (const m of frameMats) setShared(m);
     const cu = canvasMat.uniforms;
     cu.uCar.value = s.mood.car;
-    // The arrival, shaped by the dev panel (toileTweak): density reaches 1 at
-    // `ramp` of dev (smoothstepped so neither end pops), the optional recul and
-    // ombre ride the RAW dev — the travel keeps going while the density holds.
-    const dRaw = s.mood.dev;
-    const dR = Math.min(1, dRaw / Math.max(0.05, tt.ramp));
-    cu.uPhotoOn.value = dR * dR * (3 - 2 * dR);
-    cu.uDevZoom.value = 1 + tt.recul * (1 - dRaw);
-    cu.uDevDim.value = 1 - tt.ombre * (1 - dRaw);
-    cu.uFit.value = tt.fit;
+    /*
+     * LES PHOTOGRAPHIES SONT ÉTEINTES. Le poste remplace le tableau, donc l'affichage des
+     * projets n'a plus lieu ici — et la question de ce que la télé montre est ouverte, pas
+     * répondue. Le pipeline est laissé INTACT derrière ce zéro plutôt que retiré : il pèse
+     * ~460 lignes dans formPhoto, il marche, et c'est probablement lui qui portera l'image du
+     * tube quand cette question sera tranchée. Un zéro se réveille ; du code supprimé se
+     * réécrit.
+     */
+    cu.uPhotoOn.value = 0;
+    /*
+     * LE TUBE S'ALLUME EN DERNIER, et le décalage est voulu.
+     *
+     * dev court de 0 à 1 pour révéler la peau ; le tube n'entre que sur sa seconde moitié,
+     * remise à l'échelle 0→1. La séquence lue est donc : la forme devient un poste, le chrome
+     * s'efface, PUIS l'écran s'allume — trois beats sur un seul signal, échelonnés par des
+     * fenêtres, ce qui est le motif que ce fichier emploie déjà partout (voir uPhotoOn et son
+     * ramp). Un second signal aurait pu dériver du premier ; une fenêtre ne peut pas.
+     */
     cu.uColour.value = s.mood.hover * PLATE_LOOK.colour;
 
     g.position.set(s.dockX, s.dockY, 0);
-    // tt.turn: the dev panel's manual turntable, for inspecting the work at an angle.
-    g.rotation.set(0, s.spin + (tt.turn * Math.PI) / 180, 0);
+    g.rotation.set(0, s.spin, 0);
     g.scale.setScalar(s.scale);
 
     // The DOM's hit link, published from here now — the field goes dark in Work and
     // stale numbers would park the link on the wrong rectangle.
     const pxPerWorld = size.height / (2 * tanHalf * (camera.position.z - PLATE_T * s.scale));
-    const kk = k * sizeNow.current;
-    const h = 2 * (PLATE_H + frameOut) * kk * s.scale * pxPerWorld;
-    const w = 2 * (PLATE_H * aspNow.current + frameOut) * kk * s.scale * pxPerWorld;
+    /*
+     * Le rectangle publié est celui de la GÉOMÉTRIE posée (tvExt·k), plus celui d'une
+     * plaque théorique : l'ancienne formule gardait l'aspect des PHOTOS (aspNow) et la
+     * taille d'accrochage par œuvre (sizeNow) — les trois lentilles de la revue ont
+     * convergé dessus : lien cliquable ~60 % plus large que l'objet, mobilier posé sur
+     * une hauteur gonflée de moitié. Ce que le shader dessine et ce que le DOM reçoit
+     * dérivent désormais des mêmes nombres.
+     */
+    const h = 2 * tvExt.halfH * k * s.scale * pxPerWorld;
+    const w = 2 * tvExt.halfW * k * s.scale * pxPerWorld;
     const cx = s.dockX * pxPerWorld;
     if (
       Math.abs(w - frameBox.current.w) > 0.75 ||
@@ -640,11 +1144,19 @@ export function ChromeTableau({ reduced }: Props) {
     }
   });
 
-  if (!frameGeo) return null;
+  if (!frameGeos) return null;
   return (
     <group ref={group} visible={false}>
-      <mesh geometry={canvasGeo} material={canvasMat} frustumCulled={false} />
-      <mesh geometry={frameGeo} material={frameMat} frustumCulled={false} />
+      {/* LA DALLE PROCÉDURALE EST MASQUÉE, pas retirée. C'était le porte-photographie
+          (un slab 16:9 devant la moulure) : le poste a son écran dans sa propre
+          géométrie, et le tube est projeté sur le corps (voir FRAG_FRAME) — un slab
+          flottant à travers le boîtier n'aurait fait que dépasser. Elle reste montée
+          pour le jour où une surface dédiée redeviendra utile ; ses uniformes se
+          mettent à jour pour rien, ce qui coûte des écritures de nombres, pas un draw. */}
+      <mesh geometry={canvasGeo} material={canvasMat} frustumCulled={false} visible={false} />
+      {frameGeos.map((g, i) => (
+        <mesh key={i} geometry={g} material={frameMats[i]} frustumCulled={false} />
+      ))}
     </group>
   );
 }

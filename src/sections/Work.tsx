@@ -409,7 +409,7 @@ export function Work() {
             truth for the selection: it lights a row up, a click scrolls to that row's
             plate (the picks' old contract), and hovering the LIT row answers on the
             picture — colour, stillness, the step forward. */}
-        <div className="plate-index" role="group" aria-label="Projects">
+        <div className="plate-index" role="group" aria-label="Projects" hidden>
           {works.map((w, i) => (
             <button
               data-row
@@ -434,7 +434,14 @@ export function Work() {
             the current picture is. Hovering it is the read gesture — the picture takes
             its colour, holds still, steps forward — and clicking it opens the live
             site: the affordance sits ON the proof, not on the name that summons it. */}
-        {formed && (
+        {/* CACHÉ AVEC LES PROJETS. La forme est un téléviseur qui ne montre plus les
+            œuvres — un lien qui ouvre le site d'un projet depuis un poste qui n'affiche
+            rien de ce projet est une affordance orpheline (et son hover ne répondait
+            plus par rien de visible : la couleur qu'il appelait vit sur la dalle photo,
+            elle-même cachée). Revient avec l'affichage des projets. `false &&` plutôt
+            qu'un retrait : le bloc et son commentaire d'origine restent la doc du
+            geste à restaurer. */}
+        {false && formed && (
           <a
             className="plate-hit"
             href={current.url}

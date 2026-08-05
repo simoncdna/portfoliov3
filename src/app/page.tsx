@@ -5,6 +5,8 @@ import { ControlPanel } from "@/components/ControlPanel";
 import { SectionNav } from "@/components/SectionNav";
 import { Hero } from "@/sections/Hero";
 import { About } from "@/sections/About";
+import { Work } from "@/sections/Work";
+import { Contact } from "@/sections/Contact";
 
 export default function Home() {
 	return (
@@ -17,6 +19,8 @@ export default function Home() {
 			<main>
 				<Hero />
 				<About />
+				<Work />
+				<Contact />
 			</main>
 			<Footer />
 			<SectionNav />

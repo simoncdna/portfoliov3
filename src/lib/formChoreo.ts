@@ -19,7 +19,21 @@
  * (uPlateK, which knows about this dock) had anything sane left to give it.
  */
 export const DOCK_X = -3.6;
-export const DOCK_X_WORK = 2.6;
+/*
+ * ZÉRO — LE POSTE EST AU MILIEU.
+ *
+ * 2.6 mettait la pièce dans la marge droite, en miroir d'About : l'index des noms lisait à
+ * gauche en display, l'œuvre tenait la droite. Cette composition supposait deux sujets, du
+ * texte et une image. Le poste est un sujet unique et il n'a rien à côté de quoi se ranger —
+ * il apparaît au centre de l'écran, ce qui est aussi la seule place tenable pour un objet qu'on
+ * regarde s'allumer.
+ *
+ * Le 2.6 était lui-même dérivé (« les plaques sont plus larges que le crâne, à 3.6 une
+ * photographie en paysage sortait par le bord droit avant que le plafond de taille n'ait plus
+ * rien de sensé à lui donner »). Ce raisonnement portait sur des plaques photographiques ; il
+ * ne s'applique plus.
+ */
+export const DOCK_X_WORK = 0;
 
 /**
  * …and where it goes once Work is over. Contact's text is left-aligned across the

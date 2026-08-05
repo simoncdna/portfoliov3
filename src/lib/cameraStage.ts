@@ -98,8 +98,8 @@ export function seek(scrub: number) {
  *
  * D'où l'import DYNAMIQUE sous une condition constante à la compilation : le bundler évalue
  * `process.env.NODE_ENV` au build, la branche devient morte, et le chunk n'est jamais
- * demandé. Même motif que ToileDevPanelMount. À VÉRIFIER PAR LA MESURE et non sur la foi de
- * ce commentaire — voir le plan, tâche 5.
+ * demandé. À VÉRIFIER PAR LA MESURE et non sur la foi de ce commentaire — voir le plan,
+ * tâche 5.
  */
 if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
   import("@theatre/studio").then((m) => m.default.initialize());

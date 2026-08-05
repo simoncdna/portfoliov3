@@ -5,7 +5,6 @@ import { formChoreo, smoothstep, confine, type FormChoreo } from "./formChoreo";
 import { aboutReveal } from "./aboutReveal";
 import { workReveal } from "./workReveal";
 import { workPlate, MOOD_REST, SHAPES, type Shape } from "./workPlate";
-import { toileTweak } from "./toileTweak";
 import { pose as camPose, seek as camSeek } from "./cameraStage";
 
 /**
@@ -181,12 +180,13 @@ const MOOD_RATE = 0.4;
  * 2π, and every plate projects as a true rectangle.
  */
 
-/*
- * There is no DEV_RATE constant while the dev panel lives: the print's arrival time
- * is toileTweak.secs (seconds to 90%, default 1s — slow enough to be seen arriving,
- * fast enough that the section is not kept waiting). When the numbers are found,
- * the winner comes back here as a constant and the panel goes.
+/**
+ * The print's arrival rate — the fraction still to go after a second, so 0.1 is 90%
+ * of the arrival in 1s: slow enough to be seen arriving, fast enough that the section
+ * is not kept waiting. Dialled live on the toile dev panel, then baked here when the
+ * panel went.
  */
+const DEV_RATE = 0.1;
 
 /**
  * The page turn's rate — how fast the framed work spins its revolution, as the
@@ -293,8 +293,6 @@ let swapAtAngle = 0;
 let swapPending = false;
 // The face-on angle the flattening plate is walked to (radians) — latched, see below.
 let faced = 0;
-// The dev panel's replay nonce last honoured (see the print's arrival below).
-let devReplaySeen = 0;
 
 export function advanceFormClock(
   delta: number,
@@ -421,17 +419,8 @@ export function advanceFormClock(
   // turned around does not fade, it turns. Snapped at both ends like flat itself —
   // the shader gates its grain branch on dev reaching 1, and an exponential ease
   // never lands on its own.
-  //
-  // The dev panel's replay rewinds it to 0 on a settled plate, so the arrival can
-  // be watched again without scrubbing the whole entrance back and forth.
-  const tt = toileTweak.get();
-  if (tt.replayNonce !== devReplaySeen) {
-    devReplaySeen = tt.replayNonce;
-    md.dev = 0;
-  }
   const devTarget = md.flat === 1 && workPlate.index >= 0 ? 1 : 0;
-  const devRate = Math.pow(0.1, 1 / Math.max(0.05, tt.secs));
-  md.dev += (devTarget - md.dev) * (reduced ? 1 : 1 - Math.pow(devRate, delta));
+  md.dev += (devTarget - md.dev) * (reduced ? 1 : 1 - Math.pow(DEV_RATE, delta));
   if (md.dev > 0.995) md.dev = 1;
   else if (md.dev < 0.005) md.dev = 0;
 
