@@ -16,6 +16,7 @@ import {
   Matrix4,
   Mesh,
   NoColorSpace,
+  SRGBColorSpace,
   ShaderMaterial,
   SphereGeometry,
   CanvasTexture,
@@ -27,6 +28,7 @@ import { blobTweak, DISTORT_MAX, FORM_RADIUS } from "@/lib/blobTweak";
 import { SNOISE, FORM_DISPLACE, CHROME_SHADE, ENV_FILE, ENV_INTENSITY, ENV_ROT_Y } from "@/lib/formField";
 import { FRAME_W, LINER_W, PHOTO_SHADE, PLATE_H, PLATE_T } from "@/lib/formPhoto";
 import { PLATE_LOOK } from "@/lib/plateLook";
+import { posteTweak, usePosteEnv, usePosteSkinSrgb } from "@/lib/posteTweak";
 import { formState } from "@/lib/formClock";
 import { works } from "@/data/site";
 
@@ -77,33 +79,46 @@ const FLY = 0.22;
  * mécanisme reste : le prochain glb n'aura aucune raison d'être aligné.
  */
 const TV_YAW = 0;
-/**
- * La fraction de la demi-hauteur visible que le poste occupe, une fois posé au
- * centre. Le plafond de taille d'origine mesurait « la place que laisse le dock »,
- * ce qui n'a plus de sens pour un objet centré : ici c'est un CADRAGE, celui d'un
- * objet posé devant l'objectif.
+/*
+ * TV_FILL A DÉMÉNAGÉ DANS posteTweak, avec le rectangle du tube et le placement du
+ * texte : tant que le panneau vit, le store est l'unique source de ces nombres. Une
+ * constante ici PLUS un défaut là-bas, et le premier réglage recopié d'un seul côté les
+ * fait mentir tous les deux. Ils reviendront ici quand le panneau partira — le bouton
+ * « copier » du panneau crache exactement la forme attendue.
+ *
+ * (Le cadrage lui-même est inchangé : une fraction de la demi-dimension visible LA PLUS
+ * CONTRAIGNANTE, mesurée sur les étendues réelles de l'objet — voir le useFrame.)
  */
-const TV_FILL = 0.5;
 /** La demi-étendue du poste en espace de forme, à la largeur de moulure de référence. */
 const SCR_H = PLATE_H + LINER_W + 2 * FRAME_W;
 
 /*
  * LA SÉQUENCE DU TERMINAL. Le poste apparaît, le curseur clignote À VIDE — l'attente est
  * un état qu'on doit voir, d'où presque trois clignotements avant la première lettre —
- * puis le texte se FRAPPE, curseur en bout de ligne, et l'invite reste à clignoter.
+ * puis les phrases se FRAPPENT l'une après l'autre, curseur en bout de ligne, et l'invite
+ * reste à clignoter sur la dernière.
+ *
+ * TROIS PHRASES, PAS UNE, et la dernière est un état de repos choisi : « Follow the white
+ * rabbit. » est une invitation, ce qui est exactement ce qu'une section de projets doit
+ * laisser à l'écran quand le lecteur arrive dessus. La séquence ne boucle donc pas — elle
+ * se pose.
  *
  * La cadence de frappe est CONSTANTE, et c'est voulu : un texte reçu par un terminal
  * arrive au rythme de la ligne, pas au rythme d'une main — la frappe humaine irrégulière
  * aurait demandé du hasard, et le hasard par frame est interdit ici (deux lectures du
  * même instant doivent dessiner la même image).
  */
-const TV_TEXT = "hello world";
+const TV_LINES = ["wake up...", "The matrix has you.", "Follow the white rabbit."];
 /** L'attente au curseur nu, secondes — presque trois clignotements. */
 const TYPE_IDLE = 1.5;
-/** Une lettre toutes les… — le débit d'une ligne série, pas d'une main. */
-const TYPE_CHAR = 0.07;
 /** La demi-période du clignotement (530 ms allumé, 530 ms éteint — le battement VT). */
 const BLINK = 0.53;
+/**
+ * L'interligne, en multiples du corps. 1.5 est le pas d'un terminal — assez d'air pour que
+ * le halo de phosphore d'une ligne ne vienne pas manger la suivante, ce qui compte
+ * d'autant plus que le halo est réglé haut (22.5).
+ */
+const LINE_STEP = 1.5;
 
 /* -------------------------------------------------------------------------- */
 /* shaders                                                                    */
@@ -232,6 +247,10 @@ uniform vec3 uHi;
 uniform vec3 uCamPos;
 uniform float uTv;
 uniform sampler2D uSkin;
+uniform float uSkinFres;
+uniform vec3 uSkinTint;
+uniform float uSkinSat;
+uniform float uSkinGain;
 uniform float uReveal;
 uniform sampler2D uScreen;
 uniform float uGlow;
@@ -286,7 +305,26 @@ void main(){
    * comme du papier, il a un vernis. Sans ce reste de réflexion la peau lit comme un décalque.
    */
   vec3 skin = texture2D(uSkin, vUv).rgb;
-  skin += skin * fres * 0.55;
+  /*
+   * L'ÉTALONNAGE DE LA PEAU — trois termes, tous NEUTRES par défaut (teinte blanche,
+   * gain 1, saturation 1), donc ce bloc ne change rien tant que personne n'y touche.
+   *
+   * L'ORDRE EST LE SIEN : teinte et gain d'abord, désaturation ensuite, vernis en
+   * dernier. Saturer avant de teinter aurait fait dépendre la saturation de la teinte
+   * (une teinte rouge sur une image désaturée redonne du rouge saturé) ; et le vernis
+   * doit rester DERNIER parce qu'il n'appartient pas à la couleur du plastique mais à
+   * son reflet — il doit monter sur la couleur finie, sinon l'étalonnage repeint aussi
+   * le brillant.
+   *
+   * Le gain est propre à la peau, là où l'exposition du panneau est globale : sur un
+   * boîtier trop clair, celui-ci est ce qu'il faut baisser, pas l'autre.
+   */
+  skin *= uSkinTint * uSkinGain;
+  // Rec.709 — approximatif si la texture est en NoColorSpace (ses octets sRGB passent
+  // pour du linéaire), mais c'est un étalonnage réglé À L'ŒIL sur le résultat affiché :
+  // la molette veut dire ce qu'on voit, pas ce qu'un colorimètre mesurerait.
+  skin = mix(vec3(dot(skin, vec3(0.2126, 0.7152, 0.0722))), skin, uSkinSat);
+  skin += skin * fres * uSkinFres;
   col = mix(col, skin, uReveal * uTv);
 
   /*
@@ -660,7 +698,19 @@ function withLining(geo: BufferGeometry): BufferGeometry {
 export function ChromeTableau({ reduced }: Props) {
   const group = useRef<Group>(null);
   const { camera, size } = useThree();
-  const envMap = useEnvironment({ files: ENV_FILE });
+  /*
+   * L'ENVIRONNEMENT, commutable depuis le panneau — « local » est le .hdr du dépôt, celui
+   * que la PROD sert ; tout le reste est un preset drei tiré d'un CDN, réservé au réglage
+   * (voir POSTE_ENVS). Un abonnement étroit au seul nom : c'est la seule molette qui
+   * change une ressource, donc la seule qui a le droit de faire re-rendre cette scène.
+   *
+   * Changer d'environnement fait RE-SUSPENDRE le hook de drei, donc le <Suspense> de
+   * ChromeCanvas montre son fallback (null) le temps du téléchargement : le poste
+   * disparaît une seconde puis revient. Coût assumé d'un outil de dev — pas un chemin de
+   * prod, où `env` ne quitte jamais "local".
+   */
+  const env = usePosteEnv();
+  const envMap = useEnvironment(env === "local" ? { files: ENV_FILE } : { preset: env });
   const appear = useRef(0);
   const modeVis = useRef(0);
   const colScratch = useMemo(() => new Color(), []);
@@ -712,10 +762,15 @@ export function ChromeTableau({ reduced }: Props) {
     const x = c.getContext("2d")!;
     const tex = new CanvasTexture(c);
     tex.flipY = false;
-    const draw = (chars: number, cursorOn: boolean) => {
+    const draw = (line: number, chars: number, cursorOn: boolean) => {
+      // Le placement est lu ICI, à l'instant de peindre, et non capturé à la création du
+      // pinceau : le panneau bouge ces nombres pendant la session, et un pinceau qui
+      // aurait fermé sur eux peindrait l'ancienne position pour toujours. C'est le
+      // useFrame qui décide QUAND repeindre (le nonce du store) ; draw ne fait que lire.
+      const pt = posteTweak.get();
       x.fillStyle = "#000";
       x.fillRect(0, 0, c.width, c.height);
-      x.font = "600 30px ui-monospace, SFMono-Regular, Menlo, monospace";
+      x.font = `600 ${pt.textSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
       x.textBaseline = "top";
       // Du PHOSPHORE, pas du texte de canvas : un glyphe cathodique n'a pas de bord.
       // L'ombre portée verte dessine le halo dans la même passe que le trait — le
@@ -723,23 +778,43 @@ export function ChromeTableau({ reduced }: Props) {
       // lui-même doit être dans la texture, sinon le bord crénelé du canvas reste
       // visible sous n'importe quel halo.
       x.shadowColor = "rgba(77, 255, 122, 0.9)";
-      x.shadowBlur = 7;
+      x.shadowBlur = pt.textGlow;
       x.fillStyle = "#5aff85";
       // En HAUT À GAUCHE — là où un terminal démarre. Le centre était un choix d'écran
       // de veille ; une invite naît au coin.
-      const line = "> " + TV_TEXT.slice(0, Math.max(0, chars));
-      x.fillText(line, 26, 22);
-      // Le curseur, ce qui fait la différence entre du texte et un terminal — il SUIT la
-      // frappe : mesuré sur la ligne réellement affichée, pas sur la ligne finale.
-      if (cursorOn) x.fillRect(26 + x.measureText(line + " ").width - x.measureText(" ").width + 8, 22, 16, 30);
+      //
+      // `stack` : les phrases déjà dites restent à l'écran sous forme de lignes, comme dans
+      // un vrai terminal. Sinon chacune EFFACE la précédente — le geste du film, où chaque
+      // message est seul sur un écran noir. Les deux se lisent, d'où la molette.
+      const step = pt.textSize * LINE_STEP;
+      const first = pt.textStack ? 0 : line;
+      for (let i = first; i <= line; i++) {
+        // Seule la ligne COURANTE est tronquée ; celles d'avant sont entières.
+        const txt = "> " + (i === line ? TV_LINES[i].slice(0, Math.max(0, chars)) : TV_LINES[i]);
+        const y = pt.textY + (i - first) * step;
+        x.fillText(txt, pt.textX, y);
+        // Le curseur, ce qui fait la différence entre du texte et un terminal — il SUIT la
+        // frappe : mesuré sur la ligne réellement affichée, pas sur la ligne finale. Ses
+        // dimensions suivent le corps du glyphe, sinon régler la taille du texte laisse un
+        // curseur de l'ancienne taille à côté.
+        if (cursorOn && i === line) {
+          const advance = x.measureText(txt + " ").width - x.measureText(" ").width;
+          const pad = pt.textSize * 0.27;
+          x.fillRect(pt.textX + advance + pad, y, pt.textSize * 0.53, pt.textSize);
+        }
+      }
       x.shadowBlur = 0;
       tex.needsUpdate = true;
     };
-    draw(0, true);
+    draw(0, 0, true);
     return { tex, draw };
   }, []);
-  /** Le dernier état dessiné, et l'horloge du tube — voir la séquence dans le useFrame. */
-  const tube = useRef({ t: 0, chars: -1, cursor: false });
+  /**
+   * Le dernier état dessiné, et l'horloge du tube — voir la séquence dans le useFrame.
+   * `nonce` est la mise en page du texte déjà peinte (le panneau la bouge), `replay` le
+   * dernier rembobinage honoré.
+   */
+  const tube = useRef({ t: 0, line: -1, chars: -1, cursor: false, nonce: -1, replay: 0 });
 
   /**
    * LA TEXTURE DU POSTE, prise sur le matériau du glb.
@@ -764,13 +839,26 @@ export function ChromeTableau({ reduced }: Props) {
       }),
     [frameSrcs]
   );
+  /*
+   * L'ESPACE COULEUR DE LA PEAU, et pourquoi il est réglable.
+   *
+   * NoColorSpace était posé ici sans justification — le seul override non commenté du
+   * fichier. Ce qu'il fait : GLTFLoader marque un baseColor en SRGBColorSpace, donc le
+   * sampler décode sRGB→linéaire ; le forcer à NoColorSpace SAUTE ce décodage, les octets
+   * sRGB passent pour du linéaire, et la sortie du renderer les ré-encode — la peau sort
+   * plus claire et moins saturée que le fichier. C'est peut-être le choix voulu (un
+   * boîtier beige pâli par vingt ans de lumière) mais rien ne le disait, donc le panneau
+   * permet de voir les deux et de trancher. Le défaut reste NoColorSpace : ce commit ne
+   * change pas l'image.
+   */
+  const skinSrgb = usePosteSkinSrgb();
   useEffect(() => {
     for (const tex of tvTexs) {
       if (!tex) continue;
-      tex.colorSpace = NoColorSpace;
+      tex.colorSpace = skinSrgb ? SRGBColorSpace : NoColorSpace;
       tex.needsUpdate = true;
     }
-  }, [tvTexs]);
+  }, [tvTexs, skinSrgb]);
   const frameGeos = useMemo(() => {
     if (!frameSrcs.length) return null;
     const forms = partsFrame(frameSrcs);
@@ -824,14 +912,20 @@ export function ChromeTableau({ reduced }: Props) {
      * couple d'objets, référencé partout : une écriture les règle tous.
      */
     /*
-     * CALCULÉ, pas réglé : bords du verre relevés sur capture, convertis en unités
-     * de forme par le rectangle DOM publié (--plate-px-*) et les étendues mesurées
-     * (tvExt) — la conversion est exacte par construction puisque les deux dérivent
-     * des mêmes nombres. Retrait de 5 % pour ne pas lécher le biseau. À recalculer
-     * si le glb change (la méthode est en commentaire d'historique de session).
+     * CALCULÉ, pas réglé à l'origine : bords du verre relevés sur capture, convertis en
+     * unités de forme par le rectangle DOM publié (--plate-px-*) et les étendues
+     * mesurées (tvExt) — la conversion est exacte par construction puisque les deux
+     * dérivent des mêmes nombres. Retrait de 5 % pour ne pas lécher le biseau. À
+     * RECALCULER si le glb change (la méthode est en commentaire d'historique de
+     * session) : le panneau permet de le corriger à l'œil, il ne remplace pas la mesure.
+     *
+     * Les nombres eux-mêmes vivent dans posteTweak (centre + taille) et setShared les
+     * réécrit à chaque frame ; ici on ne fait qu'ouvrir les deux Vector2 sur l'état
+     * courant, plutôt que de recopier des coins qui dériveraient du store.
      */
-    const scrMin = new Vector2(-2.464, -0.303);
-    const scrMax = new Vector2(1.254, 2.701);
+    const pt0 = posteTweak.get();
+    const scrMin = new Vector2(pt0.scrX - pt0.scrW / 2, pt0.scrY - pt0.scrH / 2);
+    const scrMax = new Vector2(pt0.scrX + pt0.scrW / 2, pt0.scrY + pt0.scrH / 2);
     const shared = () => ({
       uTime: { value: 0 },
       uDistort: { value: 0.25 },
@@ -840,6 +934,12 @@ export function ChromeTableau({ reduced }: Props) {
       uFly: { value: FLY },
       uAspX: { value: 1 },
       uSeatK: { value: 1 },
+      uSkinFres: { value: 0.55 },
+      // Un Color par matériau (shared() en fabrique de frais) : setShared les écrit tous
+      // par frame, donc pas d'instance partagée à synchroniser comme pour le rect du tube.
+      uSkinTint: { value: new Color(1, 1, 1) },
+      uSkinSat: { value: 1 },
+      uSkinGain: { value: 1 },
       uFade: { value: 0 },
       uRough: { value: 0.12 },
       uTv: { value: 0 },
@@ -956,6 +1056,7 @@ export function ChromeTableau({ reduced }: Props) {
     if (!g) return;
     const s = formState();
     const tw = blobTweak.get();
+    const pt = posteTweak.get();
 
     appear.current += (1 - appear.current) * (1 - Math.pow(0.04, delta));
     const modeTarget = tw.mode === "blob" ? 1 : 0;
@@ -976,16 +1077,16 @@ export function ChromeTableau({ reduced }: Props) {
      * demi-hauteur visible — la revue a montré qu'en viewport portrait (aspect < la
      * fraction demandée) le poste débordait des deux bords, tronqué en permanence :
      * le glb est normalisé sur sa LARGEUR (son axe le plus long), pas sur sa hauteur.
-     * Ici le poste occupe TV_FILL de la dimension visible qui le contraint le plus,
+     * Ici le poste occupe pt.fill de la dimension visible qui le contraint le plus,
      * mesuré sur ses étendues réelles (tvExt) — exact par construction, dans les
-     * deux orientations d'écran.
+     * deux orientations d'écran. (pt.fill est l'ancien TV_FILL, passé au panneau.)
      */
     const fov = (camera as { fov?: number }).fov ?? 42;
     const tanHalf = Math.tan((fov * Math.PI) / 180 / 2);
     const halfHeightLocal = (tanHalf * camera.position.z) / Math.max(0.01, s.scale);
     const halfWidthLocal = halfHeightLocal * (size.width / size.height);
     const k =
-      TV_FILL * Math.min(halfHeightLocal / tvExt.halfH, halfWidthLocal / tvExt.halfW);
+      pt.fill * Math.min(halfHeightLocal / tvExt.halfH, halfWidthLocal / tvExt.halfW);
 
     /*
      * LE VERROU DE SORTIE. uTv seul ne suffit pas : à la sortie de Work, md.flat
@@ -1014,12 +1115,24 @@ export function ChromeTableau({ reduced }: Props) {
      * mouvement.
      */
     const tb = tube.current;
-    if (reduced) {
-      if (tb.chars !== TV_TEXT.length || !tb.cursor) {
-        tb.chars = TV_TEXT.length;
-        tb.cursor = true;
-        screen.draw(tb.chars, true);
-      }
+    // Le rembobinage du panneau : l'attente puis la frappe rejouent sur un poste déjà
+    // posé, sans re-scrubber la section d'un bout à l'autre.
+    if (pt.replayNonce !== tb.replay) {
+      tb.replay = pt.replayNonce;
+      tb.t = 0;
+    }
+    const last = TV_LINES.length - 1;
+    let line: number;
+    let chars: number;
+    let cursorOn: boolean;
+    // `textFull` est la position de réglage : on cale un texte sur son état FINAL, pas
+    // sur une frappe en cours dont la largeur bouge sous la molette. Reduced motion
+    // atterrit au même endroit, pour une autre raison — le texte est une information,
+    // son arrivée est un mouvement.
+    if (reduced || pt.textFull) {
+      line = last;
+      chars = TV_LINES[last].length;
+      cursorOn = true;
     } else {
       // Le garde compare flat — le nombre qui SNAPPE exactement à 1 dans formClock —
       // et jamais `dressed === 1` : la fenêtre dérivée (flat − 0.9) / 0.1 vaut
@@ -1027,19 +1140,54 @@ export function ChromeTableau({ reduced }: Props) {
       // démarrait jamais. Une égalité stricte n'est licite que sur une valeur snappée.
       if (s.mood.dev > 0.55 && s.mood.flat === 1) tb.t += delta;
       else tb.t = 0;
-      const typed =
-        tb.t <= TYPE_IDLE
-          ? 0
-          : Math.min(TV_TEXT.length, Math.floor((tb.t - TYPE_IDLE) / TYPE_CHAR));
+      /*
+       * LE DÉROULÉ, dérivé d'UN SEUL temps. Attente, puis pour chaque phrase : la frappe,
+       * puis une pause — et sur la dernière, plus rien, l'état se pose.
+       *
+       * Une boucle sur tb.t plutôt qu'un index avancé à la frame, pour la même raison que
+       * le reste du fichier : l'état doit être une FONCTION de l'instant. Un compteur
+       * incrémenté par frame dériverait, ne saurait pas rejouer, et surtout ne saurait pas
+       * répondre deux fois la même chose au même temps — ce que le rembobinage du panneau
+       * et le scrub de la section exigent tous les deux.
+       */
+      line = 0;
+      chars = 0;
+      let rest = tb.t - TYPE_IDLE;
+      if (rest > 0) {
+        for (let i = 0; i <= last; i++) {
+          const dur = TV_LINES[i].length * pt.textChar;
+          line = i;
+          if (rest < dur) {
+            chars = Math.floor(rest / pt.textChar);
+            break;
+          }
+          chars = TV_LINES[i].length;
+          rest -= dur;
+          // La dernière ne cède pas la main : pas de pause à consommer, on reste dessus.
+          if (i === last || rest < pt.textHold) break;
+          rest -= pt.textHold;
+        }
+      }
       // Le curseur ne clignote qu'au repos — pendant la frappe il reste allumé,
       // comme un vrai terminal : c'est l'écho qui bat la mesure, pas le curseur.
-      const typing = typed > 0 && typed < TV_TEXT.length;
-      const cursorOn = typing || tb.t % (2 * BLINK) < BLINK;
-      if (typed !== tb.chars || cursorOn !== tb.cursor) {
-        tb.chars = typed;
-        tb.cursor = cursorOn;
-        screen.draw(typed, cursorOn);
-      }
+      const typing = chars > 0 && chars < TV_LINES[line].length;
+      cursorOn = typing || tb.t % (2 * BLINK) < BLINK;
+    }
+    // L'état comprend maintenant la MISE EN PAGE : sans le nonce, traîner « Texte X »
+    // ne se verrait qu'au clignotement suivant — jusqu'à une demi-seconde de retard sur
+    // la molette, ce qui rend le réglage illisible. Le canvas reste repeint au seul
+    // changement d'état, jamais à la frame.
+    if (
+      line !== tb.line ||
+      chars !== tb.chars ||
+      cursorOn !== tb.cursor ||
+      pt.textNonce !== tb.nonce
+    ) {
+      tb.line = line;
+      tb.chars = chars;
+      tb.cursor = cursorOn;
+      tb.nonce = pt.textNonce;
+      screen.draw(line, chars, cursorOn);
     }
 
     const setShared = (m: ShaderMaterial) => {
@@ -1050,7 +1198,14 @@ export function ChromeTableau({ reduced }: Props) {
       u.uFreq.value = tw.freq;
       u.uRough.value = tw.roughness;
       u.uTv.value = s.mood.flat;
-      u.uReveal.value = s.mood.dev * dressed;
+      /*
+       * Le décapage, et le seul endroit du panneau qui DÉBRANCHE l'horloge. Nécessaire, pas
+       * décoratif : à uReveal = 1 le mix du fragment jette tout le chrome (voir FRAG_FRAME),
+       * donc l'HDRI n'a littéralement aucun effet sur un poste posé — mesuré en comparant
+       * deux environnements sur un poste settled, images identiques. Figer le décapage est
+       * ce qui rend les molettes HDRI observables.
+       */
+      u.uReveal.value = pt.revealAuto ? s.mood.dev * dressed : pt.reveal;
       u.uFly.value = reduced ? 0 : FLY;
       /*
        * 1 : uAspX étirait la toile aux proportions de chaque photographie, et le
@@ -1072,6 +1227,27 @@ export function ChromeTableau({ reduced }: Props) {
       const lit = Math.max(0, (s.mood.dev - 0.5) / 0.5);
       u.uGlow.value = lit * lit * (3 - 2 * lit) * dressed;
       u.uFade.value = fade;
+      /*
+       * L'HDRI ET LE RECTANGLE DU TUBE, écrits par frame depuis le panneau.
+       *
+       * uEnvInt/uEnvRot ne concernent QUE le poste : le crâne et le liquide lisent la
+       * même constante ENV_INTENSITY à leur propre construction, donc régler ici ne les
+       * suit pas — c'est voulu, ce panneau règle une scène. Le <Environment> de
+       * ChromeCanvas est encore une troisième chose (l'éclairage des matériaux standard).
+       *
+       * Le rectangle passe du centre + taille du panneau aux deux coins que le shader
+       * lit. Écrit via .set() sur les Vector2 déjà en place — les matériaux les
+       * PARTAGENT par référence (voir leur création), donc ces écritures répétées visent
+       * le même objet : redondant, et strictement plus sûr que de compter sur l'alias.
+       */
+      u.uEnvInt.value = pt.envInt;
+      u.uEnvRot.value = pt.envRot;
+      u.uSkinFres.value = pt.skinFres;
+      (u.uSkinTint.value as Color).set(pt.skinTint);
+      u.uSkinSat.value = pt.skinSat;
+      u.uSkinGain.value = pt.skinGain;
+      (u.uScrMin.value as Vector2).set(pt.scrX - pt.scrW / 2, pt.scrY - pt.scrH / 2);
+      (u.uScrMax.value as Vector2).set(pt.scrX + pt.scrW / 2, pt.scrY + pt.scrH / 2);
       u.uEnv.value = envMap;
       (u.uCamPos.value as Vector3).copy(camera.position);
       colScratch.set(tw.color);

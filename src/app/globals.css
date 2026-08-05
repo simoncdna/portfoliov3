@@ -191,6 +191,27 @@ body::after {
   }
 }
 
+/* LES OUTILS DE DEV GARDENT LE CURSEUR NATIF. Le réticule custom est fait pour lire la
+   page ; sur un panneau de réglage il faut VISER — une barre de 6 px de haut se pointe au
+   pixel, et un réticule en mix-blend-mode difference sur du texte gris ne dit pas où est
+   le point chaud.
+
+   `!important` et un sélecteur d'attribut : la règle au-dessus est `body *` en !important,
+   qu'un style inline ne peut pas battre (un !important de feuille gagne contre l'inline).
+   `[data-dev-panel] *` pèse (0,1,0) contre (0,0,2), donc il passe devant — sans média
+   query, la spécificité tranche seule entre deux !important. */
+[data-dev-panel],
+[data-dev-panel] * {
+  cursor: auto !important;
+}
+[data-dev-panel] button {
+  cursor: pointer !important;
+}
+[data-dev-panel] [data-dev-bar],
+[data-dev-panel] [data-dev-bar] * {
+  cursor: ew-resize !important;
+}
+
 ::selection {
   background: var(--silver-bright);
   color: var(--void);

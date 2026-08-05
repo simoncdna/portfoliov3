@@ -283,7 +283,18 @@ export function ChromeCanvas({
         // window), at dpr 1 it keeps up. The softness is under a black plane for nearly all
         // of it; full resolution returns the frame the curtain is gone.
         dpr={load === "cheap" ? 1 : dpr}
-        gl={{ antialias: true, alpha: true, toneMappingExposure: 1.15 }}
+        /*
+         * toneMappingExposure : 0.3, DEPUIS 1.15 — et c'est un réglage GLOBAL, réglé sur
+         * une seule section. Trouvé au panneau du poste (dev/poste) pendant l'étalonnage
+         * du téléviseur, avec le passage de sa peau en sRGB, une désaturation à 0.36 et un
+         * vernis à 1.3 : le poste demandait un quart de la lumière d'avant.
+         *
+         * MAIS LE BLOB DU HERO ET LE CRÂNE D'ABOUT LE SUBISSENT AUSSI — c'est le renderer,
+         * pas un matériau. Si l'une de ces deux sections a l'air éteinte, c'est ici qu'il
+         * faut regarder d'abord, et la sortie sera de leur donner leur propre échelle
+         * (uEnvInt est déjà par-forme) plutôt que de remonter ce nombre.
+         */
+        gl={{ antialias: true, alpha: true, toneMappingExposure: 0.3 }}
         camera={{ position: [0, 0, 10], fov: 42 }}
         // pointerEvents: none is NOT redundant with the pointer-events-none on the
         // wrapper. R3F's own container div sets pointer-events: auto on itself,
