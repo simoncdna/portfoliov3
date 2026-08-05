@@ -581,3 +581,29 @@ export function advanceFormClock(
 }
 
 export const formState = (): Readonly<FormState> => state;
+
+/**
+ * UN HUBLOT DE DÉVELOPPEMENT sur l'horloge — `window.__form` en dev, rien en prod.
+ *
+ * Tout ce fichier est un état de module que rien n'expose : c'est voulu (les formes ne
+ * doivent le lire que par `formState()`, une fois par frame), mais ça rend le débogage
+ * aveugle. Symptôme réel qui a motivé ceci : « changer les paramètres de la caméra ne fait
+ * rien » — impossible à trancher sans voir, au même instant, la présence du corridor, le
+ * scrub qui pilote le playhead, et la pose qui en sort. Trois valeurs dans trois modules,
+ * aucune observable depuis la console.
+ *
+ * Les singletons sont exposés par RÉFÉRENCE et l'état par une fonction, donc le hublot
+ * montre toujours la frame courante sans rien copier par frame — il ne coûte rien, et en
+ * production la branche est morte à la compilation.
+ *
+ * Lecture seule par convention. Écrire dedans ne cassera rien d'irréparable, mais l'horloge
+ * réécrit tout à la frame suivante, donc ça ne sert à rien.
+ */
+if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__form = {
+    state: formState,
+    workReveal,
+    aboutReveal,
+    workPlate,
+  };
+}
