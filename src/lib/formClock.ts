@@ -6,6 +6,7 @@ import { aboutReveal } from "./aboutReveal";
 import { workReveal } from "./workReveal";
 import { workPlate, MOOD_REST, SHAPES, type Shape } from "./workPlate";
 import { toileTweak } from "./toileTweak";
+import { pose as camPose, seek as camSeek } from "./cameraStage";
 
 /**
  * The central form's live state: one clock, one turntable, one eased scroll
@@ -503,10 +504,17 @@ export function advanceFormClock(
     const claim = reduced ? 0 : smoothstep(0.55, 0.85, aboutReveal.exit);
     state.tableauOn = Math.max(tIn * tIn * (3 - 2 * tIn), claim) * (1 - easedAfter);
   }
-  // La caméra. Pose codée à l'identité pour l'instant — Theatre la fournira (voir
-  // cameraStage) ; la plomberie est branchée d'abord pour que ce câblage soit vérifiable
-  // sans que rien ne bouge à l'écran.
-  const pose = CAM_REST;
+  // La caméra. Le playhead EST le scrub de l'entrée (workReveal.form) — celui qui déroule
+  // déjà le métal — donc la trajectoire de caméra est le MÊME geste que la métamorphose,
+  // pas un second événement par-dessus. Et piloté par la valeur brute, pas par la lissée
+  // (md.flat, qui la chase à FORM_RATE) : le lissage est ce qui donne son poids à la
+  // matière, et l'appliquer aussi à la caméra doublerait le retard. La caméra suit la main,
+  // le métal traîne derrière.
+  //
+  // En reduced motion, le playhead est ramené à 0 et la pose forcée au repos : un mouvement
+  // de caméra est du mouvement, et cette préférence demande qu'il n'y en ait pas.
+  camSeek(reduced ? 0 : workReveal.form);
+  const pose = reduced ? CAM_REST : camPose();
   const on = state.tableauOn;
   state.camZ = confine(CAM_REST.z, pose.z, on);
   state.camY = confine(CAM_REST.y, pose.y, on);
