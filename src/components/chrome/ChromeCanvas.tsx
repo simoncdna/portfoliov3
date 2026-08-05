@@ -7,6 +7,7 @@ import type { Group } from "three";
 import type { BlobShape } from "./ChromeBlob";
 import { FormDriver } from "./FormDriver";
 import { ChromeTableau } from "./ChromeTableau";
+import { PixelTunnel } from "./PixelTunnel";
 import { LiquidDna } from "./LiquidDna";
 import { ChromeSkull } from "./ChromeSkull";
 import { DnaParticles } from "./DnaParticles";
@@ -379,6 +380,13 @@ export function ChromeCanvas({
           <Suspense fallback={null}>
             <ChromeTableau reduced={reduced} />
           </Suspense>
+          {/* LE CORRIDOR DE PHOSPHORE — la suite du poste, pas une forme indépendante :
+              il partage le canvas du tube (voir tubeScreen.ts) et ne se montre que
+              pendant la plongée (formState().dive), qu'il lit lui-même. Aucun glb, aucune
+              texture chargée : rien à suspendre, donc pas de boundary à lui — un
+              InstancedMesh construit sur un BoxGeometry(1,1,1) est prêt dès le premier
+              rendu. */}
+          <PixelTunnel />
           {/* The skull mesh — the About section's form, so always present. */}
           {/* Its glb is ~1 MB, so it keeps its own boundary: inside the outer one it
               would hold the liquid (which needs nothing but a shader) off the

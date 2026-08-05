@@ -109,8 +109,17 @@ const SCR_H = PLATE_H + LINER_W + 2 * FRAME_W;
  * arrive au rythme de la ligne, pas au rythme d'une main — la frappe humaine irrégulière
  * aurait demandé du hasard, et le hasard par frame est interdit ici (deux lectures du
  * même instant doivent dessiner la même image).
+ *
+ * EXPORTÉE depuis PixelTunnel : le tunnel doit peindre le MÊME canvas, avec le MÊME
+ * contenu — tubeScreen(lines) n'utilise `lines` qu'à son tout premier appel (voir ce
+ * fichier). Une copie locale dans PixelTunnel, même identique aujourd'hui, dériverait
+ * silencieusement de celle-ci au premier mot changé ; et si PixelTunnel se montait un
+ * jour avant ce composant, une copie DIFFÉRENTE y gagnerait la course et s'imprimerait
+ * dans le canvas pour de bon, sans erreur. Partager la même constante rend le résultat
+ * correct quel que soit l'ordre de montage, plutôt que de dépendre d'une garantie
+ * d'ordre de rendu de React qu'aucun des deux fichiers ne vérifie.
  */
-const TV_LINES = ["wake up...", "The matrix has you.", "Follow the white rabbit."];
+export const TV_LINES = ["wake up...", "The matrix has you.", "Follow the white rabbit."];
 /** L'attente au curseur nu, secondes — presque trois clignotements. */
 const TYPE_IDLE = 1.5;
 /** La demi-période du clignotement (530 ms allumé, 530 ms éteint — le battement VT). */
