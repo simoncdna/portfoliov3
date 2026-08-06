@@ -30,7 +30,7 @@ import { FRAME_W, LINER_W, PHOTO_SHADE, PLATE_H, PLATE_T } from "@/lib/formPhoto
 import { PLATE_LOOK } from "@/lib/plateLook";
 import { posteTweak, usePosteEnv, usePosteSkinSrgb } from "@/lib/posteTweak";
 import { CAM_REST, formState } from "@/lib/formClock";
-import { sequenceAt, sequenceDuration, type SequenceState } from "@/lib/tubeSequence";
+import { sequenceAt, type SequenceState } from "@/lib/tubeSequence";
 import { tubeGate } from "@/lib/tubeGate";
 import { tubeHole } from "@/lib/tubeHole";
 import { TV_LINES, TV_TEXTS } from "@/lib/tubeLines";
@@ -1384,7 +1384,7 @@ export function ChromeTableau({ reduced }: Props) {
     // motion y atterrit pour une autre raison — le texte est une information, son arrivée
     // est un mouvement (voir « LA SÉQUENCE DU TERMINAL » ci-dessus).
     const forced = reduced || pt.textFull;
-    // Sortie une fois, réutilisée par sequenceAt ET sequenceDuration ci-dessous : les
+    // Sortie une fois, passée à sequenceAt ci-dessous : les
     // construire séparément marcherait tout aussi bien aujourd'hui, mais laisserait la
     // porte ouverte à ce que l'un des deux dérive de l'autre au premier réglage du
     // panneau touché d'un seul côté.
@@ -1404,11 +1404,6 @@ export function ChromeTableau({ reduced }: Props) {
     if (forced) {
       const l = TV_LINES.length - 1;
       seq = { line: l, chars: TV_LINES[l].text.length, typing: false, done: true };
-      // Le rembobinage du panneau ou un reduced motion arrivé pendant que le lecteur
-      // molettait laisserait sinon un boost accumulé, prêt à faire sauter tb.t en avant
-      // dès que `forced` retombe — un rembobinage n'est pas rembobiné s'il repart déjà
-      // en marche avant.
-      tubeGate.boost = 0;
     } else {
       // Le garde compare flat — le nombre qui SNAPPE exactement à 1 dans formClock — et
       // jamais `dressed === 1` : la fenêtre dérivée (flat − 0.9) / 0.1 vaut
@@ -1423,23 +1418,17 @@ export function ChromeTableau({ reduced }: Props) {
       // l'autre doit suivre.
       if (s.mood.dev > 0.55 && s.mood.flat === 1) {
         /*
-         * L'ACCÉLÉRATION AU SCROLL — voir tubeGate. Bornée par ce qu'il reste jusqu'à la
-         * fin de la séquence (sequenceDuration), JAMAIS au-delà, sur consigne explicite :
-         * Work.tsx ne DÉCOUVRE `tubeGate.done` que sur son prochain passage de ticker, pas
-         * à l'instant où il devient vrai ici — donc au moins une frame après que tb.t a
-         * franchi la fin, le verrou est encore tenu et un cran de molette peut encore
-         * arriver. À cet instant tb.t DÉPASSE déjà `sequenceDuration` (le `delta` seul,
-         * jamais borné, l'y a poussé dès la frame du franchissement) : sans le
-         * `Math.max(0, …)`, `remaining` serait négatif et `Math.min(boost, remaining)`
-         * ferait RECULER tb.t d'un coup — la frappe reviendrait en arrière au moment même
-         * où elle se termine.
+         * LE TEMPS RÉEL, ET RIEN D'AUTRE. Il y avait ici une accélération au scroll (voir
+         * tubeGate, où le champ `boost` a été retiré et l'historique conservé) : chaque cran de
+         * molette pendant la retenue avançait cette horloge. La direction artistique demande
+         * l'inverse — la frappe joue sa durée comme un plan de film, la molette ne peut ni la
+         * précipiter ni la sauter. `delta` seul, donc, et la séquence dure exactement ce que
+         * `TYPE_CHAR`/`LINE_HOLD` disent qu'elle dure.
          */
-        const remaining = Math.max(0, sequenceDuration(TV_TEXTS, cadence) - tb.t);
-        tb.t += delta + Math.min(tubeGate.boost, remaining);
+        tb.t += delta;
       } else {
         tb.t = 0;
       }
-      tubeGate.boost = 0;
       seq = sequenceAt(tb.t, TV_TEXTS, cadence);
     }
     // LE PONT VERS LA RETENUE — voir tubeGate. Écrit que la branche ait été `forced` ou

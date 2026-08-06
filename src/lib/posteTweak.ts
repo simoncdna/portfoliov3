@@ -249,6 +249,21 @@ export type PosteTweak = {
    * L'arc de luminosité du corridor repart de ce même point (PixelTunnel, uArrive) : les
    * deux ne peuvent pas se désaccorder puisqu'ils lisent cette molette-ci.
    */
+  /**
+   * LA DURÉE DE LA PLONGÉE, EN SECONDES RÉELLES — parce que ce n'est plus un scrub.
+   *
+   * La plongée était scrubbée : `dive` suivait la molette, donc sa vitesse était celle du
+   * poignet du lecteur, et plus il scrollait vite plus le monde défilait vite. La direction
+   * artistique a tranché l'autre sens — « on ne fait que jouer des animations comme un film, en
+   * gros on ne peut pas accélérer » : la plongée se DÉCLENCHE au scroll (quand le terminal a fini
+   * ses phrases) puis joue sa durée, le scroll retenu pendant tout ce temps (voir la retenue dans
+   * Work.tsx, qui tient le verrou jusqu'à la fin du film).
+   *
+   * La vitesse n'est pas constante pour autant : `DIVE_EASE` (Work.tsx) part lentement pour
+   * l'approche du poste, accélère au passage du verre, et ralentit à l'arrivée — le mouvement de
+   * plongée, pas un travelling régulier.
+   */
+  diveSeconds: number;
   diveArrive: number;
   /**
    * CAM_DIVE_PAST_GLASS — LA DISTANCE. De combien la caméra dépasse le front du verre une
@@ -800,6 +815,7 @@ const DEFAULTS: Omit<PosteTweak, "textNonce" | "replayNonce"> = {
   holeWin: 8,
   zoomChars: 5,
   zoomSpan: 0.6,
+  diveSeconds: 7,
   diveArrive: 0.5,
   divePast: 2.7,
   crossIn: 0.06,
@@ -1024,6 +1040,7 @@ export function posteTweakAsSource(): string {
       : []),
     ``,
     `// src/lib/formClock.ts`,
+    `const DIVE_SECONDS = ${n(s.diveSeconds, 1)}; // Work.tsx — la plongée est un film`,
     `const CAM_DIVE_ARRIVE = ${n(s.diveArrive, 3)};`,
     `const CAM_DIVE_PAST_GLASS = ${n(s.divePast, 3)};`,
     ...(s.diveArrive === DEFAULTS.diveArrive

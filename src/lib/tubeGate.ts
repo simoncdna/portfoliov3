@@ -35,13 +35,16 @@ export const tubeGate = {
    * plus tard, une fois la plaque posée.
    */
   done: false,
-  /**
-   * Des SECONDES, ajoutées par Work.tsx à chaque cran de molette pendant que la
-   * retenue tient, consommées puis remises à zéro par ChromeTableau une fois par
-   * frame (`tb.t += delta + tubeGate.boost; tubeGate.boost = 0;`). Jamais négatif :
-   * Work.tsx n'y ajoute que des increments positifs, dans un sens ou dans l'autre de
-   * la molette — reculer l'horloge du tube ferait revenir des lettres déjà frappées,
-   * ce que rien dans cette feature ne demande.
-   */
-  boost: 0,
 };
+
+/*
+ * PAS DE `boost` ICI, ET C'EST UNE DÉCISION D'AUTEUR. Il y en a eu un : des secondes que
+ * Work.tsx ajoutait à chaque cran de molette pendant la retenue, pour que « retenir sans rien
+ * répondre au geste » ne se lise pas comme une page cassée. La direction artistique a tranché
+ * l'inverse — « on ne fait que jouer des animations comme un film, en gros on ne peut pas
+ * accélérer » : la frappe tient sa durée quoi que fasse la molette, et la plongée qui la suit
+ * est un film joué dans le temps (voir DIVE_EASE dans Work.tsx), pas un scrub.
+ *
+ * Si le silence pendant la retenue redevient un problème, la réponse est un SIGNE (un curseur,
+ * un indice « ça arrive ») et non un raccourci : accélérer, c'est laisser sauter le dialogue.
+ */

@@ -775,6 +775,16 @@ export function PosteDevPanel() {
             onChange={(v) => posteTweak.set({ cycles: v })}
           />
           {/* Où Paroi/Blocs ont fini leur course — à caler contre la ligne « Anime ». */}
+          {/* La plongée n'est plus scrubbée : elle joue cette durée — voir `diveSeconds`. */}
+          <Row
+            label="Durée"
+            value={t.diveSeconds}
+            min={2}
+            max={20}
+            step={0.5}
+            fmt={(v) => `${v.toFixed(1)} s`}
+            onChange={(v) => posteTweak.set({ diveSeconds: v })}
+          />
           <Row
             label="Dissout à"
             value={t.dissolveAt}

@@ -9,6 +9,7 @@ import { workPlate } from "@/lib/workPlate";
 import { workReveal } from "@/lib/workReveal";
 import { formState } from "@/lib/formClock";
 import { tubeGate } from "@/lib/tubeGate";
+import { posteTweak } from "@/lib/posteTweak";
 import { lockPageScroll, scrollPageTo } from "@/lib/pageScroll";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -123,31 +124,25 @@ const SCROLL_KEYS = new Set([
   "Spacebar",
 ]);
 
-/**
- * L'ACCÉLÉRATION DE LA RETENUE — voir tubeGate. Secondes ajoutées à l'horloge du tube
- * PAR ÉVÈNEMENT wheel pendant que le verrou tient — pas une fraction de son deltaY :
- * les unités de deltaY ne sont pas comparables entre souris et trackpad (mode ligne ou
- * pixel, accélération propre au pilote), donc une échelle proportionnelle aurait fait
- * dépendre la vitesse perçue du matériel du lecteur plutôt que de son geste. Compter
- * les évènements reste dépendant de l'appareil (un trackpad en émet beaucoup plus
- * qu'une molette pour un geste comparable), mais c'est la dépendance que la tâche
- * assume déjà en parlant de « chaque cran », pas de « chaque pixel ».
- *
- * NON MESURÉ AU NAVIGATEUR — rien ici ne peut compter les évènements wheel qu'émet un
- * geste réel. Ce qui suit est un calcul, pas une observation :
- *
- * La séquence dure 8,01 s aux réglages par défaut de posteTweak (1,5 s d'attente +
- * (10 + 19 + 24) caractères × 0,07 s + 2 pauses × 1,4 s — voir sequenceDuration). À
- * 0.5 s le cran, une dizaine de crans — quelques gestes déterminés à la molette, ou un
- * flick de trackpad — suffisent à faire tomber l'attente de 8 s à 2-3 s, la fourchette
- * demandée. Et AUCUN cran isolé ne peut sauter une phrase entière : le plus petit reste
- * à frapper après la première phrase (« wake up... », 0,7 s de frappe puis 1,4 s de
- * pause) pèse encore 2,1 s, plus de quatre fois l'incrément.
+/*
+ * PAS DE PAS D'ACCÉLÉRATION — il y en avait un (BOOST_STEP, 0,5 s par cran de molette) et le
+ * calcul qui le justifiait : la séquence dure ~8 s aux réglages par défaut, une dizaine de crans
+ * la ramenaient à 2-3 s sans qu'aucun cran isolé puisse sauter une phrase. La direction
+ * artistique a tranché contre — « on ne fait que jouer des animations comme un film, en gros on
+ * ne peut pas accélérer » — donc la frappe tient ses ~8 s et la plongée son film (voir la retenue
+ * plus bas, et tubeGate où le champ `boost` a été retiré).
  */
-const BOOST_STEP = 0.5;
 
 export function Work() {
   const ref = useRef<HTMLElement>(null);
+  /**
+   * LE FILM DE LA PLONGÉE — une timeline gsap PAUSÉE, créée par le useGSAP plus bas et jouée par
+   * le ticker de la retenue quand le terminal a fini. Une ref, parce que les deux effets ne
+   * peuvent pas se voir autrement : la retenue est déclarée AVANT le useGSAP, donc elle tourne
+   * une première fois quand la timeline n'existe pas encore (d'où le test de nullité côté
+   * ticker), et la timeline appartient au contexte gsap qui la tuera au démontage.
+   */
+  const divePlay = useRef<gsap.core.Timeline | null>(null);
   const [plate, setPlate] = useState(0);
   /** true from the moment the metal starts taking a project's shape */
   const [formed, setFormed] = useState(false);
@@ -251,11 +246,21 @@ export function Work() {
   }, [geometry, walk]);
 
   /**
-   * LA RETENUE, ET SON ACCÉLÉRATION — voir tubeGate et pageScroll. `workReveal.dive`
-   * (plus bas, diveTl) est le scrub qui traverse l'écran, et il ne doit pas avancer
-   * avant que le terminal ait fini ses trois phrases : la molette scrubbe déjà tout le
-   * reste de la section, donc sans retenue un simple flick pendant l'attente saute le
-   * dialogue et arrive dans la plongée avant qu'un mot n'ait été lu.
+   * LA RETENUE — voir tubeGate et pageScroll. Elle tient sur TOUTE la séquence : le terminal
+   * tape ses phrases, PUIS la plongée joue (voir divePlay plus bas), et le scroll ne reprend
+   * qu'après. La molette déclenche, elle ne conduit pas.
+   *
+   * ELLE COUVRAIT AUTREFOIS LA SEULE FRAPPE, et la plongée était un scrub : `dive` suivait le
+   * poignet du lecteur, donc plus il scrollait vite plus le monde défilait vite, et un flick
+   * traversait la matrice en une fraction de seconde. La direction artistique a tranché — « on
+   * ne fait que jouer des animations comme un film, en gros on ne peut pas accélérer » : la
+   * plongée est devenue une timeline jouée dans le temps, et la retenue s'étend donc jusqu'à sa
+   * fin. Le scroll qu'elle retient n'est pas perdu : la page reprend EXACTEMENT là où elle
+   * s'était figée (il n'y a pas de pin — voir plus bas).
+   *
+   * L'ACCÉLÉRATION AU SCROLL A ÉTÉ RETIRÉE par la même décision (l'historique est dans
+   * tubeGate, où le champ `boost` vivait) : ni la frappe ni la plongée ne peuvent être
+   * précipitées.
    *
    * LE VERROU tombe sur lockPageScroll("tube", …), pas sur un lenis.stop() en direct :
    * c'est le mécanisme déjà établi (voir pageScroll, et SectionNav pour le menu, l'autre
@@ -280,14 +285,6 @@ export function Work() {
    * côté DOM — seulement une frame de plus, au pire, avant qu'un `done` écrit par le
    * useFrame de ChromeTableau (une boucle R3F séparée, sans garantie d'ordre avec celle-
    * ci dans la même frame navigateur) ne soit vu ici.
-   *
-   * L'ACCÉLÉRATION répond au même problème par l'autre bout : retenir SANS rien répondre
-   * au geste lirait comme une page cassée (voir BOOST_STEP), donc pendant que le verrou
-   * tient, chaque évènement wheel avance l'horloge du tube (tubeGate.boost) au lieu de
-   * ne rien faire. L'écouteur est câblé comme celui qui referme le panneau toile dans
-   * SmoothScroll (même options : `passive`, pas de capture) — Lenis arrêté preventDefault
-   * déjà l'évènement, donc celui-ci n'a besoin que de LIRE deltaY, jamais de le bloquer
-   * lui-même.
    *
    * LE CLAVIER EST UNE AUTRE PORTE, et une que la tâche qui a posé ce fichier ne nommait
    * pas : Lenis n'intercepte QUE wheel et touch (SmoothScroll le documente déjà pour son
@@ -320,16 +317,102 @@ export function Work() {
 
     const tick = () => {
       const s = formState();
-      const want = s.mood.flat === 1 && s.mood.dev > 0.55 && !tubeGate.done;
+      const ready = s.mood.flat === 1 && s.mood.dev > 0.55;
+      const film = divePlay.current;
+      /*
+       * LE FILM SE LANCE QUAND LE TERMINAL A FINI, et une seule fois : `paused()` retombe à
+       * false dès qu'il joue, donc ce test ne le relance pas à chaque frame. La durée est relue
+       * au démarrage (et pas figée à la création) pour que la molette « Durée » du panneau se
+       * juge sans recharger.
+       *
+       * `!reversed()` EST LA GARDE QUI REND LE REMBOBINAGE POSSIBLE : sans elle, un film que le
+       * lecteur vient de faire revenir à zéro (molette vers le haut, voir onWheel) repartirait en
+       * avant à la frame suivante, et la marche arrière serait impossible à tenir.
+       */
+      if (film && ready && tubeGate.done && film.paused() && !film.reversed() && film.progress() < 1) {
+        film.duration(Math.max(0.5, posteTweak.get().diveSeconds));
+        film.play();
+      }
+      /*
+       * QUITTER LA SECTION REMET LE FILM À ZÉRO, prêt à rejouer à la prochaine descente — et
+       * `reversed(false)` avec, sans quoi il repartirait en marche arrière. Le seuil de SORTIE est
+       * plus bas que celui d'entrée (0.5 contre 0.55) : sans cette hystérésis, un `dev` qui vibre
+       * autour de 0.55 rembobinerait la plongée en pleine course, ce qui se verrait comme un saut
+       * au noir.
+       */
+      if (film && (s.mood.flat < 1 || s.mood.dev < 0.5) && film.progress() > 0) {
+        film.reversed(false).pause(0);
+      }
+      /*
+       * LE VERROU TIENT JUSQU'À LA FIN DU FILM, pas seulement de la frappe (voir l'en-tête). La
+       * condition d'entrée reste la MÊME que celle de ChromeTableau (flat === 1 && dev > 0.55,
+       * dupliquée là-bas avec un renvoi ici) ; ce qui s'y ajoute est la seconde moitié de la
+       * séquence.
+       *
+       * DEUX FAÇONS D'EN SORTIR, ET IL FAUT LES DEUX : le film est allé au bout (on continue vers
+       * la suite de la page), ou le lecteur l'a rembobiné jusqu'à zéro (il veut remonter, et le
+       * retenir là serait un piège). Tester seulement `progress() < 1` tenait le verrou pour
+       * toujours dans le second cas.
+       */
+      const done = film ? film.progress() >= 1 && !film.reversed() : false;
+      const rewound = film ? film.progress() <= 0 && film.reversed() : false;
+      const want = ready && !done && !rewound;
       if (want === locked) return;
       locked = want;
       lockPageScroll("tube", want);
     };
     gsap.ticker.add(tick);
 
-    const onWheel = () => {
-      if (!locked) return;
-      tubeGate.boost += BOOST_STEP;
+    /* UN HUBLOT DE DÉVELOPPEMENT sur le film — même motif que window.__form / __tunnel : l'état
+     * d'une timeline pausée n'est lisible nulle part ailleurs, et « pourquoi repart-il en avant ? »
+     * ne se répond pas sans progress/reversed/paused sous les yeux. */
+    if (process.env.NODE_ENV === "development") {
+      (window as unknown as Record<string, unknown>).__dive = () => {
+        const f = divePlay.current;
+        return f
+          ? { progress: +f.progress().toFixed(3), reversed: f.reversed(), paused: f.paused(), dive: workReveal.dive }
+          : null;
+      };
+    }
+
+    /*
+     * LA MOLETTE CHOISIT LE SENS, PAS LA VITESSE — « si je scroll à l'envers je joue le film à
+     * l'envers ». C'est la nuance qui distingue ça de l'accélération retirée plus haut : `reverse()`
+     * et `play()` laissent le timeScale à 1, donc un flick rageur ne fait pas défiler le monde plus
+     * vite, il ne fait que décider de la direction. Le geste répond, la durée tient.
+     *
+     * AVANT LA FIN DE LA FRAPPE, RIEN : rembobiner une plongée qui n'a pas commencé n'a pas de
+     * sens, et la frappe elle-même ne se pilote pas (voir tubeGate).
+     *
+     * PASSIF, comme l'écouteur qui referme le panneau toile dans SmoothScroll : Lenis arrêté
+     * preventDefault déjà l'évènement, celui-ci n'a besoin que de LIRE deltaY.
+     *
+     * LE TACTILE N'EST PAS COUVERT — Lenis gouverne wheel ET touch, mais un touchmove n'émet pas
+     * de wheel : sur tablette la plongée joue donc en avant sans marche arrière. Signalé plutôt
+     * que corrigé à l'aveugle, faute de pouvoir l'essayer ici.
+     */
+    const onWheel = (e: WheelEvent) => {
+      const film = divePlay.current;
+      if (!film || !tubeGate.done) return;
+      const s = formState();
+      if (s.mood.flat < 1 || s.mood.dev <= 0.55) return;
+      /*
+       * UN PLAN NE S'INTERROMPT PAS — « on ne peut pas rembobiner pendant le film, on doit
+       * attendre la fin ». La molette n'est donc écoutée qu'aux DEUX BOUTS de la timeline : à la
+       * fin elle rembobine, au début elle relance. Pendant que ça joue, dans un sens ou dans
+       * l'autre, elle ne fait rien.
+       *
+       * C'est la même doctrine que le refus de l'accélération, poussée d'un cran : la durée ET la
+       * continuité du plan appartiennent au film, pas au poignet. Sans ça, un geste hésitant
+       * hachait la plongée en allers-retours.
+       */
+      const atEnd = film.progress() >= 1;
+      const atStart = film.progress() <= 0;
+      if (e.deltaY < 0) {
+        if (atEnd && !film.reversed()) film.reverse();
+      } else if (atStart && film.reversed()) {
+        film.reversed(false).play();
+      }
     };
     window.addEventListener("wheel", onWheel, { passive: true });
 
@@ -566,15 +649,61 @@ export function Work() {
        * travel/hauteur ≈ 0,792. D'où 0,55 → 43,5 % et 0,75 → 59,4 %.
        */
       workReveal.dive = 0;
-      const diveTl = gsap.timeline({
-        scrollTrigger: {
-          trigger: el,
-          start: "top+=43.5% top",
-          end: "top+=59.4% top",
-          scrub: 1,
-        },
-      });
-      diveTl.fromTo(workReveal, { dive: 0 }, { dive: 1, ease: "none" }, 0);
+      /*
+       * LA PLONGÉE EST UN FILM, PLUS UN SCRUB — et c'est le changement dont tout le paragraphe
+       * ci-dessus était l'aveu d'impuissance : il expliquait que la position définitive de
+       * `diveTl` ne pouvait pas être décidée, parce que « la séquence du terminal dure quelques
+       * secondes de temps réel là où cette fenêtre ne fait que ~960 px de scroll ». C'était le
+       * bon diagnostic et la mauvaise unité : une chorégraphie qui se compte en secondes ne se
+       * loge pas dans une bande de pixels.
+       *
+       * Donc plus de ScrollTrigger ici. La molette DÉCLENCHE (la retenue plus haut lance cette
+       * timeline quand `tubeGate.done` passe vrai) puis le film joue sa durée — `diveSeconds`,
+       * réglable au panneau — le scroll retenu jusqu'au bout. On ne peut ni le précipiter ni le
+       * sauter, ce qui est exactement la demande : « on ne fait que jouer des animations comme un
+       * film ».
+       *
+       * CE QUE ÇA SUPPRIME AU PASSAGE : les deux chevauchements que le paragraphe ci-dessus
+       * signalait sans pouvoir les corriger (diveTl contenait tout le roll-out et toute l'entrée,
+       * et recouvrait la moitié de la zone des plaques). Une timeline pausée qui n'existe que sur
+       * ordre ne peut chevaucher personne.
+       *
+       * `paused: true` ET PAS UN `scrollTrigger` : le ticker de la retenue est le seul à décider
+       * quand ça part, et il relit la durée à ce moment-là (voir là-bas).
+       */
+      /*
+       * LA VITESSE EST PROGRESSIVE, ET LE FREIN TOMBE AVANT LE FONDU — trois temps, et c'est la
+       * troisième version : la première (`power2.inOut`, une seule courbe symétrique) freinait
+       * aussi peu qu'elle démarrait ; la deuxième (deux temps, `power2.in` puis `power4.out`)
+       * freinait fort mais AU MAUVAIS ENDROIT — mesuré, `dive` passait 0.90 dès 3,7 s puis mettait
+       * 3,3 s à finir, or 0.90 est précisément l'instant où le fondu au noir s'amorce. Tout le
+       * ralenti se jouait donc APRÈS l'extinction, c'est-à-dire dans le noir : invisible.
+       *
+       * D'où la découpe sur les DEUX seuils de la chorégraphie plutôt que sur le milieu du temps :
+       *
+       *   1. jusqu'à `diveArrive` (0.5) — l'approche, la caméra pousse vers le verre. Démarrage
+       *      lent qui accélère (`power2.in`), 32 % du temps.
+       *   2. jusqu'à l'amorce du fondu (0.5 + `fallAt` · 0.5, soit 0.90 par défaut) — la traversée
+       *      du corridor ET TOUT LE FREIN, `power4.out` sur 52 % du temps : c'est le seul segment
+       *      que le spectateur voit en entier, donc le seul où un ralenti se lit.
+       *   3. le reste (0.90 → 1) — l'extinction, 16 % du temps et sans ease : freiner pendant un
+       *      fondu au noir ne se voit pas, l'y étaler ne ferait que rallonger l'attente.
+       *
+       * Les seuils sont RELUS dans le store (diveArrive, fallAt) plutôt que recopiés : ce sont les
+       * mêmes deux nombres que PixelTunnel utilise pour son arc de luminosité, et une copie ici
+       * dériverait au premier réglage touché d'un seul côté.
+       *
+       * Les durées sont des PARTS, pas des secondes — `duration()` sur la timeline (voir le ticker
+       * de la retenue) les met à l'échelle de `diveSeconds` d'un seul coup.
+       */
+      const pt0 = posteTweak.get();
+      const fadeDive = pt0.diveArrive + pt0.fallAt * (1 - pt0.diveArrive);
+      divePlay.current = gsap
+        .timeline({ paused: true })
+        .fromTo(workReveal, { dive: 0 }, { dive: pt0.diveArrive, duration: 0.32, ease: "power2.in" })
+        .to(workReveal, { dive: fadeDive, duration: 0.52, ease: "power4.out" })
+        .to(workReveal, { dive: 1, duration: 0.16, ease: "none" });
+      divePlay.current.duration(pt0.diveSeconds);
 
       // The release gate. Reversible in both directions, like the entrance gate —
       // scrolling back up out of Contact has to hand the plate back, and the plate it
