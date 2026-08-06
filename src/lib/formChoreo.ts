@@ -58,8 +58,18 @@ export const DOCK_Y_WORK = 0;
  * resting size. It fills the space the About text just vacated — but barely: past
  * about a fifth it stops reading as a mass taking the stage and starts reading as
  * the camera pushing in, which is a different (and unintended) statement.
+ *
+ * 0.10, DEPUIS 0.2 — et le commentaire ci-dessus avait raison sans aller assez loin.
+ * Le pic à 1,2 a été jugé trop gros À L'USAGE, précisément au moment où il compte le
+ * plus : le gonflement culmine pendant le relais crâne → poste, donc c'est ce pic-là
+ * que le lecteur voit au moment où les deux formes se croisent. Un gonflement qui
+ * attire l'œil pendant qu'on essaie de rendre un fondu invisible travaille contre
+ * lui — l'air que le gonflement était censé « dépenser » entre les encoches et la
+ * pièce coûtait plus cher qu'il ne rapportait.
+ *
+ * Réglé à l'œil, pas calculé : c'est une valeur de mise en scène.
  */
-const EXIT_SCALE = 0.2;
+const EXIT_SCALE = 0.1;
 
 /**
  * The size it settles at in Work — an absolute scale, not a bonus on top of the
