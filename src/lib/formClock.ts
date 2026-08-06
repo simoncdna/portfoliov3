@@ -6,7 +6,11 @@ import { aboutReveal } from "./aboutReveal";
 import { workReveal } from "./workReveal";
 import { workPlate, MOOD_REST, SHAPES, type Shape } from "./workPlate";
 import { pose as camPose, seek as camSeek } from "./cameraStage";
-import { tubeMouth } from "./tubeMouth";
+import { screenFill, tubeMouth } from "./tubeMouth";
+import { tubeHole } from "./tubeHole";
+// Le panneau du poste, lu par frame comme blobTweak au-dessus : la plongée y a ses deux
+// nombres tant que ce panneau vit (voir le bloc de la caméra plus bas).
+import { posteTweak } from "./posteTweak";
 
 /**
  * The central form's live state: one clock, one turntable, one eased scroll
@@ -86,6 +90,23 @@ export type FormState = FormChoreo & {
   wave: number;
   /** turntable angle, radians — signed by the scroll direction */
   spin: number;
+  /**
+   * LE MÊME PLATEAU, SANS LE TOUR DE PAGE — l'angle que lit le poste de Work.
+   *
+   * `spin` porte deux gestes que le tableau-photo confondait légitimement : la marche vers
+   * `faced` (présenter la pièce) ET la révolution par changement d'œuvre (`turn`, « la page
+   * tourne pour montrer le tirage suivant »). L'ordinateur n'a plus de tirage à présenter en
+   * tournant : chaque changement d'œuvre le faisait pivoter sur lui-même pour rien.
+   *
+   * Donc le même angle moins `turn`. Les deux bouts sont exacts par construction, ce qui est
+   * tout l'intérêt de le calculer ICI plutôt que de le rattraper chez le lecteur : à
+   * md.flat = 0 il vaut `free`, l'angle vivant du blob, au bit près — le poste porte encore
+   * la sphère et sa dérive ne doit pas être amputée ; à md.flat = 1 le terme `free`
+   * disparaît de l'expression et il ne reste que `faced`, multiple EXACT de 2π, donc un
+   * poste FACE À LA CAMÉRA, immobile, et identique à chaque approche quelle que soit la
+   * vitesse du scroll. Entre les deux, la même marche continue que `spin`.
+   */
+  spinPosed: number;
   /**
    * The shown plate's silhouette, eased. Mutated in place (never replaced), so a
    * form can hold a reference to it and read it every frame without allocating.
@@ -264,24 +285,58 @@ export const CAM_REST = { z: 10, y: 0, x: 0, fov: 42 } as const;
  * phases : rien ne bascule brutalement entre elles, le point où la caméra s'immobilise est
  * simplement celui où la courbe a fini de monter.
  */
-/** La part de la plongée (0..1) que la caméra passe à AVANCER. Au-delà, elle est arrivée. */
-const CAM_DIVE_ARRIVE = 0.5;
-/**
- * De combien la caméra dépasse le front du verre, une fois arrivée (monde, unités Z).
+/*
+ * CAM_DIVE_ARRIVE ET CAM_DIVE_PAST_GLASS ONT DÉMÉNAGÉ DANS posteTweak (`diveArrive`,
+ * `divePast`) — tant que le panneau du poste vit, ce fichier les LIT (`dv`, dans le bloc de
+ * la caméra plus bas) au lieu de les déclarer. Même raison que TV_FILL avant elles : une
+ * constante ici plus un défaut là-bas, et le premier réglage recopié d'un seul côté les fait
+ * mentir tous les deux. Elles reviendront ici quand le panneau partira — le bouton
+ * « copier » crache exactement les deux lignes attendues, sous le chemin de ce fichier.
  *
- * DOIT DÉPASSER LE Z0 DE PixelTunnel (2.2 — la profondeur locale de sa tranche 0, le seuil
- * du tunnel), sans quoi la caméra s'arrête AVANT même d'avoir franchi la première tranche
- * du corridor : elle resterait au bord du seuil plutôt que dedans. Deux valeurs plus
- * petites (0.5, puis 1.8 avant la recalibration de Z0 dans PixelTunnel) ont été essayées et
- * rejetées pour cette raison même — la vraie correction n'était pas la profondeur de la
- * caméra mais l'angle d'ouverture du cône lui-même, voir le commentaire de Z0 là-bas.
+ * CE QU'ELLES VEULENT DIRE NE CHANGE PAS, et la seconde a des contraintes qu'aucune molette
+ * ne connaît — donc elles restent écrites ici :
  *
- * 2.5 place la caméra un peu après ce seuil (profondeur locale 2.5 contre 2.2), à
- * l'intérieur du corridor sans s'y enfoncer inutilement — le sentiment de défilement vient
- * du recyclage (uTravel), pas d'un long trajet caméra à travers les ~24 unités du cycle
- * (Z0·(1+g)^16), donc rien n'est gagné à aller plus loin.
+ * CAM_DIVE_ARRIVE (0.5) — la part de la plongée (0..1) que la caméra passe à AVANCER.
+ * Au-delà, elle est arrivée. C'est la frontière des deux phases de la table du plan
+ * ci-dessus, et l'arc de luminosité du corridor repart du même point (PixelTunnel, uArrive,
+ * qui lit la même molette — ce fut le MÊME 0.5 écrit dans deux fichiers dont un en GLSL).
+ *
+ * CAM_DIVE_PAST_GLASS (2.23) — de combien la caméra dépasse le front du verre, une fois
+ * arrivée (monde, unités Z).
+ *
+ * DOIT PLACER LA CAMÉRA UN PEU APRÈS LE Z0 DE PixelTunnel (2.2 — la profondeur LOCALE de sa
+ * tranche 0, le seuil du tunnel), sans quoi elle s'arrête AVANT même d'avoir franchi la
+ * première tranche du corridor : elle resterait au bord du seuil plutôt que dedans. Deux
+ * valeurs plus petites (0.5, puis 1.8 avant la recalibration de Z0 dans PixelTunnel) ont été
+ * essayées et rejetées pour cette raison même.
+ *
+ * RECALIBRÉE PAR CETTE TÂCHE (T7), ET CE N'EST PAS LE MÊME GENRE DE CHANGEMENT QUE LES DEUX
+ * PRÉCÉDENTS. Cette constante est en unités MONDE ; « profondeur locale » (le seuil qu'elle
+ * doit dépasser) est en unités LOCALES au corridor — les deux ne coïncidaient que parce que
+ * PixelTunnel posait `mesh.scale.z = 1` (T6). Cette tâche fait suivre l'échelle Z par `sx`
+ * (voir l'en-tête de PixelTunnel.tsx : sans ça, chaque cellule ressort en écharde ~28× plus
+ * longue en Z qu'en X/Y), ce qui change le TAUX DE CHANGE entre les deux repères : 1 unité
+ * MONDE valait 1 unité LOCALE avant (scale.z=1) ; elle en vaut 1/sx après. `sx` a lui-même
+ * changé dans cette tâche (voir CELL dans PixelTunnel.tsx, recalibré ≈0.9 → 0.035 pour une
+ * autre raison, l'angle de la tranche proche) : au CELL de T6, sx ≈ 0.0346 et 2.5 unités
+ * MONDE atterrissaient à une profondeur locale ≈72, profondément à l'intérieur du cycle de
+ * recyclage plutôt que juste après son seuil — mesuré au navigateur, une croix géante (les
+ * interstices FILL_XY d'UNE cellule, grossie par sa distance au sommet du cône) plutôt qu'un
+ * corridor. Au CELL de CETTE tâche, sx ≈ 0.890 (mesuré au navigateur, viewport testé).
+ *
+ * 2.23 = 2.5 × sx (le sx ACTUEL, ci-dessus) VISE la MÊME profondeur LOCALE qu'avant tout ceci
+ * (2.5, juste après le seuil 2.2) à TRAVERS l'échelle courante — la caméra retrouve la
+ * position que ce commentaire a toujours visée, seulement exprimée dans l'unité MONDE qui la
+ * fait réellement atterrir là. CALIBRÉ SUR LE VIEWPORT TESTÉ (même réserve que le demi-angle
+ * de PixelTunnel, qui varie déjà avec `tubeMouth.hw` sans qu'on l'y corrige pour chaque
+ * taille d'écran) : `sx` suit le viewport, cette constante ne le peut pas sans que
+ * PixelTunnel publie son échelle quelque part que ce fichier puisse lire — non fait ici, pour
+ * ne pas ajouter un troisième écrivain à un objet partagé (`tubeMouth`) qui n'en a qu'un par
+ * conception (voir son en-tête). Sur un AUTRE viewport, la caméra atterrit à une profondeur
+ * locale différente de 2.5 — jamais assez loin pour retomber dans le régime pathologique
+ * mesuré ci-dessus (72), puisque `sx` ne varie que d'un facteur limité entre viewports (le
+ * poste change de taille apparente, pas d'ordre de grandeur).
  */
-const CAM_DIVE_PAST_GLASS = 2.5;
 
 /**
  * How tightly the sheet's flatness chases the entrance's scrub (workReveal.form), as
@@ -309,6 +364,7 @@ const state: FormState = {
   time: 0,
   wave: 0,
   spin: 0,
+  spinPosed: 0,
   tableauOn: 0,
   dive: 0,
   camZ: CAM_REST.z,
@@ -610,10 +666,61 @@ export function advanceFormClock(
   // la plongée ne commence, ou pendant qu'elle retombe en sortie de Work — voir `dressed` au-
   // dessus), donc `state.camZ/X/Y` valent alors `entranceZ/X/Y` AU BIT PRÈS : l'identité
   // arithmétique que confine() garantit déjà se recompose sans rien perdre.
-  const t = smoothstep(0, CAM_DIVE_ARRIVE, state.dive);
-  state.camZ = confine(entranceZ, tubeMouth.frontZ - CAM_DIVE_PAST_GLASS, t);
-  state.camX = confine(entranceX, tubeMouth.cx, t);
-  state.camY = confine(entranceY, tubeMouth.cy, t);
+  const dv = posteTweak.get();
+  const t = smoothstep(0, dv.diveArrive, state.dive);
+  // `divePast` est en DEMI-LARGEURS DE BOUCHE, pas en unités monde — voir posteTweak. La
+  // bouche est la fenêtre échantillonnée (PixelTunnel), donc sa taille monde suit le cadrage
+  // ET `Fenêtre` : la caméra reste à la même profondeur RELATIVE dans le corridor quoi qu'on
+  // règle, au lieu d'atterrir loin derrière son seuil dès que la bouche rétrécit.
+  const mouthHw = tubeMouth.hw * 2 * tubeHole().half;
+  state.camZ = confine(entranceZ, tubeMouth.frontZ - dv.divePast * mouthHw, t);
+  /*
+   * `tubeMouth.holeX/holeY`, PAS `tubeMouth.cx/cy` — LE CHANGEMENT DE CETTE TÂCHE. La
+   * caméra de plongée zoome sur une LETTRE (la contreforme du « a » de « rabbit », voir
+   * tubeHole.ts), pas sur le centre géométrique du rectangle-écran : sur le poste réel, le
+   * texte du terminal n'est pas centré (il part du coin haut-gauche, voir posteTweak), donc
+   * viser `cx/cy` pointait la caméra à côté de la lettre que le tunnel de pixels (PixelTunnel)
+   * s'apprête à faire traverser — les deux DOIVENT viser le même point, sans quoi la caméra
+   * regarderait l'axe du corridor de travers plutôt que droit dans son fond. `t` (ci-dessus)
+   * fait de ce visage une transition progressive de l'entrée jusqu'à l'arrivée du corridor,
+   * pas un saut : à `dive` petit, l'écart entre viser cx/cy et viser holeX/holeY est encore
+   * faible (t petit), et il grandit précisément tandis que le poste s'éteint (voir
+   * DIVE_FADE_START/END dans ChromeTableau) — la caméra achève de se désaxer du centre de
+   * l'écran à peu près quand il n'y a plus d'écran à regarder de face pour s'en apercevoir.
+   */
+  // …ET LE RECENTRAGE SUR UNE AUTRE COURBE QUE `t` — voir `aimFrom`/`aimBy` dans posteTweak.
+  // Sur la distance au verre, pas sur `dive` : il doit être FINI avant que la lettre ne
+  // grossisse, sinon le retard restant se divise par une distance qui tend vers zéro.
+  // La rampe part de LA POSE D'ENTRÉE, pas d'une distance absolue : `tAim` vaut donc
+  // exactement 0 tant que la plongée n'a pas commencé (camZ = entranceZ), donc le poste est
+  // cadré comme Theatre le dit, centré sur lui-même et pas sur la lettre.
+  const tanHalfCam = Math.tan((state.camFov * Math.PI) / 360);
+  const xEntry = screenFill(entranceZ, 0.1, tanHalfCam);
+  const tAim =
+    1 - smoothstep(dv.aimBy, Math.max(xEntry, dv.aimBy + 1e-3), screenFill(state.camZ, 0.1, tanHalfCam));
+  /*
+   * LA COURBE EST DÉFINIE SUR L'ÉCART PROJETÉ, PAS SUR LA POSITION MONDE — et c'est ce qui
+   * supprime le coude. Interpoler camX/camY linéairement vers la lettre donnait une dérive
+   * latérale qui S'ARRÊTE (à `aimBy`) alors que la poussée en Z continue : un virage puis une
+   * ligne droite.
+   *
+   * `shrink` est la profondeur restante en fraction de celle de l'entrée. Le facteur
+   * `(1 − tAim) · shrink` rend l'écart ANGULAIRE de la lettre exactement proportionnel à
+   * (1 − tAim) — la profondeur s'annule dans le rapport écart/distance — donc la lettre
+   * GLISSE vers le centre de l'image suivant un smoothstep pur, sans à-coup ni arrêt, et le
+   * chemin de la caméra dans le monde est courbe puisque la profondeur, elle, ne décroît pas
+   * linéairement.
+   *
+   * Écrit comme un `u` passé à `confine` plutôt qu'en calculant les positions à la main :
+   * u = 0 à l'entrée (tAim = 0, shrink = 1) et u = 1 une fois recentré, donc les deux
+   * identités que `confine` garantit — camX/camY valent EXACTEMENT entranceX/Y hors de la
+   * plongée — se recomposent sans perdre un bit.
+   */
+  const depthEntry = Math.max(entranceZ - tubeMouth.frontZ, 1e-4);
+  const shrink = Math.max(state.camZ - tubeMouth.frontZ, 0) / depthEntry;
+  const uAim = Math.max(0, Math.min(1, 1 - (1 - tAim) * shrink));
+  state.camX = confine(entranceX, tubeMouth.holeX, uAim);
+  state.camY = confine(entranceY, tubeMouth.holeY, uAim);
   // NOTE the hover's step forward is NOT here. It used to multiply this scale, which is the
   // whole form's — so pointing at one project's name grew every picture in the gallery,
   // neighbours included. It belongs to the slot being read, and it is applied there (uGrow in
@@ -672,6 +779,9 @@ export function advanceFormClock(
   // rests on multiples of 2π (and snaps there), so the settled work is exactly
   // face-on and the picture a true rectangle.
   state.spin = free + (faced - free) * md.flat + turn * md.flat;
+  // …que le poste ne performe PAS : le même angle sans la révolution de la page. Voir
+  // `spinPosed` dans FormState pour le pourquoi, et ChromeTableau pour le seul lecteur.
+  state.spinPosed = free + (faced - free) * md.flat;
 }
 
 export const formState = (): Readonly<FormState> => state;

@@ -11,8 +11,14 @@ import { ENV_INTENSITY, ENV_ROT_Y } from "./formField";
  * cycle qui manquait la dernière fois, où le dépouillement s'est fait à la main.
  *
  * CES VALEURS SONT LA SOURCE DE VÉRITÉ tant que le panneau vit : ChromeTableau ne garde
- * plus ses propres TV_FILL / scrMin / scrMax, il les lit ici. Deux copies auraient
- * dérivé l'une de l'autre au premier réglage oublié.
+ * plus ses propres TV_FILL / scrMin / scrMax / DIVE_FADE_START/END, formClock ses
+ * CAM_DIVE_ARRIVE / CAM_DIVE_PAST_GLASS, ni tubeHole son WINDOW_CHARS — tous les lisent
+ * ici. Deux copies auraient dérivé l'une de l'autre au premier réglage oublié.
+ *
+ * LE STORE EST DONC LU PAR QUATRE FICHIERS ET DEUX SHADERS, ce qui est justement ce qui le
+ * rend utile sur la plongée : `diveArrive` gouverne à la fois l'arrêt de la caméra
+ * (formClock) et le départ de l'arc de luminosité du corridor (PixelTunnel) — deux nombres
+ * qui ÉTAIENT le même 0.5 écrit deux fois, dans deux fichiers, dont un en GLSL.
  *
  * Lu IMPÉRATIVEMENT une fois par frame (`posteTweak.get()`), jamais par un hook dans la
  * scène : aucune de ces molettes ne change de géométrie ni de graphe React, donc aucune
@@ -138,6 +144,126 @@ export type PosteTweak = {
   scrW: number;
   scrH: number;
 
+  /* ---- L'ENTRÉE : où l'on rentre dans le poste --------------------------- */
+  /**
+   * QUI CHOISIT L'ENDROIT OÙ L'ON RENTRE : la MESURE ou la MAIN.
+   *
+   * true (le défaut, et ce qu'on veut cuire si rien ne cloche) — tubeHole.ts trouve la
+   * contreforme du « a » de « rabbit » en mesurant la police réellement peinte (voir son
+   * en-tête). Le trou SUIT alors `textX`/`textY`/`textSize` : retoucher la frappe le
+   * déplace tout seul, ce qu'aucune coordonnée écrite à la main ne peut faire.
+   *
+   * false — `aimX`/`aimY` ci-dessous, en pixels du canvas, prennent la place du calcul.
+   * Pour viser autre chose que ce « a » (une autre lettre, un coin de l'écran) ou pour
+   * corriger ce que la mesure du glyphe n'a pas su viser.
+   *
+   * Le panneau affiche les coordonnées du point EFFECTIF dans les deux modes — donc on peut
+   * lire où la mesure a visé, et basculer sur « point » repart exactement de là, sans saut.
+   */
+  aimAuto: boolean;
+  /**
+   * LE POINT VISÉ, en pixels du canvas 512×384 — x vers la DROITE, y vers le BAS (les
+   * conventions du canvas, qui porte flipY = false, comme `textX`/`textY`). Ignorés si
+   * `aimAuto`.
+   *
+   * CE POINT EST VISÉ PAR DEUX CHOSES À LA FOIS : la caméra de plongée (formClock aligne
+   * camX/camY sur `tubeMouth.holeX/holeY`, la conversion en monde de ce point) et l'axe du
+   * corridor (PixelTunnel y centre son cône). Les deux lisent le MÊME point — c'est ce qui
+   * garantit qu'on ne peut pas régler l'un et regarder l'autre de travers.
+   */
+  aimX: number;
+  aimY: number;
+  /**
+   * WINDOW_CHARS — la largeur de la fenêtre de prélèvement autour du trou, en multiples de
+   * l'avance d'un caractère. Combien de lettres voisines forment les parois du corridor :
+   * voir tubeHole.ts, qui explique pourquoi 2 (une tranche de « r » et de « b ») plutôt
+   * qu'une lettre entière de plus.
+   */
+  holeWin: number;
+
+  /* ---- LA PLONGÉE : quand et de combien la caméra entre ------------------ */
+  /**
+   * CAM_DIVE_ARRIVE — LE MOMENT. La part de la plongée (0..1) que la caméra passe à
+   * AVANCER ; au-delà elle est arrivée et ne bouge plus, seul le corridor défile (voir le
+   * grand commentaire de formClock sur les deux phases). C'est donc le nombre qui dit
+   * QUAND on passe du zoom au plan de tube.
+   *
+   * L'arc de luminosité du corridor repart de ce même point (PixelTunnel, uArrive) : les
+   * deux ne peuvent pas se désaccorder puisqu'ils lisent cette molette-ci.
+   */
+  diveArrive: number;
+  /**
+   * CAM_DIVE_PAST_GLASS — LA DISTANCE. De combien la caméra dépasse le front du verre une
+   * fois arrivée, en DEMI-LARGEURS DE LA BOUCHE du corridor (et non en unités monde, ce
+   * qu'elle était : voir plus bas).
+   *
+   * Le défaut 7 place la caméra à une profondeur LOCALE de 7 × REF_HW ≈ 5.9 (REF_HW = 0.84
+   * dans PixelTunnel) — plus loin que le seuil Z0 = 2.2 que cette constante visait quand la
+   * bouche faisait tout l'écran, ET C'EST OBLIGATOIRE depuis qu'elle est calée sur la fenêtre.
+   * Le corridor est auto-similaire le long de son axe (recyclage géométrique), donc s'enfoncer
+   * plus loin n'y change rien À UNE EXCEPTION PRÈS : le plan proche de la caméra est à 0.1
+   * MONDE, une distance qui ne rétrécit pas avec le corridor. À une profondeur locale de 2.5,
+   * les premières tranches tombaient DANS ce plan proche — mesuré au navigateur, un écran noir
+   * sans erreur. Le corridor n'est pas plus loin, il est vu d'aussi près : seul le plan de
+   * coupe est dégagé. L'exprimer dans l'unité de la bouche la rend invariante :
+   * elle suit le cadrage, le viewport ET `Fenêtre`, alors qu'un nombre monde devait être
+   * recalibré à chaque fois que l'échelle du corridor changeait. À revoir si COLS ou CELL
+   * bougent dans PixelTunnel, puisque REF_HW en dépend.
+   *
+   * TROP PETIT, ELLE S'ARRÊTE AU BORD DU SEUIL plutôt que dedans : elle doit atterrir un
+   * peu APRÈS la première tranche du corridor (Z0 dans PixelTunnel, en unités LOCALES —
+   * voir le commentaire de la constante dans formClock pour le taux de change entre les
+   * deux repères, qui suit le viewport). C'est la molette à bouger si le plan de tube
+   * s'ouvre sur un mur ou sur une croix géante au lieu d'un corridor.
+   */
+  divePast: number;
+  /**
+   * LE FONDU CROISÉ POSTE ↔ TUNNEL, en « écrans » de distance restante jusqu'au verre (voir
+   * `screenFill` dans tubeMouth) : 1 = l'écran remplit tout juste la hauteur du cadre, 0 = on
+   * touche le verre. Le poste s'éteint et le corridor s'allume sur LA MÊME fenêtre, donc les
+   * deux plans se superposent pendant tout le croisement.
+   *
+   * `crossIn` doit rester PETIT : c'est là que le basculement commence, et le geste demande
+   * qu'il n'arrive qu'une fois collé à l'écran, la lettre énorme, juste avant de passer à
+   * travers. `crossOut` doit rester > 0 — à 0 le poste est encore là quand le plan proche
+   * franchit le verre, et on voit l'intérieur du boîtier (matériaux en DoubleSide).
+   */
+  crossIn: number;
+  crossOut: number;
+  /**
+   * LA NAISSANCE DU CORRIDOR — son intensité À L'INSTANT du croisement, en fraction de son
+   * intensité normale, puis `birthSpan` (en écrans, au-delà du verre) pour y monter.
+   *
+   * Sans ça il naissait à 1 : le poste s'effaçait pendant que le corridor arrivait à pleine
+   * puissance, et le croisement se lisait comme un flash au lieu d'un relais. Un corridor qui
+   * s'allume EN entrant dedans est aussi ce que la matière raconte — le phosphore répond à la
+   * traversée, il ne l'attend pas.
+   *
+   * Se compose avec l'arc de luminosité qui existe déjà plus loin dans la plongée (PEAK dans
+   * PixelTunnel, qui monte puis retombe au noir) : celui-ci gouverne les premiers instants,
+   * celui-là la traversée.
+   */
+  birthDim: number;
+  birthSpan: number;
+  /**
+   * LE RECENTRAGE SUR LA LETTRE : la distance au verre, en « écrans » (même unité que
+   * `crossIn`/`crossOut`), à laquelle il doit être TERMINÉ. Il commence à la pose d'entrée —
+   * pas à une distance réglable de plus : ancrée sur l'entrée, la rampe vaut exactement 0
+   * tant que la plongée n'a pas commencé, donc le poste s'ouvre CENTRÉ SUR LUI-MÊME et
+   * dérive vers la lettre seulement en approchant. Une borne de départ absolue ne pouvait pas
+   * tenir cette promesse : dès que la pose d'entrée passait sous elle, la caméra visait déjà
+   * la lettre à l'arrivée dans Work.
+   *
+   * IL DOIT SE TERMINER LOIN, et c'est tout l'enjeu de ces deux nombres. L'écart au centre
+   * de l'image est un écart MONDE divisé par la distance à la lettre : un retard de marche
+   * qui passe inaperçu de loin explose en fin d'approche, quand le diviseur tend vers zéro.
+   * Une marche calée sur `diveArrive` (ce qui était le cas) ne finissait qu'APRÈS la
+   * traversée du verre — donc la lettre dérivait vers un bord pendant toute la partie où
+   * elle est grosse. Fini à `aimBy` écrans, la caméra est déjà sur l'axe de la lettre avant
+   * que celle-ci ne remplisse le cadre, et le plongeon se fait droit dedans.
+   */
+  aimBy: number;
+
   /* ---- Le texte dans le canvas du tube ---------------------------------- */
   /**
    * Où l'invite est peinte dans le canvas 512×384, en pixels depuis le coin HAUT
@@ -188,6 +314,15 @@ export type PosteTweak = {
  * le jour où la constante bouge là-bas, le panneau s'ouvre sur la bonne valeur au lieu de
  * mentir.
  *
+ * L'ENTRÉE ET LA PLONGÉE (aimAuto…crossOut) SONT LES VALEURS DE LA SOURCE, PAS D'UN RÉGLAGE :
+ * ce sont les constantes que ces molettes remplacent, recopiées à l'identique le jour où
+ * elles sont devenues réglables — 0/0 pour le décalage du trou (donc le trou MESURÉ par
+ * tubeHole, intact), et les nombres calculés de formClock (CAM_DIVE_ARRIVE,
+ * CAM_DIVE_PAST_GLASS) et de tubeHole (WINDOW_CHARS) pour les autres. `crossIn`/`crossOut`
+ * sont les seuls nombres NEUFS : ils remplacent DIVE_FADE_START/END, qui réglaient la même
+ * chose sur un `dive` brut au lieu de la distance au verre. Ouvrir le panneau ne change donc rien à l'image tant
+ * qu'on n'a pas traîné une barre.
+ *
  * TOUT LE RESTE VIENT D'UNE SESSION DE RÉGLAGE (2026-08-05), pas de la mesure d'origine.
  *
  * L'écran : le rectangle relevé sur capture était min (-2.464, -0.303) / max (1.254,
@@ -195,6 +330,11 @@ export type PosteTweak = {
  * min (-2.373, 0.513) / max (-0.223, 2.355), soit centre (-1.298, 1.434) et 2.150 × 1.842
  * ici. Le texte suit : descendu à y = 30, corps 31 px, et un halo poussé à 22.5 — trois
  * fois celui d'origine, un phosphore qui bave franchement dans le verre.
+ *
+ * LE CADRAGE : `fill` descendu de 0.5 à 0.42 (réglé à la molette, en passant par 0.32 —
+ * trop petit sur un écran de bureau). Ce n'est pas neutre pour la plongée : le rectangle du
+ * tube, et avec lui `tubeMouth.frontZ`, rétrécit d'autant ; voir la note de
+ * DIVE_FADE_START/END dans ChromeTableau.
  *
  * LA PEAU A CHANGÉ DE RÉGIME. sRGB (donc le décodage que GLTFLoader posait de lui-même),
  * teinte grise à 0.734 de net (#c2c2c2 × gain 1.36), saturation tombée à 0.36 et vernis
@@ -214,11 +354,25 @@ const DEFAULTS: Omit<PosteTweak, "textNonce" | "replayNonce"> = {
   skinTint: "#c2c2c2",
   skinSat: 0.36,
   skinGain: 1.36,
-  fill: 0.5,
+  fill: 0.42,
   scrX: -1.298,
   scrY: 1.434,
   scrW: 2.15,
   scrH: 1.842,
+  aimAuto: true,
+  // Le centre du canvas — jamais utilisé tant que `aimAuto` tient, et remplacé par le point
+  // mesuré à la seconde où on bascule (voir le panneau) : ces deux nombres ne sont un défaut
+  // que pour le premier rendu, pas une visée que quelqu'un aurait choisie.
+  aimX: 256,
+  aimY: 192,
+  holeWin: 2,
+  diveArrive: 0.5,
+  divePast: 7,
+  crossIn: 0.13,
+  crossOut: 0.08,
+  birthDim: 0.4,
+  birthSpan: 1,
+  aimBy: 2,
   textX: 26,
   textY: 30,
   textSize: 31,
@@ -362,7 +516,42 @@ export function posteTweakAsSource(): string {
     `const TV_FILL = ${n(s.fill, 3)};`,
     `const scrMin = new Vector2(${n(s.scrX - s.scrW / 2)}, ${n(s.scrY - s.scrH / 2)});`,
     `const scrMax = new Vector2(${n(s.scrX + s.scrW / 2)}, ${n(s.scrY + s.scrH / 2)});`,
-    `// le pinceau du tube (screen.draw)`,
+    `const BIRTH_DIM = ${n(s.birthDim, 2)};`,
+    `const BIRTH_SPAN = ${n(s.birthSpan, 2)};`,
+    `const CROSS_IN = ${n(s.crossIn, 3)};`,
+    `const CROSS_OUT = ${n(s.crossOut, 3)};`,
+    `const AIM_BY = ${n(s.aimBy, 2)};`,
+    ...(s.crossOut <= 0
+      ? [
+          `// ⚠ CROSS_OUT EST À 0 : le poste est encore rendu quand le plan proche franchit le`,
+          `// verre, donc on voit l'intérieur du boîtier (DoubleSide). Remonter avant de cuire.`,
+        ]
+      : []),
+    ``,
+    `// src/lib/formClock.ts`,
+    `const CAM_DIVE_ARRIVE = ${n(s.diveArrive, 3)};`,
+    `const CAM_DIVE_PAST_GLASS = ${n(s.divePast, 3)};`,
+    ...(s.diveArrive === DEFAULTS.diveArrive
+      ? []
+      : [
+          `// …et dans PixelTunnel.tsx, l'arc de luminosité repart de ce même point (uArrive).`,
+          `// Le laisser en uniforme, ou recuire le "0.5" du fragment AVEC celui-ci — jamais l'un`,
+          `// sans l'autre, c'est le désaccord que cette molette existe pour rendre impossible.`,
+        ]),
+    ``,
+    `// src/lib/tubeHole.ts`,
+    `const WINDOW_CHARS = ${n(s.holeWin, 2)};`,
+    ...(s.aimAuto
+      ? [`// (visée AUTO : le « a » mesuré est resté le bon point — rien à cuire, measure() suffit.)`]
+      : [
+          `// ⚠ VISÉE MANUELLE — le point ci-dessous REMPLACE la mesure du glyphe, donc le trou ne`,
+          `// suivra plus textX/textY/textSize. Avant de cuire ça : vérifier que c'est bien voulu`,
+          `// (viser une autre lettre se fait mieux par WORD/LETTER_OFFSET, qui reste mesuré).`,
+          `const AIM_X = ${Math.round(s.aimX)};`,
+          `const AIM_Y = ${Math.round(s.aimY)};`,
+        ]),
+    ``,
+    `// src/lib/tubeScreen.ts — le pinceau du tube (screen.draw)`,
     `x.font = "600 ${Math.round(s.textSize)}px ui-monospace, SFMono-Regular, Menlo, monospace";`,
     `x.shadowBlur = ${n(s.textGlow, 1)};`,
     `x.fillText(txt, ${Math.round(s.textX)}, ${Math.round(s.textY)});`,

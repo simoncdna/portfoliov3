@@ -1,13 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
-import {
-  POSTE_ENVS,
-  posteTweak,
-  posteTweakAsSource,
-  usePosteTweak,
-  type PosteEnv,
-} from "@/lib/posteTweak";
+import { useEffect, useRef, useState } from "react";
+import { posteTweak, posteTweakAsSource, usePosteTweak } from "@/lib/posteTweak";
+import { tubeHole } from "@/lib/tubeHole";
+import { formState } from "@/lib/formClock";
+import { screenFill, tubeMouth } from "@/lib/tubeMouth";
+
+/** Le canvas du tube (voir tubeScreen.ts) — les deux barres de visée parlent en pixels de
+ *  cette grille, comme les molettes de TEXTE juste au-dessus d'elles. */
+const CANVAS_W = 512;
+const CANVAS_H = 384;
 
 /**
  * DEV PANEL — la scène du poste, réglée en direct. Un outil, pas une fonctionnalité :
@@ -100,81 +102,65 @@ function Head({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * Le choix d'environnement. Une grille de pastilles et non un <select> : on compare des
- * éclairages en faisant des allers-retours entre deux d'entre eux, ce qu'une liste
- * déroulante rend pénible (ouvrir, viser, fermer) alors que deux pastilles côte à côte se
- * font au clic. « local » est distingué — c'est le seul que la prod sert.
+/*
+ * PAS DE PASTILLE DE COULEUR ICI — il y en a eu une (un `<input type="color">`, le même
+ * contrôle que le « Tint » du panneau blob) pour la TEINTE de la peau ; la teinte est trouvée
+ * (#c2c2c2, voir posteTweak) et sa barre est partie avec le rectangle du tube et la frappe du
+ * texte (voir le commentaire dans le corps du panneau). Si une couleur redevient un jour
+ * réglable ici, c'est ce contrôle-là qu'il faut reprendre du panneau blob : il ouvre le picker
+ * de l'OS au CLIC, donc il n'a rien du drag que les `<input type="range">` n'arrivent pas à
+ * accrocher sur ce site.
  */
-function EnvPicker({
-  value,
-  onChange,
-}: {
-  value: PosteEnv;
-  onChange: (v: PosteEnv) => void;
-}) {
+
+function Readout({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex w-[17.5rem] flex-wrap gap-1">
-      {POSTE_ENVS.map((e) => {
-        const on = e === value;
-        return (
-          <button
-            key={e}
-            type="button"
-            onClick={() => onChange(e)}
-            className="border px-[0.3rem] py-[0.1rem] font-mono text-[0.5rem] uppercase tracking-[0.1em] transition-colors"
-            style={{
-              color: on ? "var(--void)" : e === "local" ? "var(--silver)" : "var(--silver-muted)",
-              background: on ? "var(--silver-bright)" : "transparent",
-              borderColor: on ? "var(--silver-bright)" : "var(--steel)",
-            }}
-          >
-            {e}
-          </button>
-        );
-      })}
+    <div className="flex items-center gap-2">
+      <span className="w-16 shrink-0 font-mono text-[0.55rem] uppercase tracking-[0.12em] text-silver-muted">
+        {label}
+      </span>
+      <span className="w-40 shrink-0 font-mono text-[0.55rem] tabular-nums text-silver">{value}</span>
     </div>
   );
 }
 
 /**
- * Une pastille de couleur. `<input type="color">` — le MÊME contrôle que le « Tint » du
- * panneau blob, et le seul choix de couleur prouvé sur ce site : il ouvre le picker de
- * l'OS au CLIC, il n'a donc rien du drag que les <input type="range"> n'arrivaient pas à
- * accrocher ici. Le bouton à côté ramène au neutre sans passer par le picker, parce que
- * retrouver le blanc exact dans une roue chromatique est pénible.
+ * L'état vivant de la plongée, échantillonné à ~8 Hz (pas par frame : ce panneau se
+ * re-rendrait 60 fois par seconde pour quatre nombres). `near` = 0.1, le défaut d'une
+ * PerspectiveCamera three.js, le même que lit ChromeTableau.
  */
-function Swatch({
-  label,
-  value,
-  neutral,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  neutral: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 font-mono text-[0.55rem] uppercase tracking-[0.12em] text-silver">
-        {label}
-      </span>
-      <input
-        type="color"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-5 w-40 border border-steel bg-transparent p-0"
-      />
-      <button
-        type="button"
-        onClick={() => onChange(neutral)}
-        className="w-11 shrink-0 text-right font-mono text-[0.55rem] text-silver-muted transition-colors hover:text-chrome"
-      >
-        {value.toLowerCase() === neutral ? "neutre" : "×"}
-      </button>
-    </div>
-  );
+function useDiveLive() {
+  const [live, setLive] = useState({ x: 0, y: 0, z: 0, fov: 0, ecr: 0, dx: 0, dy: 0, through: false });
+  useEffect(() => {
+    let raf = 0;
+    let last = 0;
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      if (now - last < 125) return;
+      last = now;
+      const s = formState();
+      const tanHalf = Math.tan((s.camFov * Math.PI) / 360);
+      const depth = s.camZ - tubeMouth.frontZ;
+      const aspect = window.innerWidth / window.innerHeight;
+      // Pas de lookAt dans cette scène : la projection d'un point se réduit à son écart en
+      // x/y à la caméra, divisé par la profondeur — d'où le centre du viewport quand l'écart
+      // est nul, ce que la plongée vise par construction.
+      const ndcX = (tubeMouth.holeX - s.camX) / Math.max(depth * tanHalf * aspect, 1e-6);
+      const ndcY = (tubeMouth.holeY - s.camY) / Math.max(depth * tanHalf, 1e-6);
+      setLive({
+        x: s.camX,
+        y: s.camY,
+        z: s.camZ,
+        fov: s.camFov,
+        ecr: screenFill(s.camZ, 0.1, tanHalf),
+        dx: (ndcX / 2) * window.innerWidth,
+        dy: (-ndcY / 2) * window.innerHeight,
+        through: depth <= 0,
+      });
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return live;
 }
 
 function Toggle({
@@ -214,6 +200,23 @@ export function PosteDevPanel() {
   const t = usePosteTweak();
   const [open, setOpen] = useState(true);
   const [copied, setCopied] = useState(false);
+
+  /*
+   * LE POINT D'ENTRÉE EFFECTIF, EN PIXELS DU CANVAS — lu chez tubeHole, le MÊME calcul que la
+   * scène, jamais une seconde copie de la formule ici (voir tubeMouth.ts sur ce qu'une
+   * deuxième dérivation coûte). C'est ce qui permet aux deux barres de VISÉE d'afficher où la
+   * mesure a visé quand personne ne l'a remplacée, au lieu de n'afficher que ce qu'on y a
+   * tapé.
+   *
+   * Appelé au rendu, sans mémo : le rendu ne se produit qu'au changement du store
+   * (`usePosteTweak`) et tubeHole garde son propre cache sur exactement ces clés-là — donc
+   * l'appel est une comparaison de chaîne tant que rien de pertinent n'a bougé. Sans danger
+   * côté serveur : ce composant est monté en `ssr: false` (voir PosteDevPanelMount), qui
+   * existe précisément parce qu'il touche `document`.
+   */
+  const hole = tubeHole();
+  const aimPx = { x: hole.u * CANVAS_W, y: hole.v * CANVAS_H };
+  const live = useDiveLive();
 
   const copy = async () => {
     try {
@@ -261,94 +264,6 @@ export function PosteDevPanel() {
             </button>
           </div>
 
-          <Head>hdri — scène</Head>
-          <EnvPicker value={t.env} onChange={(v) => posteTweak.set({ env: v })} />
-          <Row
-            label="Intensité"
-            value={t.envInt}
-            min={0}
-            max={8}
-            step={0.05}
-            onChange={(v) => posteTweak.set({ envInt: v })}
-          />
-          <Row
-            label="Rotation"
-            value={t.envRot}
-            min={0}
-            max={Math.PI * 2}
-            step={0.02}
-            fmt={(v) => `${Math.round((v * 180) / Math.PI)}°`}
-            onChange={(v) => posteTweak.set({ envRot: v })}
-          />
-          {/*
-            LE DÉCAPAGE VIT SOUS L'HDRI, et pas dans une section « matière » à lui : c'est
-            la molette sans laquelle les deux du dessus ne se voient pas (à décapage plein,
-            le shader jette le chrome et l'environnement avec). On la lit donc comme
-            l'interrupteur des deux précédentes, pas comme un réglage indépendant.
-          */}
-          <Toggle
-            label="Décapage"
-            on={!t.revealAuto}
-            onLabel="figé"
-            offLabel="auto (horloge)"
-            onChange={(v) => posteTweak.set({ revealAuto: !v })}
-          />
-          {!t.revealAuto && (
-            <Row
-              label="↳ chrome"
-              value={t.reveal}
-              min={0}
-              max={1}
-              step={0.01}
-              fmt={(v) => (v === 0 ? "chrome" : v === 1 ? "peau" : v.toFixed(2))}
-              onChange={(v) => posteTweak.set({ reveal: v })}
-            />
-          )}
-
-          {/*
-            LA PEAU — ce qui touche la COULEUR du glb, une fois le chrome retiré. L'HDRI
-            n'entre pas ici : à décapage plein le shader jette le chrome, donc rien de
-            l'environnement n'atteint la peau. Ces trois-là, si.
-          */}
-          <Head>peau du glb</Head>
-          <Toggle
-            label="Espace"
-            on={t.skinSrgb}
-            onLabel="sRGB"
-            offLabel="linéaire (source)"
-            onChange={(v) => posteTweak.set({ skinSrgb: v })}
-          />
-          <Swatch
-            label="Teinte"
-            value={t.skinTint}
-            neutral="#ffffff"
-            onChange={(v) => posteTweak.set({ skinTint: v })}
-          />
-          <Row
-            label="Saturation"
-            value={t.skinSat}
-            min={0}
-            max={2}
-            step={0.01}
-            onChange={(v) => posteTweak.set({ skinSat: v })}
-          />
-          <Row
-            label="Gain"
-            value={t.skinGain}
-            min={0}
-            max={2}
-            step={0.01}
-            onChange={(v) => posteTweak.set({ skinGain: v })}
-          />
-          <Row
-            label="Vernis"
-            value={t.skinFres}
-            min={0}
-            max={2}
-            step={0.01}
-            onChange={(v) => posteTweak.set({ skinFres: v })}
-          />
-
           <Head>cadrage</Head>
           <Row
             label="Taille"
@@ -360,112 +275,160 @@ export function PosteDevPanel() {
             onChange={(v) => posteTweak.set({ fill: v })}
           />
 
-          <Head>écran (sur le verre)</Head>
+          {/*
+           * LE RECTANGLE DU TUBE (scrX/scrY/scrW/scrH) ET LA FRAPPE DU TEXTE
+           * (textX/textY/textSize/textGlow/textChar/textHold/textStack/textFull) N'ONT PLUS DE
+           * BARRES — trouvés, validés, retirés du panneau. Le geste est celui que l'en-tête
+           * annonce pour le panneau entier : une molette existe pour chercher un nombre, et
+           * s'en va quand il est trouvé. Un panneau qui garde tout ce qu'il a servi à régler
+           * finit par cacher les deux réglages en cours dans une liste de vingt.
+           *
+           * LES VALEURS, ELLES, N'ONT PAS BOUGÉ D'UN BIT : elles vivent toujours dans
+           * posteTweak (voir ses DEFAULTS et le grand commentaire de la session du 2026-08-05),
+           * qui reste la source de vérité que la scène lit — retirer une barre ne recuit rien.
+           * Le bouton « copier » continue de les cracher, donc le jour où ce panneau part en
+           * entier, il n'y a rien de plus à retrouver à la main. Pour en régler une à nouveau :
+           * remettre la barre ici, elle retrouvera le store intact.
+           */}
+          <Head>entrée (canvas 512×384)</Head>
+          {/*
+           * LA BASCULE AMORCE LA VISÉE MANUELLE AVEC LE POINT MESURÉ, elle ne la laisse pas
+           * sauter au centre : `hole` ci-dessus est le point EFFECTIF (en auto, celui du
+           * « a »), donc passer en manuel repart exactement d'où la mesure avait visé. Sans
+           * ça, un clic sur la bascule déplaçait l'entrée de tout un écran avant qu'on ait
+           * réglé quoi que ce soit — et on aurait perdu la seule information qu'on venait
+           * chercher, l'endroit que la mesure avait trouvé.
+           */}
+          <Toggle
+            label="Visée"
+            on={t.aimAuto}
+            onLabel="le « a » mesuré"
+            offLabel="un point"
+            onChange={(v) =>
+              posteTweak.set(
+                v ? { aimAuto: true } : { aimAuto: false, aimX: aimPx.x, aimY: aimPx.y }
+              )
+            }
+          />
+          {/*
+           * AFFICHÉES DANS LES DEUX MODES, et c'est le point de ces deux barres autant que le
+           * réglage : en auto elles RAPPORTENT où la mesure a visé (des coordonnées qu'on peut
+           * lire, noter, transmettre), en manuel elles la remplacent. Les barres restent
+           * traînables en auto — traîner bascule en manuel, ce qui est le geste attendu quand
+           * on empoigne une coordonnée pour la corriger.
+           */}
           <Row
-            label="Centre X"
-            value={t.scrX}
-            min={-3}
-            max={2}
-            step={0.002}
-            fmt={(v) => v.toFixed(2)}
-            onChange={(v) => posteTweak.set({ scrX: v })}
+            label="Visée X"
+            value={aimPx.x}
+            min={0}
+            max={512}
+            step={1}
+            fmt={(v) => `${Math.round(v)}px${t.aimAuto ? " ·auto" : ""}`}
+            onChange={(v) => posteTweak.set({ aimAuto: false, aimY: aimPx.y, aimX: v })}
           />
           <Row
-            label="Centre Y"
-            value={t.scrY}
-            min={-1}
-            max={3.5}
-            step={0.002}
-            fmt={(v) => v.toFixed(2)}
-            onChange={(v) => posteTweak.set({ scrY: v })}
+            label="Visée Y"
+            value={aimPx.y}
+            min={0}
+            max={384}
+            step={1}
+            fmt={(v) => `${Math.round(v)}px${t.aimAuto ? " ·auto" : ""}`}
+            onChange={(v) => posteTweak.set({ aimAuto: false, aimX: aimPx.x, aimY: v })}
           />
           <Row
-            label="Largeur"
-            value={t.scrW}
+            label="Fenêtre"
+            value={t.holeWin}
             min={0.5}
             max={6}
-            step={0.002}
-            fmt={(v) => v.toFixed(2)}
-            onChange={(v) => posteTweak.set({ scrW: v })}
-          />
-          <Row
-            label="Hauteur"
-            value={t.scrH}
-            min={0.5}
-            max={6}
-            step={0.002}
-            fmt={(v) => v.toFixed(2)}
-            onChange={(v) => posteTweak.set({ scrH: v })}
+            step={0.1}
+            fmt={(v) => `${v.toFixed(1)} car.`}
+            onChange={(v) => posteTweak.set({ holeWin: v })}
           />
 
-          <Head>texte (canvas 512×384)</Head>
+          <Head>plongée</Head>
           <Row
-            label="Texte X"
-            value={t.textX}
+            label="Moment"
+            value={t.diveArrive}
+            min={0.15}
+            max={0.9}
+            step={0.01}
+            fmt={(v) => v.toFixed(2)}
+            onChange={(v) => posteTweak.set({ diveArrive: v })}
+          />
+          <Row
+            label="Distance"
+            value={t.divePast}
             min={0}
-            max={480}
-            step={1}
-            fmt={(v) => `${Math.round(v)}`}
-            onChange={(v) => posteTweak.set({ textX: v })}
+            max={12}
+            step={0.02}
+            fmt={(v) => `${v.toFixed(2)} bch.`}
+            onChange={(v) => posteTweak.set({ divePast: v })}
           />
           <Row
-            label="Texte Y"
-            value={t.textY}
-            min={0}
-            max={350}
-            step={1}
-            fmt={(v) => `${Math.round(v)}`}
-            onChange={(v) => posteTweak.set({ textY: v })}
+            label="Croise à"
+            value={t.crossIn}
+            min={0.1}
+            max={3}
+            step={0.02}
+            fmt={(v) => `${v.toFixed(2)} écr.`}
+            onChange={(v) =>
+              posteTweak.set({ crossIn: v, crossOut: Math.min(t.crossOut, v - 0.05) })
+            }
           />
           <Row
-            label="Corps"
-            value={t.textSize}
-            min={8}
-            max={96}
-            step={1}
-            fmt={(v) => `${Math.round(v)}px`}
-            onChange={(v) => posteTweak.set({ textSize: v })}
+            label="Fini à"
+            value={t.crossOut}
+            min={0.05}
+            max={1.5}
+            step={0.01}
+            fmt={(v) => `${v.toFixed(2)} écr.`}
+            onChange={(v) =>
+              posteTweak.set({ crossOut: v, crossIn: Math.max(t.crossIn, v + 0.05) })
+            }
+          />
+
+          <Row
+            label="Naissance"
+            value={t.birthDim}
+            min={0.05}
+            max={1}
+            step={0.01}
+            fmt={(v) => v.toFixed(2)}
+            onChange={(v) => posteTweak.set({ birthDim: v })}
           />
           <Row
-            label="Halo"
-            value={t.textGlow}
-            min={0}
-            max={30}
-            step={0.5}
-            fmt={(v) => v.toFixed(1)}
-            onChange={(v) => posteTweak.set({ textGlow: v })}
-          />
-          <Row
-            label="Frappe"
-            value={t.textChar}
-            min={0.01}
-            max={0.2}
-            step={0.005}
-            fmt={(v) => `${Math.round(v * 1000)}ms`}
-            onChange={(v) => posteTweak.set({ textChar: v })}
-          />
-          <Row
-            label="Pause"
-            value={t.textHold}
-            min={0}
+            label="Monte sur"
+            value={t.birthSpan}
+            min={0.2}
             max={4}
             step={0.05}
-            fmt={(v) => `${v.toFixed(2)}s`}
-            onChange={(v) => posteTweak.set({ textHold: v })}
+            fmt={(v) => `${v.toFixed(2)} écr.`}
+            onChange={(v) => posteTweak.set({ birthSpan: v })}
           />
-          <Toggle
-            label="Lignes"
-            on={t.textStack}
-            onLabel="empilées"
-            offLabel="effacées"
-            onChange={(v) => posteTweak.set({ textStack: v })}
+          <Row
+            label="Recentré"
+            value={t.aimBy}
+            min={0.5}
+            max={6}
+            step={0.1}
+            fmt={(v) => `${v.toFixed(1)} écr.`}
+            onChange={(v) => posteTweak.set({ aimBy: v })}
           />
-          <Toggle
-            label="État"
-            on={t.textFull}
-            onLabel="état final"
-            offLabel="séquence"
-            onChange={(v) => posteTweak.set({ textFull: v })}
+
+          <Head>en direct</Head>
+          <Readout
+            label="Caméra"
+            value={`x ${live.x.toFixed(2)}  y ${live.y.toFixed(2)}  z ${live.z.toFixed(2)}`}
+          />
+          <Readout label="Fov" value={`${live.fov.toFixed(1)}°`} />
+          <Readout label="Verre" value={`${live.ecr.toFixed(2)} écr.`} />
+          <Readout
+            label="Lettre"
+            value={
+              live.through
+                ? "traversée"
+                : `${live.dx >= 0 ? "+" : ""}${Math.round(live.dx)}, ${live.dy >= 0 ? "+" : ""}${Math.round(live.dy)} px`
+            }
           />
 
           <div className="mt-1 flex items-center gap-4">

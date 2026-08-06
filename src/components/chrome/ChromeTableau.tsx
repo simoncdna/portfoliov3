@@ -32,7 +32,9 @@ import { posteTweak, usePosteEnv, usePosteSkinSrgb } from "@/lib/posteTweak";
 import { CAM_REST, formState } from "@/lib/formClock";
 import { sequenceAt, sequenceDuration, type SequenceState } from "@/lib/tubeSequence";
 import { tubeGate } from "@/lib/tubeGate";
-import { tubeMouth } from "@/lib/tubeMouth";
+import { tubeHole } from "@/lib/tubeHole";
+import { TV_LINES } from "@/lib/tubeLines";
+import { screenFill, tubeMouth, tunnelCross } from "@/lib/tubeMouth";
 import { tubeScreen } from "@/lib/tubeScreen";
 import { works } from "@/data/site";
 
@@ -120,13 +122,26 @@ const SCR_H = PLATE_H + LINER_W + 2 * FRAME_W;
  * (0.14) a été essayée et écartée : elle entamait le poste alors qu'il grossissait encore,
  * ce que la table du plan ne demande pas.
  *
+ * CE ≈ 2.22 A ÉTÉ MESURÉ À pt.fill = 0.5 ; le cadrage cuit vaut maintenant 0.42, donc
+ * frontZ est plus petit. Le sens de l'écart est favorable : en résolvant le même croisement
+ * avec un frontZ plus petit, la dérivée du `dive` de croisement par rapport à frontZ vaut
+ * −(near + CAM_DIVE_PAST_GLASS)/(…)² < 0 — rapetisser le poste RETARDE le croisement et
+ * élargit donc la marge. La borne tient ; c'est en REMONTANT fill qu'il faut re-mesurer.
+ *
  * SI CAM_DIVE_ARRIVE OU CAM_DIVE_PAST_GLASS CHANGENT DANS formClock.ts, OU SI Z0 CHANGE DANS
  * PixelTunnel.tsx (qui contraint CAM_DIVE_PAST_GLASS, voir son commentaire), CE MARGIN DOIT
  * ÊTRE REVÉRIFIÉ — elle n'est pas recalculée automatiquement, elle a été vérifiée une fois
  * pour les valeurs actuelles des trois fichiers.
  */
-const DIVE_FADE_START = 0.2;
-const DIVE_FADE_END = 0.3;
+/*
+ * CES DEUX-LÀ ONT DÉMÉNAGÉ DANS posteTweak (`fadeStart`, `fadeEnd`), avec le cadrage et les
+ * deux nombres de la plongée — le useFrame plus bas les lit là. Tout ce qui précède reste
+ * VRAI et reste la raison d'être de leurs valeurs : la borne haute de la barre du panneau
+ * encode la marge calculée ci-dessus, et le bouton « copier » avertit explicitement dès que
+ * `fadeEnd` a été monté au-dessus de son 0.30 vérifié. Une molette ne dispense pas de
+ * revérifier le croisement au navigateur avant de cuire — elle rend seulement le réglage
+ * possible sans recompiler.
+ */
 
 /*
  * LA SÉQUENCE DU TERMINAL. Le poste apparaît, le curseur clignote À VIDE — l'attente est
@@ -134,26 +149,18 @@ const DIVE_FADE_END = 0.3;
  * puis les phrases se FRAPPENT l'une après l'autre, curseur en bout de ligne, et l'invite
  * reste à clignoter sur la dernière.
  *
- * TROIS PHRASES, PAS UNE, et la dernière est un état de repos choisi : « Follow the white
- * rabbit. » est une invitation, ce qui est exactement ce qu'une section de projets doit
- * laisser à l'écran quand le lecteur arrive dessus. La séquence ne boucle donc pas — elle
- * se pose.
- *
  * La cadence de frappe est CONSTANTE, et c'est voulu : un texte reçu par un terminal
  * arrive au rythme de la ligne, pas au rythme d'une main — la frappe humaine irrégulière
  * aurait demandé du hasard, et le hasard par frame est interdit ici (deux lectures du
  * même instant doivent dessiner la même image).
  *
- * EXPORTÉE depuis PixelTunnel : le tunnel doit peindre le MÊME canvas, avec le MÊME
- * contenu — tubeScreen(lines) n'utilise `lines` qu'à son tout premier appel (voir ce
- * fichier). Une copie locale dans PixelTunnel, même identique aujourd'hui, dériverait
- * silencieusement de celle-ci au premier mot changé ; et si PixelTunnel se montait un
- * jour avant ce composant, une copie DIFFÉRENTE y gagnerait la course et s'imprimerait
- * dans le canvas pour de bon, sans erreur. Partager la même constante rend le résultat
- * correct quel que soit l'ordre de montage, plutôt que de dépendre d'une garantie
- * d'ordre de rendu de React qu'aucun des deux fichiers ne vérifie.
+ * TV_LINES A DÉMÉNAGÉ dans src/lib/tubeLines.ts (voir ce fichier pour le texte lui-même et
+ * pour pourquoi) — depuis que tubeHole.ts est devenu un TROISIÈME lecteur de cette même
+ * constante (pour y chercher le « a » de « rabbit »), et que CE fichier doit lire tubeHole
+ * (pour publier tubeMouth.holeX/holeY, voir le useFrame plus bas) : garder TV_LINES ici
+ * aurait fermé un cycle ChromeTableau → tubeHole → ChromeTableau. Toujours importée par
+ * PixelTunnel, désormais depuis ce même fichier neutre plutôt que d'ici.
  */
-export const TV_LINES = ["wake up...", "The matrix has you.", "Follow the white rabbit."];
 /** L'attente au curseur nu, secondes — presque trois clignotements. */
 const TYPE_IDLE = 1.5;
 /** La demi-période du clignotement (530 ms allumé, 530 ms éteint — le battement VT). */
@@ -333,6 +340,11 @@ uniform float uGlow;
 uniform float uTube;
 uniform vec2 uScrMin;
 uniform vec2 uScrMax;
+// 0 = le tube vu de loin (halo plein, l'image validee), 1 = vu de tres pres, ou le phosphore
+// se resout : le halo s'efface et la loi superlineaire du corridor prend le relais. Sans ca la
+// contreforme du << a >> reste bouchee dans cette scene alors que le corridor l'ouvre, et les
+// deux plans du fondu ne montrent pas la meme lettre.
+uniform float uPixel;
 varying vec3 vNrm;
 varying vec3 vWPos;
 varying vec2 vUv;
@@ -441,10 +453,18 @@ void main(){
      */
     vec2 tuv = vec2(suv.x, 1.0 - suv.y) + vFormN.xy * vec2(0.10, -0.10);
     vec3 lit = texture2D(uScreen, tuv).rgb;
+    // Les quatre taps sont a ~3 px du canvas et le bol du << a >> en fait 4 : de pres, cette
+    // halation le remplit a elle seule. Elle s'eteint donc avec uPixel.
     lit += (texture2D(uScreen, tuv + vec2(0.006, 0.0)).rgb +
             texture2D(uScreen, tuv - vec2(0.006, 0.0)).rgb +
             texture2D(uScreen, tuv + vec2(0.0, 0.008)).rgb +
-            texture2D(uScreen, tuv - vec2(0.0, 0.008)).rgb) * 0.22;
+            texture2D(uScreen, tuv - vec2(0.0, 0.008)).rgb) * 0.22 * (1.0 - uPixel);
+    // …et la loi du corridor (voir BLOOM_P dans PixelTunnel) ecrase les demi-teintes que le
+    // halo CUIT dans le canvas laisse dans la contreforme : mesure 67 sur 211, soit un gris a
+    // 31 %, qui tombe a 6 % une fois la courbe appliquee. Dosee par uPixel, donc le plan large
+    // garde exactement l'image reglee.
+    float litLuma = min(1.0, dot(lit, vec3(0.2126, 0.7152, 0.0722)));
+    lit *= mix(1.0, pow(litLuma, 1.4), uPixel);
     float scan = 0.85 + 0.15 * sin(tuv.y * 220.0 * 3.14159);
     vec2 sc = suv * 2.0 - 1.0;
     float vig = 1.0 - 0.30 * dot(sc, sc);
@@ -791,13 +811,6 @@ export function ChromeTableau({ reduced }: Props) {
   const modeVis = useRef(0);
   const colScratch = useMemo(() => new Color(), []);
   const frameBox = useRef({ w: 0, h: 0, cx: 0 });
-  /**
-   * LA ROTATION APPLIQUÉE, tenue à part de `s.spin` — voir son useFrame pour le
-   * pourquoi : `s.spin` appartient au blob (le crâne et le liquide le lisent tel
-   * quel, et doivent continuer à le faire), le poste n'en garde qu'une part qui
-   * DÉCROÎT à mesure qu'il se forme.
-   */
-  const heldSpin = useRef(0);
 
   const canvasGeo = useMemo(() => buildCanvas(), []);
 
@@ -820,9 +833,10 @@ export function ChromeTableau({ reduced }: Props) {
    * src/lib/tubeScreen.ts, avec toute la justification (canvas 2D et non géométrie de texte,
    * discipline de repeinture, résolution) : le tunnel de pixels (à venir) doit peindre et lire
    * EXACTEMENT le même canvas que ce tube, donc ce n'est plus une ressource qu'un seul
-   * composant possède. `TV_LINES` — la constante qui vit dans CE fichier — tient lieu de
-   * `lines` ; tubeScreen ne consulte cet argument qu'à sa toute première invocation (voir son
-   * commentaire pour la précondition que ça impose).
+   * composant possède. `TV_LINES` (src/lib/tubeLines.ts — voir ce fichier pour pourquoi ce
+   * n'est plus une constante DE ce fichier) tient lieu de `lines` ; tubeScreen ne consulte
+   * cet argument qu'à sa toute première invocation (voir son commentaire pour la
+   * précondition que ça impose).
    */
   const screen = useMemo(() => tubeScreen(TV_LINES), []);
   /**
@@ -1016,6 +1030,7 @@ export function ChromeTableau({ reduced }: Props) {
       uGlow: { value: 0 },
       uScrMin: { value: scrMin },
       uScrMax: { value: scrMax },
+      uPixel: { value: 0 },
       uEnv: { value: null as Texture | null },
       uEnvInt: { value: ENV_INTENSITY },
       uEnvRot: { value: ENV_ROT_Y },
@@ -1131,11 +1146,18 @@ export function ChromeTableau({ reduced }: Props) {
     // sphere disguise, takes the stage from there. It TRAVELS as that sphere (the dock
     // below is the clock's), and only unrolls where the roll-out scrub says so.
     const workOn = reduced ? (s.tableauOn > 0.5 ? 1 : 0) : s.tableauOn;
-    // LA PLONGÉE ÉTEINT LE POSTE — voir DIVE_FADE_START/END et l'invariant du fondu
-    // ci-dessus. `on` en découle (comme du reste des facteurs de `fade`), donc au-delà de
-    // DIVE_FADE_END ce mesh n'est même plus rendu (`g.visible = false`) : double
-    // protection, alpha ET présence, pas seulement l'une des deux.
-    const diveFade = 1 - smoothstep(DIVE_FADE_START, DIVE_FADE_END, s.dive);
+    // LE FONDU CROISÉ — sur la distance restante jusqu'au verre, pas sur `dive` (voir
+    // `crossIn`/`crossOut` dans posteTweak et `screenFill` dans tubeMouth). PixelTunnel lit la
+    // MÊME fonction pour s'allumer, donc les deux plans se croisent sur une seule fenêtre.
+    const diveFade =
+      1 -
+      tunnelCross(
+        camera.position.z,
+        camera.near,
+        Math.tan((s.camFov * Math.PI) / 360),
+        pt.crossIn,
+        pt.crossOut
+      );
     const fade = (reduced ? 1 : appear.current) * modeVis.current * workOn * diveFade;
     const on = fade > 0.004;
     g.visible = on;
@@ -1220,6 +1242,37 @@ export function ChromeTableau({ reduced }: Props) {
     tubeMouth.hw = s.scale * k * (pt.scrW / 2);
     tubeMouth.hh = s.scale * k * (pt.scrH / 2);
     tubeMouth.frontZ = s.scale * k * tvExt.glassZ;
+
+    /*
+     * …ET LE CENTRE MONDE DE LA CONTREFORME DU « a » — voir tubeMouth.ts pour le pourquoi
+     * (« PAS le centre du rectangle-écran »). `hole.u/v` est un point dans le canvas
+     * (0..1, voir tubeHole.ts) ; converti en monde par la MÊME relation affine que le
+     * vertex shader de PixelTunnel applique à `aCell` (cellRef = (aCell − 0.5) · étendue) —
+     * u=0.5/v=0.5 (le centre du canvas) doit redonner tubeMouth.cx/cy EXACTEMENT, ce que
+     * ce calcul fait bien puisque (0.5 − 0.5) = 0 des deux côtés. Le Y EST INVERSÉ (0.5 − v,
+     * pas v − 0.5) pour la raison déjà commentée dans PixelTunnel : v croît vers le BAS du
+     * canvas (flipY=false, tubeScreen.ts) tandis que Y monde croît vers le HAUT — un « a »
+     * peint près du haut du canvas (v petit) doit se retrouver près du HAUT du rectangle
+     * (Y monde grand), pas l'inverse.
+     */
+    const hole = tubeHole();
+    /*
+     * LA CORRECTION DU TIRAGE — le texte PEINT n'est pas là où la relation affine le dit. Le
+     * fragment du tube déplace l'UV de `vFormN.xy · vec2(0.10, -0.10)` pour coudre le phosphore
+     * au relief du verre (voir son commentaire) : jusqu'à 0.10 UV, soit ~38 px de canvas. La
+     * visée tombait donc à côté du bol du « a » — mesuré au navigateur en centrant ce bol dans
+     * le viewport, +2.4 px en u et +7.7 px en v.
+     *
+     * ELLE VIT ICI ET PAS DANS tubeHole, ET C'EST LE POINT : tubeHole rend le point du CANVAS,
+     * ce dont PixelTunnel a besoin pour prélever la bonne région (son shader mappe `aCell` sans
+     * aucun tirage). Le tirage n'existe que sur le verre, donc il ne concerne que le passage en
+     * MONDE — la caméra et la position du corridor. Corriger tubeHole aurait décalé le
+     * prélèvement du corridor d'autant, en sens inverse du défaut qu'on répare.
+     */
+    const dragU = 2.4 / 512;
+    const dragV = 7.7 / 384;
+    tubeMouth.holeX = tubeMouth.cx + (hole.u + dragU - 0.5) * 2 * tubeMouth.hw;
+    tubeMouth.holeY = tubeMouth.cy + (0.5 - hole.v - dragV) * 2 * tubeMouth.hh;
 
     /*
      * LE VERROU DE SORTIE. uTv seul ne suffit pas : à la sortie de Work, md.flat
@@ -1348,6 +1401,19 @@ export function ChromeTableau({ reduced }: Props) {
       screen.draw(line, chars, cursorOn);
     }
 
+    /*
+     * LE PHOSPHORE SE RÉSOUT EN APPROCHANT — 0 loin (l'image réglée), 1 au moment du fondu.
+     * Bornes reprises de `aimBy` et `crossIn` plutôt qu'une paire de plus : « loin » est là où
+     * le recentrage est fini, « près » est l'instant où le corridor prend le relais.
+     */
+    const pixel =
+      1 -
+      smoothstep(
+        pt.crossIn,
+        Math.max(pt.aimBy, pt.crossIn + 1e-3),
+        screenFill(camera.position.z, camera.near, Math.tan((s.camFov * Math.PI) / 360))
+      );
+
     const setShared = (m: ShaderMaterial) => {
       const u = m.uniforms;
       u.uTime.value = s.time;
@@ -1424,6 +1490,7 @@ export function ChromeTableau({ reduced }: Props) {
       u.uSkinGain.value = pt.skinGain;
       (u.uScrMin.value as Vector2).set(pt.scrX - pt.scrW / 2, pt.scrY - pt.scrH / 2);
       (u.uScrMax.value as Vector2).set(pt.scrX + pt.scrW / 2, pt.scrY + pt.scrH / 2);
+      u.uPixel.value = pixel;
       u.uEnv.value = envMap;
       (u.uCamPos.value as Vector3).copy(camera.position);
       colScratch.set(tw.color);
@@ -1456,40 +1523,31 @@ export function ChromeTableau({ reduced }: Props) {
 
     g.position.set(s.dockX, s.dockY, 0);
     /*
-     * LA ROTATION S'ÉTEINT À MESURE QUE LE POSTE SE FORME — pas d'un coup, et pas dans
-     * formClock (qui reste inchangé : le crâne et le liquide continuent de lire
-     * `s.spin` brut, comme avant).
+     * L'ANGLE DU POSTE EST PUBLIÉ PAR L'HORLOGE, pas rattrapé ici — `s.spinPosed`, le
+     * plateau sans le tour de page (voir son commentaire dans formClock pour le geste
+     * dont le poste n'a plus l'usage). `s.spin` reste brut pour le crâne et le liquide.
      *
-     * `s.spin` PORTE DEUX CHOSES qui n'intéressent que le crâne/liquide : la dérive
-     * d'ambiance (`drift`, freinée mais jamais nulle) ET LE TOUR DE PAGE — chaque
-     * changement d'œuvre ajoute exactement 2π à `turnTarget`, un geste hérité de
-     * l'ancienne plaque photo (« la page tourne pour présenter le prochain tirage »).
-     * Le poste n'a plus de tirage à présenter (uPhotoOn = 0), mais `state.spin`
-     * continue d'inclure `turn · md.flat` que le poste soit posé ou pas.
+     * CE FUT UNE CHASSE LOCALE, et elle est morte de ne pas atterrir. `heldSpin` suivait
+     * `s.spin` à une vitesse qui retombait à zéro avec (1 − md.flat) : le raisonnement
+     * était qu'à md.flat = 1 le facteur nul gèlerait l'angle sur un multiple de 2π « par
+     * construction de state.spin ». Ce que la construction garantit, c'est l'angle de
+     * L'HORLOGE — pas celui d'un suiveur EN RETARD. Le facteur de chasse s'éteignant
+     * pendant que `s.spin` marchait encore vers `faced`, le gel tombait sur le résidu du
+     * retard, qui dépend de la VITESSE de l'approche.
      *
-     * MESURÉ : poste posé (md.flat = 1), immobile, sans scroller — `s.spin` ne bouge
-     * pas d'un bit sur 6 s (18.8495559… constant), donc la dérive d'ambiance est déjà
-     * bien freinée par le mécanisme existant (`frz = max(holdEased, md.flat)` dans
-     * formClock). En revanche, en scrollant jusqu'à un CHANGEMENT D'ŒUVRE une fois
-     * posé, `s.spin` saute d'environ 2π sur quelques centaines de ms (mesuré : +4.8 puis
-     * +5.1 rad sur deux changements consécutifs, soit le tour de page en vol) — le
-     * poste tournait donc bel et bien sur lui-même à chaque œuvre, sans plus rien à
-     * montrer en tournant.
+     * MESURÉ AU NAVIGATEUR (deux approches de Work, viewport de bureau) : `md.flat` valait
+     * exactement 1 et `s.spin` exactement 4π puis 8π — l'horloge présentait donc bien le
+     * poste de face — pendant que l'objet à l'écran était de TROIS QUARTS, et des deux
+     * côtés selon l'approche (saut de scroll instantané : flanc gauche du moniteur visible ;
+     * approche progressive sur ~3 s : flanc droit). Un angle non reproductible, jamais
+     * celui que l'horloge annonçait.
      *
-     * Le correctif vit ICI plutôt que dans formClock (qui reste la même horloge pour
-     * toutes les sections) : `heldSpin` chasse `s.spin` à une vitesse qui retombe à
-     * zéro avec (1 − md.flat). À md.flat = 0 (encore un blob) elle vaut `s.spin` EXACTEMENT
-     * chaque frame — aucune latence, la dérive du blob n'est pas amputée pendant qu'il
-     * en est un. À md.flat = 1 (posé) le facteur de chasse est nul : `heldSpin` reste
-     * figé à l'angle qu'il tenait à cet instant-là — un multiple de 2π par construction
-     * de `state.spin` (voir `faced` dans formClock), donc un poste FACE À LA CAMÉRA,
-     * pas figé de travers — et aucun tour de page ultérieur ne le fait plus bouger.
-     * Entre les deux, la sensibilité décroît avec md.flat : la rotation s'éteint
-     * progressivement, elle n'est pas coupée au dernier centile comme `alive` (qui
-     * répond à une question différente : la vivacité du CHAMP, pas l'angle de l'OBJET).
+     * `s.spinPosed` n'a pas de retard à résorber : ses deux bouts sont exacts par
+     * construction (`free` au blob, `faced` au poste posé) et les tours de page ultérieurs
+     * n'y entrent pas. LE RECTANGLE DU TUBE EN DÉPEND AUSSI — sa publication plus haut
+     * suppose une rotation identité, ce que seul un multiple exact de 2π rend vrai.
      */
-    heldSpin.current += (s.spin - heldSpin.current) * (1 - s.mood.flat);
-    g.rotation.set(0, heldSpin.current, 0);
+    g.rotation.set(0, s.spinPosed, 0);
     g.scale.setScalar(s.scale);
 
     // The DOM's hit link, published from here now — the field goes dark in Work and

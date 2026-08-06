@@ -59,6 +59,9 @@ export function SmoothScroll({ children }: { children: React.ReactNode }) {
     // plate numbers): while Lenis runs, it is the only thing allowed to write the
     // scroll position — see pageScroll.
     setPageScroller(lenis);
+    // TEMPORAIRE — hublot de test pour la tâche du tunnel, à retirer avant la fin.
+    if (process.env.NODE_ENV === "development")
+      (window as unknown as Record<string, unknown>).__lenis = lenis;
 
     // Single clock: drive Lenis from GSAP's ticker so Lenis, ScrollTrigger and
     // every scrubbed animation share the exact same frame → no desync.

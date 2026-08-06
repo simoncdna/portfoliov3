@@ -1,5 +1,7 @@
 "use client";
 
+import { smoothstep } from "./formChoreo";
+
 /**
  * LE RECTANGLE-MONDE DE L'ÉCRAN — le pont entre ChromeTableau (le seul à connaître tvExt,
  * mesuré sur le glb, et `k`, le facteur de cadrage vivant) et ses deux lecteurs de T6 :
@@ -43,4 +45,42 @@ export const tubeMouth = {
    * ChromeTableau (DIVE_FADE_END).
    */
   frontZ: 0,
+  /**
+   * LE CENTRE MONDE DE LA CONTREFORME DU « a » (voir tubeHole.ts) — PAS le centre du
+   * rectangle-écran (cx/cy). Le tunnel est l'intérieur d'une lettre, pas un corridor
+   * générique posé au milieu de l'écran : la caméra de plongée (formClock, CAM_DIVE_ARRIVE)
+   * vise CE point, et le corridor de pixels (PixelTunnel) centre l'axe de son cône dessus —
+   * les deux doivent s'accorder, sans quoi la caméra regarderait le tunnel de travers.
+   *
+   * CALCULÉ ICI (dans le useFrame de ChromeTableau, juste après cx/cy/hw/hh) et pas dans
+   * chacun des deux lecteurs séparément, pour la même raison que cx/cy/hw/hh eux-mêmes :
+   * un seul endroit connaît tous les ingrédients (le rectangle-écran ET tubeHole, la
+   * position UV du trou dans le canvas) — les recalculer deux fois avec la même formule
+   * dériverait au premier des deux fichiers dont la copie change.
+   */
+  holeX: 0,
+  holeY: 0,
 };
+
+/**
+ * LA DISTANCE QUI RESTE JUSQU'AU VERRE, EN « ÉCRANS » : 1 = l'écran du poste remplit
+ * exactement la hauteur du cadre, 0 = le plan proche de la caméra touche le verre, négatif =
+ * on est passé à travers. C'est la grandeur dans laquelle le fondu poste ↔ tunnel est réglé,
+ * plutôt qu'un `dive` brut : elle dit « à quel point on est collé à l'écran », donc elle
+ * garde le même sens quel que soit le viewport, la pose d'entrée de Theatre ou le cadrage.
+ */
+export function screenFill(camZ: number, near: number, tanHalfFov: number): number {
+  const fill = Math.max(tubeMouth.hh, 1e-4) / Math.max(tanHalfFov, 1e-4);
+  return (camZ - near - tubeMouth.frontZ) / fill;
+}
+
+/** 0 = le poste seul, 1 = le tunnel seul. Entre les deux, les deux plans sont dessinés. */
+export function tunnelCross(
+  camZ: number,
+  near: number,
+  tanHalfFov: number,
+  xIn: number,
+  xOut: number
+): number {
+  return 1 - smoothstep(xOut, xIn, screenFill(camZ, near, tanHalfFov));
+}
