@@ -171,8 +171,24 @@ export function formChoreo(
   // more SCROLL inside the same range — so pres falls quickly to the top of the
   // window and then crawls through it, giving the cross-fade about a fifth of the
   // exit beat rather than the sliver it got when pres ran linearly to zero.
-  const fall = smoothstep(0.35, 0.8, x); // 1 → the top of the handover window
-  const cross = smoothstep(0.8, 1.0, x); // …then through it, slowly
+  /*
+   * RÉALIGNÉ SUR LA FENÊTRE OÙ LE POSTE ARRIVE — le crâne était encore un crâne quand
+   * l'ordinateur entrait en scène, et ça se voyait.
+   *
+   * L'arithmétique : le poste est revendiqué par smoothstep(0.55, 0.85, exit) dans
+   * formClock. Avec l'ancien fall = smoothstep(0.35, 0.8, x), `pres` valait encore ≈0,65
+   * à x = 0,55 — donc le poste montait sur scène pendant que le crâne était à 65 % un
+   * crâne, alors que le commentaire ci-dessous dit précisément que le fondu ne peut se
+   * cacher que dans la plage étroite 0,16 → 0,02. Les deux fenêtres étaient décalées
+   * d'un quart de la sortie.
+   *
+   * C'est la FONTE qu'on avance, pas la revendication : déplacer celle-ci rouvrirait le
+   * trou où le raymarcher se rallume à pleine facture d'écran (voir le long commentaire
+   * de `claim` dans formClock). Ainsi le crâne atteint le haut de la fenêtre (pres 0,16)
+   * exactement quand le poste commence à apparaître, et la traverse pendant qu'il monte.
+   */
+  const fall = smoothstep(0.2, 0.55, x); // 1 → the top of the handover window
+  const cross = smoothstep(0.55, 0.85, x); // …then through it, slowly
   const pres = a * ((1 - fall) * (1 - HANDOVER_OUT) + HANDOVER_OUT * (1 - cross));
   return {
     pres,
