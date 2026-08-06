@@ -2,6 +2,7 @@
 
 import { CanvasTexture } from "three";
 import { posteTweak } from "./posteTweak";
+import { sentenceStart, type TubeLine } from "./tubeLines";
 
 /**
  * LE CANVAS DU TUBE, sorti de ChromeTableau parce qu'il a maintenant DEUX consommateurs : le
@@ -67,7 +68,7 @@ type Screen = { tex: CanvasTexture; draw: (line: number, chars: number, cursorOn
  */
 let screen: Screen | null = null;
 
-export function tubeScreen(lines: readonly string[]): Screen {
+export function tubeScreen(lines: readonly TubeLine[]): Screen {
   /*
    * SINGLETON PARESSEUX, ET `lines` N'EST CONSULTÉ QU'AU PREMIER APPEL — tout appelant suivant
    * reçoit le canvas déjà peint, quels que soient les mots qu'il passe. Ce n'est PAS un oubli :
@@ -117,10 +118,20 @@ export function tubeScreen(lines: readonly string[]): Screen {
     // un vrai terminal. Sinon chacune EFFACE la précédente — le geste du film, où chaque
     // message est seul sur un écran noir. Les deux se lisent, d'où la molette.
     const step = pt.textSize * LINE_STEP;
-    const first = pt.textStack ? 0 : line;
+    // `textStack` garde TOUT à l'écran ; sinon le bloc dessiné est la PHRASE courante — de son
+    // invite jusqu'à la ligne en cours — donc une phrase habillée sur deux lignes s'affiche et
+    // s'efface d'un bloc, et la suivante remplace la précédente (voir sentenceStart).
+    const first = pt.textStack ? 0 : sentenceStart(line);
     for (let i = first; i <= line; i++) {
       // Seule la ligne COURANTE est tronquée ; celles d'avant sont entières.
-      const txt = "> " + (i === line ? lines[i].slice(0, Math.max(0, chars)) : lines[i]);
+      // L'INVITE VIENT DE LA DONNÉE, pas d'une règle sur l'index : il y a deux phrases, chacune
+      // habillée sur deux lignes, donc l'invite revient à la troisième (voir tubeLines). Les
+      // lignes de continuation portent deux espaces, ce qui aligne leur texte sous la première —
+      // et tubeHole reconstruit ce MÊME préfixe pour mesurer, donc les deux ne peuvent pas
+      // diverger.
+      const pre = lines[i].prompt ? "> " : "  ";
+      const body = lines[i].text;
+      const txt = pre + (i === line ? body.slice(0, Math.max(0, chars)) : body);
       const y = pt.textY + (i - first) * step;
       x.fillText(txt, pt.textX, y);
       // Le curseur, ce qui fait la différence entre du texte et un terminal — il SUIT la

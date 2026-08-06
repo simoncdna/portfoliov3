@@ -696,8 +696,12 @@ export function advanceFormClock(
   // cadré comme Theatre le dit, centré sur lui-même et pas sur la lettre.
   const tanHalfCam = Math.tan((state.camFov * Math.PI) / 360);
   const xEntry = screenFill(entranceZ, 0.1, tanHalfCam);
+  // Le départ de la rampe est le PLUS PROCHE de `aimFrom` et de l'entrée : la caméra tient donc
+  // l'ordinateur au centre le temps du plan large, et si l'entrée est déjà plus près que `aimFrom`
+  // la rampe repart d'elle — elle vaut 0 au départ dans les deux cas (voir posteTweak).
+  const xStart = Math.min(dv.aimFrom, xEntry);
   const tAim =
-    1 - smoothstep(dv.aimBy, Math.max(xEntry, dv.aimBy + 1e-3), screenFill(state.camZ, 0.1, tanHalfCam));
+    1 - smoothstep(dv.aimBy, Math.max(xStart, dv.aimBy + 1e-3), screenFill(state.camZ, 0.1, tanHalfCam));
   /*
    * LA COURBE EST DÉFINIE SUR L'ÉCART PROJETÉ, PAS SUR LA POSITION MONDE — et c'est ce qui
    * supprime le coude. Interpoler camX/camY linéairement vers la lettre donnait une dérive

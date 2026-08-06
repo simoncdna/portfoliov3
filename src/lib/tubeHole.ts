@@ -2,7 +2,7 @@
 
 import { posteTweak } from "./posteTweak";
 import { LINE_STEP } from "./tubeScreen";
-import { TV_LINES } from "./tubeLines";
+import { sentenceStart, TV_LINES } from "./tubeLines";
 import { letterIndex } from "./letterTarget";
 
 /**
@@ -26,15 +26,20 @@ import { letterIndex } from "./letterTarget";
  * l'OS) et le fait que « a » n'a ni hampe ni jambage : sa boîte d'encre est plus basse et
  * plus courte que la ligne entière.
  *
- * LE BIAIS VERTICAL (HOLE_Y_BIAS) EST LA SEULE CONSTANTE RÉGLÉE, ET ELLE A ÉTÉ VÉRIFIÉE
- * CONTRE UN RENDU RÉEL, pas choisie au jugé : ce glyphe est un « a » à deux étages (un petit
- * œil sous la panse, une grande boucle basse) — recréé dans un canvas hors-page avec le
- * même dégradé (shadowBlur=22.5, la valeur de production) et zoomé, le milieu géométrique de
- * la boîte d'encre (fraction 0.5) tombe sur la barre qui SÉPARE les deux compartiments, pas
- * dans un trou ; la fraction 0.68 (un peu sous ce milieu, proche de la ligne de base) tombe
- * au centre de la boucle basse — largement le plus grand des deux trous, et celui qui lit
- * comme LE trou une fois le halo de phosphore appliqué (le petit œil du haut s'y fond
- * presque entièrement). Voir le rapport de tâche pour les captures prises à chaque étape.
+ * LE BIAIS VERTICAL (HOLE_Y_BIAS) EST LA SEULE CONSTANTE RÉGLÉE, ET ELLE A ÉTÉ MESURÉE SUR LE
+ * GLYPHE RÉEL, pas choisie au jugé : le canvas a été recréé hors-page avec la police, le corps
+ * et le halo de production, puis la colonne centrale du « o » relevée pixel par pixel. Elle
+ * donne un anneau dont l'intérieur tombe à 57 de luminance contre 211 sur le trait, sur 4 px de
+ * large et les fractions 0.25 à 0.65 de la boîte d'encre — d'où 0.45, le milieu de ce creux, au
+ * corps de 22 px et un halo de 16. (Mesuré aussi à 28 px — creux de 8 px à 41 — et à 14 px —
+ * 2 px à 67 : le creux suit le corps, mais le BIAIS non, c'est une propriété du dessin de la
+ * lettre. Ces deux corps ont été écartés, voir tubeLines.)
+ *
+ * (Le glyphe visé était le « a » de « rabbit », à deux étages : son biais valait 0.68, sous le
+ * milieu géométrique, parce que la fraction 0.5 tombait sur la barre séparant les deux
+ * compartiments. Un « o » n'a qu'un seul trou, centré — d'où un biais proche de 0.5, et plus
+ * aucune correction horizontale : le « o » est symétrique sur son avance, là où la panse du
+ * « a » était décalée vers la gauche par le fût.)
  *
  * REPLI SUR LE CENTRE DE L'ÉCRAN (u=v=0.5) SI « rabbit » DISPARAÎT DE LA DERNIÈRE PHRASE —
  * pas un crash, pas un NaN qui plante le vertex shader sans message (voir l'avertissement de
@@ -58,12 +63,12 @@ export type TubeHole = {
 };
 
 /** Le mot dont on vise une lettre — voir l'en-tête du fichier. */
-const WORD = "rabbit";
-/** Le « a » est le 2ᵉ caractère de « rabbit » (r-a-b-b-i-t), donc l'offset 1. */
-const LETTER_OFFSET = 1;
+const WORD = "network";
+/** Le « o » est le 5ᵉ caractère de « network » (n-e-t-w-o-r-k), donc l'offset 4. */
+const LETTER_OFFSET = 4;
 
 /** Voir « LE BIAIS VERTICAL » dans l'en-tête du fichier. */
-const HOLE_Y_BIAS = 0.68;
+const HOLE_Y_BIAS = 0.45;
 
 /*
  * WINDOW_CHARS A DÉMÉNAGÉ DANS posteTweak (`holeWin`), avec le décalage du trou — même
@@ -110,12 +115,17 @@ function clamp01(px: number, span: number): number {
 
 function measure(): TubeHole {
   const pt = posteTweak.get();
-  const line = TV_LINES[TV_LINES.length - 1];
+  // LA LIGNE QUI CONTIENT LE MOT, cherchée et non supposée la dernière : l'habillage peut
+  // déplacer « network » d'une ligne à l'autre au premier mot changé dans la phrase, et une
+  // supposition fausse ici retomberait sur le repli silencieux (le centre de l'écran).
+  const lineIdx = TV_LINES.findIndex((l) => letterIndex(l.text, WORD, LETTER_OFFSET) >= 0);
+  const last = TV_LINES[Math.max(0, lineIdx)];
+  const line = last.text;
   const ctx = measureCtx();
   ctx.font = `600 ${pt.textSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
   ctx.textBaseline = "top";
 
-  const idx = letterIndex(line, WORD, LETTER_OFFSET);
+  const idx = lineIdx < 0 ? -1 : letterIndex(line, WORD, LETTER_OFFSET);
   if (idx < 0) {
     // LE MOT A DISPARU DE LA PHRASE — et la réponse dépend de qui visait. En AUTO il n'y a
     // plus rien à mesurer : repli documenté sur le centre de l'écran (voir FALLBACK). En
@@ -131,18 +141,21 @@ function measure(): TubeHole {
     };
   }
 
-  // La ligne réellement peinte est "> " + la phrase — voir tubeScreen.draw. Et SA position
+  const first = pt.textStack ? 0 : sentenceStart(lineIdx);
+  const y = pt.textY + (lineIdx - first) * pt.textSize * LINE_STEP;
+  // La ligne réellement peinte est préfixée — voir tubeScreen.draw. Et SA position
   // Y suit la même formule que draw() (pas juste `pt.textY`) : si `textStack` est vrai, la
   // dernière phrase est poussée sous les précédentes plutôt qu'à `textY` pile. Cette
   // branche n'est visitée qu'au panneau dev (le défaut est `textStack: false`), mais la
   // dupliquer correctement coûte trois lignes et évite un trou qui dérive de l'écran dès
   // qu'on touche cette molette-là.
-  const lineIdx = TV_LINES.length - 1;
-  const first = pt.textStack ? 0 : lineIdx;
-  const y = pt.textY + (lineIdx - first) * pt.textSize * LINE_STEP;
 
-  const prefix = "> " + line.slice(0, idx);
-  const through = "> " + line.slice(0, idx + 1);
+  // LE MÊME PRÉFIXE QUE draw() : l'invite « > » n'est que sur la première ligne, les suivantes
+  // portent deux espaces (voir tubeScreen et tubeLines). Se tromper ici décalerait la cible de
+  // la largeur d'un caractère, sans rien signaler.
+  const pad = last.prompt ? "> " : "  ";
+  const prefix = pad + line.slice(0, idx);
+  const through = pad + line.slice(0, idx + 1);
   const leftPx = pt.textX + ctx.measureText(prefix).width;
   const rightPx = pt.textX + ctx.measureText(through).width;
 

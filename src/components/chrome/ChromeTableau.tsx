@@ -33,7 +33,7 @@ import { CAM_REST, formState } from "@/lib/formClock";
 import { sequenceAt, sequenceDuration, type SequenceState } from "@/lib/tubeSequence";
 import { tubeGate } from "@/lib/tubeGate";
 import { tubeHole } from "@/lib/tubeHole";
-import { TV_LINES } from "@/lib/tubeLines";
+import { TV_LINES, TV_TEXTS } from "@/lib/tubeLines";
 import { screenFill, tubeMouth, tunnelCross } from "@/lib/tubeMouth";
 import { tubeScreen } from "@/lib/tubeScreen";
 import { works } from "@/data/site";
@@ -345,6 +345,11 @@ uniform vec2 uScrMax;
 // contreforme du << a >> reste bouchee dans cette scene alors que le corridor l'ouvre, et les
 // deux plans du fondu ne montrent pas la meme lettre.
 uniform float uPixel;
+// Les deux doses de cette resolution : la halation qui survit, et l'exposant de la courbe.
+// Reglables parce qu'une courbe ponctuelle ecrase les bords antialiases du glyphe autant que
+// la contreforme -- meme luminance, donc aucun exposant ne les separe. Voir posteTweak.
+uniform float uPixelHalo;
+uniform float uPixelGamma;
 varying vec3 vNrm;
 varying vec3 vWPos;
 varying vec2 vUv;
@@ -458,13 +463,13 @@ void main(){
     lit += (texture2D(uScreen, tuv + vec2(0.006, 0.0)).rgb +
             texture2D(uScreen, tuv - vec2(0.006, 0.0)).rgb +
             texture2D(uScreen, tuv + vec2(0.0, 0.008)).rgb +
-            texture2D(uScreen, tuv - vec2(0.0, 0.008)).rgb) * 0.22 * (1.0 - uPixel);
+            texture2D(uScreen, tuv - vec2(0.0, 0.008)).rgb) * 0.22 * mix(1.0, uPixelHalo, uPixel);
     // …et la loi du corridor (voir BLOOM_P dans PixelTunnel) ecrase les demi-teintes que le
     // halo CUIT dans le canvas laisse dans la contreforme : mesure 67 sur 211, soit un gris a
     // 31 %, qui tombe a 6 % une fois la courbe appliquee. Dosee par uPixel, donc le plan large
     // garde exactement l'image reglee.
     float litLuma = min(1.0, dot(lit, vec3(0.2126, 0.7152, 0.0722)));
-    lit *= mix(1.0, pow(litLuma, 1.4), uPixel);
+    lit *= mix(1.0, pow(litLuma, uPixelGamma), uPixel);
     float scan = 0.85 + 0.15 * sin(tuv.y * 220.0 * 3.14159);
     vec2 sc = suv * 2.0 - 1.0;
     float vig = 1.0 - 0.30 * dot(sc, sc);
@@ -811,6 +816,7 @@ export function ChromeTableau({ reduced }: Props) {
   const modeVis = useRef(0);
   const colScratch = useMemo(() => new Color(), []);
   const frameBox = useRef({ w: 0, h: 0, cx: 0 });
+  const grainOut = useRef(1);
 
   const canvasGeo = useMemo(() => buildCanvas(), []);
 
@@ -1031,6 +1037,8 @@ export function ChromeTableau({ reduced }: Props) {
       uScrMin: { value: scrMin },
       uScrMax: { value: scrMax },
       uPixel: { value: 0 },
+      uPixelHalo: { value: 1 },
+      uPixelGamma: { value: 1 },
       uEnv: { value: null as Texture | null },
       uEnvInt: { value: ENV_INTENSITY },
       uEnvRot: { value: ENV_ROT_Y },
@@ -1149,18 +1157,60 @@ export function ChromeTableau({ reduced }: Props) {
     // LE FONDU CROISÉ — sur la distance restante jusqu'au verre, pas sur `dive` (voir
     // `crossIn`/`crossOut` dans posteTweak et `screenFill` dans tubeMouth). PixelTunnel lit la
     // MÊME fonction pour s'allumer, donc les deux plans se croisent sur une seule fenêtre.
+    /*
+     * LE POSTE NE PART QU'APRÈS LE PALIER — `crossHold`, pas `crossIn`. Les deux scènes étaient
+     * pilotées par la MÊME rampe en sens inverse, donc à l'instant où on les voyait le mieux
+     * toutes les deux, aucune n'était entière. Ici le poste reste PLEIN jusqu'au palier (le temps
+     * que le corridor arrive et se superpose), et ne s'efface qu'ensuite.
+     */
     const diveFade =
       1 -
       tunnelCross(
         camera.position.z,
         camera.near,
         Math.tan((s.camFov * Math.PI) / 360),
-        pt.crossIn,
+        pt.crossHold,
         pt.crossOut
       );
     const fade = (reduced ? 1 : appear.current) * modeVis.current * workOn * diveFade;
     const on = fade > 0.004;
     g.visible = on;
+
+    /*
+     * LE GRAIN DE PAPIER S'EN VA QUAND ON ENTRE DANS L'ÉCRAN, et cette écriture est AVANT la
+     * sortie anticipée — c'est tout l'enjeu de sa position. Le grain (body::after dans
+     * globals.css, « the page's paper ») est la texture de la page ; passé le verre on n'est
+     * plus sur la page mais dans un tube cathodique, et du grain de papier par-dessus du
+     * phosphore, ce sont deux matières qui s'excluent. Or c'est PRÉCISÉMENT quand le poste
+     * cesse d'être rendu que le grain doit avoir fini de partir : écrite plus bas, la valeur
+     * restait gelée au dernier passage — mesuré, --grain bloqué à 0.85 une fois dans le
+     * corridor.
+     *
+     * Publié par variable CSS parce que le grain est du DOM, et avec la même tolérance
+     * anti-scintillement que les rectangles plus bas : `diveFade` varie en continu pendant le
+     * croisement, et réécrire un style à chaque frame invalide le style calculé pour rien.
+     */
+    /*
+     * LE GRAIN S'EN VA AVEC L'ARRIVÉE DU CORRIDOR, PAS AVEC LE DÉPART DU POSTE — et la distinction
+     * compte depuis que les deux ont leur propre rampe : le poste reste PLEIN pendant tout le
+     * palier (voir `crossHold`), donc un grain calé sur son fondu restait posé sur le corridor
+     * pendant toute la superposition. Or le corridor est du phosphore vu de l'intérieur : il n'y a
+     * pas de papier là-dedans.
+     */
+    const grain =
+      1 -
+      tunnelCross(
+        camera.position.z,
+        camera.near,
+        Math.tan((s.camFov * Math.PI) / 360),
+        pt.crossIn,
+        pt.crossHold
+      );
+    if (Math.abs(grain - grainOut.current) > 0.01 || (grain < 0.01) !== (grainOut.current < 0.01)) {
+      grainOut.current = grain;
+      document.documentElement.style.setProperty("--grain", grain.toFixed(2));
+    }
+
     if (!on) return;
 
     /*
@@ -1260,8 +1310,25 @@ export function ChromeTableau({ reduced }: Props) {
      * LA CORRECTION DU TIRAGE — le texte PEINT n'est pas là où la relation affine le dit. Le
      * fragment du tube déplace l'UV de `vFormN.xy · vec2(0.10, -0.10)` pour coudre le phosphore
      * au relief du verre (voir son commentaire) : jusqu'à 0.10 UV, soit ~38 px de canvas. La
-     * visée tombait donc à côté du bol du « a » — mesuré au navigateur en centrant ce bol dans
-     * le viewport, +2.4 px en u et +7.7 px en v.
+     * visée tombait donc à côté de la lettre visée.
+     *
+     * RE-MESURÉS POUR LA CIBLE ACTUELLE — le « o » de « network », corps 20 px, dernière ligne de
+     * la seconde phrase, rectangle du tube élargi à l'écran entier. Méthode : la caméra garée à
+     * 1.39 écran du verre (le recentrage est fini à 2, donc elle est exactement sur sa visée),
+     * les deux bandes de phosphore relevées dans le framebuffer, l'abscisse du « o » déduite de
+     * l'échelle mesurée (1.57 px écran par px de canvas) — il se projetait à (+16, −20) px du
+     * centre, soit +10.2 / −12.7 px de canvas d'erreur. D'où +12.6 et −5.0.
+     *
+     * ⚠ ILS NE SONT PLUS CUITS ICI MAIS RÉGLABLES AU PANNEAU (`dragX`/`dragY` dans posteTweak,
+     * groupe « entrée ») : leur valeur dépend de l'endroit visé sur le verre, donc tout changement
+     * de lettre, de ligne, de corps de texte ou de rectangle du tube les périme — et re-mesurer
+     * puis recompiler à chaque fois est intenable. À l'œil, la lettre se recentre en deux
+     * glissements ; le bouton « copier » crache la valeur trouvée.
+     *
+     * ⚠ CES DEUX NOMBRES SONT LIÉS À LA CIBLE ET À SA PLACE SUR LE VERRE. Le tirage vaut
+     * `vFormN.xy · 0.10` au point visé : changer de lettre, de ligne, de corps ou de rectangle le
+     * change. À re-mesurer à chaque fois — la méthode ci-dessus prend deux minutes, et les barres
+     * « Calage » du panneau permettent de finir à l'œil en attendant.
      *
      * ELLE VIT ICI ET PAS DANS tubeHole, ET C'EST LE POINT : tubeHole rend le point du CANVAS,
      * ce dont PixelTunnel a besoin pour prélever la bonne région (son shader mappe `aCell` sans
@@ -1269,8 +1336,8 @@ export function ChromeTableau({ reduced }: Props) {
      * MONDE — la caméra et la position du corridor. Corriger tubeHole aurait décalé le
      * prélèvement du corridor d'autant, en sens inverse du défaut qu'on répare.
      */
-    const dragU = 2.4 / 512;
-    const dragV = 7.7 / 384;
+    const dragU = pt.dragX / 512;
+    const dragV = pt.dragY / 384;
     tubeMouth.holeX = tubeMouth.cx + (hole.u + dragU - 0.5) * 2 * tubeMouth.hw;
     tubeMouth.holeY = tubeMouth.cy + (0.5 - hole.v - dragV) * 2 * tubeMouth.hh;
 
@@ -1321,11 +1388,22 @@ export function ChromeTableau({ reduced }: Props) {
     // construire séparément marcherait tout aussi bien aujourd'hui, mais laisserait la
     // porte ouverte à ce que l'un des deux dérive de l'autre au premier réglage du
     // panneau touché d'un seul côté.
-    const cadence = { idle: TYPE_IDLE, char: pt.textChar, hold: pt.textHold };
+    /*
+     * PAS DE PAUSE AU MILIEU D'UNE PHRASE. `holdAt` ne rend `textHold` que si la ligne SUIVANTE
+     * ouvre une phrase : entre les deux lignes d'un même énoncé, l'habillage n'est pas un temps
+     * de parole, et une pause y ferait hésiter la frappe. La pause pleine ne tombe donc qu'avant
+     * un effacement, là où elle sert à laisser lire.
+     */
+    const cadence = {
+      idle: TYPE_IDLE,
+      char: pt.textChar,
+      hold: pt.textHold,
+      holdAt: (i: number) => (TV_LINES[i + 1]?.prompt ? pt.textHold : 0),
+    };
     let seq: SequenceState;
     if (forced) {
       const l = TV_LINES.length - 1;
-      seq = { line: l, chars: TV_LINES[l].length, typing: false, done: true };
+      seq = { line: l, chars: TV_LINES[l].text.length, typing: false, done: true };
       // Le rembobinage du panneau ou un reduced motion arrivé pendant que le lecteur
       // molettait laisserait sinon un boost accumulé, prêt à faire sauter tb.t en avant
       // dès que `forced` retombe — un rembobinage n'est pas rembobiné s'il repart déjà
@@ -1356,13 +1434,13 @@ export function ChromeTableau({ reduced }: Props) {
          * ferait RECULER tb.t d'un coup — la frappe reviendrait en arrière au moment même
          * où elle se termine.
          */
-        const remaining = Math.max(0, sequenceDuration(TV_LINES, cadence) - tb.t);
+        const remaining = Math.max(0, sequenceDuration(TV_TEXTS, cadence) - tb.t);
         tb.t += delta + Math.min(tubeGate.boost, remaining);
       } else {
         tb.t = 0;
       }
       tubeGate.boost = 0;
-      seq = sequenceAt(tb.t, TV_LINES, cadence);
+      seq = sequenceAt(tb.t, TV_TEXTS, cadence);
     }
     // LE PONT VERS LA RETENUE — voir tubeGate. Écrit que la branche ait été `forced` ou
     // non : Work.tsx doit voir `done` passer vrai aussi bien quand la séquence s'est
@@ -1491,6 +1569,8 @@ export function ChromeTableau({ reduced }: Props) {
       (u.uScrMin.value as Vector2).set(pt.scrX - pt.scrW / 2, pt.scrY - pt.scrH / 2);
       (u.uScrMax.value as Vector2).set(pt.scrX + pt.scrW / 2, pt.scrY + pt.scrH / 2);
       u.uPixel.value = pixel;
+      u.uPixelHalo.value = pt.pixelHalo;
+      u.uPixelGamma.value = pt.pixelGamma;
       u.uEnv.value = envMap;
       (u.uCamPos.value as Vector3).copy(camera.position);
       colScratch.set(tw.color);
@@ -1586,6 +1666,7 @@ export function ChromeTableau({ reduced }: Props) {
       // Négatif parce que dockY monte en y-monde et que `top` descend en pixels.
       root.setProperty("--form-lift", `${(-s.dockY * pxPerWorld).toFixed(1)}px`);
     }
+
   });
 
   if (!frameGeos) return null;

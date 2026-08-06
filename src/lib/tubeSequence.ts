@@ -16,6 +16,16 @@ export type Cadence = {
   char: number;
   /** La pause après une ligne avant que la suivante commence, secondes. */
   hold: number;
+  /**
+   * LA PAUSE, LIGNE PAR LIGNE — optionnelle, et `hold` sert de défaut quand elle manque.
+   *
+   * Elle existe parce que toutes les fins de ligne ne se valent pas : une ligne qui n'est que
+   * l'HABILLAGE de la précédente (une phrase trop longue pour le canvas) ne doit pas marquer
+   * de pause, sinon la phrase hésite en son milieu ; une ligne qui termine une PHRASE, elle,
+   * doit tenir en place avant de s'effacer. L'horloge ne connaît ni invites ni phrases — elle
+   * ne compte que des caractères — donc c'est l'appelant qui répond, index par index.
+   */
+  holdAt?: (i: number) => number;
 };
 
 export type SequenceState = {
@@ -33,12 +43,15 @@ export type SequenceState = {
   done: boolean;
 };
 
+/** La pause après la ligne i — `holdAt` si l'appelant en fournit une, `hold` sinon. */
+const holdOf = (r: Cadence, i: number): number => (r.holdAt ? r.holdAt(i) : r.hold);
+
 /** Combien de temps la séquence entière prend. Les pauses sont INTERMÉDIAIRES : n-1, pas n. */
 export function sequenceDuration(lines: readonly string[], r: Cadence): number {
   let d = r.idle;
   for (let i = 0; i < lines.length; i++) {
     d += lines[i].length * r.char;
-    if (i < lines.length - 1) d += r.hold;
+    if (i < lines.length - 1) d += holdOf(r, i);
   }
   return d;
 }
@@ -64,8 +77,9 @@ export function sequenceAt(t: number, lines: readonly string[], r: Cadence): Seq
     rest -= dur;
     // La dernière ne cède pas la main : pas de pause à consommer, l'état se pose.
     if (i === last) return { line: i, chars: lines[i].length, typing: false, done: true };
-    if (rest < r.hold) return { line: i, chars: lines[i].length, typing: false, done: false };
-    rest -= r.hold;
+    const hold = holdOf(r, i);
+    if (rest < hold) return { line: i, chars: lines[i].length, typing: false, done: false };
+    rest -= hold;
   }
   // Inatteignable : la branche `i === last` retourne toujours. Présent pour le typage.
   return { line: last, chars: lines[last].length, typing: false, done: true };

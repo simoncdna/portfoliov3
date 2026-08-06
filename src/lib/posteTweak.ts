@@ -174,12 +174,70 @@ export type PosteTweak = {
   aimX: number;
   aimY: number;
   /**
-   * WINDOW_CHARS — la largeur de la fenêtre de prélèvement autour du trou, en multiples de
-   * l'avance d'un caractère. Combien de lettres voisines forment les parois du corridor :
-   * voir tubeHole.ts, qui explique pourquoi 2 (une tranche de « r » et de « b ») plutôt
-   * qu'une lettre entière de plus.
+   * LA FENÊTRE DU FONDU, en multiples de l'avance d'un caractère : la zone du canvas que le
+   * corridor prélève À L'INSTANT DU CROISEMENT, et donc aussi la taille de sa bouche (la
+   * tranche 0 couvre exactement l'empreinte de cette fenêtre sur le verre — voir PixelTunnel).
+   *
+   * ELLE PILOTE AUSSI LA TAILLE DU CORRIDOR À L'ÉCRAN, et c'est le levier pour l'agrandir : la
+   * bouche EST l'empreinte de cette fenêtre sur le verre (voir PixelTunnel), donc 30 caractères
+   * lui font couvrir ~70 % de la largeur du canvas au lieu de 30 %. Le corridor grandit sans que
+   * l'alignement avec le texte peint se perde, puisque les deux restent la même région.
+   *
+   * ⚠ ELLE DÉPLACE LE PLANCHER DU RECUL DE LA BOUCHE : les cellules grandissent avec elle, donc
+   * leur longueur en profondeur aussi (voir `mouthBack`). Le recul est plafonné par le calcul dans
+   * PixelTunnel, donc ce couple ne peut plus se désaccorder — mais l'écart d'échelle au début du
+   * croisement, lui, grandit avec le recul.
+   *
+   * 12 ≈ « white rabbit », ET C'ÉTAIT LA CONDITION DU FONDU. À 2 caractères (la valeur d'avant),
+   * le corridor montrait le « a » et son voisin pendant que l'écran du poste affichait toute
+   * la phrase : deux images de la même chose qui ne se recouvraient pas, donc une superposition
+   * qu'on lit comme un décalage plutôt que comme un relais. En couvrant la même zone que
+   * l'écran, le croisement devient un fondu entre deux versions du MÊME cadre — l'une lisse,
+   * l'autre en blocs de phosphore, ce qui est précisément l'effet « l'image se résout en
+   * pixels ».
+   *
+   * Le resserrement sur la lettre vient APRÈS, et c'est `zoomChars` qui le porte.
    */
+  /**
+   * LA CORRECTION DU TIRAGE DU VERRE, en pixels du canvas — ce qui amène la caméra sur la lettre
+   * TELLE QU'ELLE EST PEINTE, et non là où la relation affine la place.
+   *
+   * Le fragment du tube déplace l'UV du texte de `vFormN.xy · vec2(0.10, -0.10)` pour le coudre au
+   * relief du verre : jusqu'à 0.10 UV, soit ~38 px de canvas. La visée, elle, ignore ce
+   * déplacement. Ces deux nombres le compensent.
+   *
+   * RÉGLABLES ET PLUS CUITS, parce que leur valeur dépend de l'endroit visé sur le verre : elle est
+   * périmée par tout changement de lettre, de ligne, de corps de texte ou de rectangle du tube. Une
+   * constante obligeait à re-mesurer au navigateur puis à recompiler à chaque fois ; ici la lettre
+   * se recentre à l'œil en deux glissements, et le bouton « copier » crache la valeur.
+   *
+   * −2.0 / +4.8 SONT LES VALEURS RETENUES À L'ŒIL, sur le rendu complet, et elles remplacent un
+   * +12.6 / −5.0 que j'avais MESURÉ au framebuffer. La mesure n'était pas fausse mais partielle :
+   * prise à 1.39 écran du verre, corridor encore absent, elle centrait la lettre du seul poste. Le
+   * réglage qui compte est celui du croisement, les deux scènes allumées — d'où ces molettes plutôt
+   * qu'une constante, et d'où le fait que l'œil tranche ici mieux que le framebuffer.
+   */
+  dragX: number;
+  dragY: number;
   holeWin: number;
+  /**
+   * LA FENÊTRE À L'ARRIVÉE, même unité : le corridor s'y resserre sur `zoomSpan` écrans de
+   * plongée, ce qui grossit la contreforme du « a » jusqu'à la traverser.
+   *
+   * 5 ET NON 1.5, PARCE QU'UNE FENÊTRE TROP SERRÉE N'A PLUS RIEN À MONTRER. Mesuré au
+   * navigateur : à 1.5 caractère, passé dive ≈ 0.5, chaque cellule échantillonne un patch
+   * presque uni de la panse du « a » — les 16 tranches lisant TOUTES la même fenêtre, la paroi
+   * devenait un mur vert uniforme, et baisser le taux de blocs révélait une trame qui ne
+   * dessinait plus rien. Vérifié que ce n'était ni l'occlusion (image identique à `cellCut` 0
+   * et 0.05) ni la seule atténuation. À 5, les parois restent des lettres jusqu'au bout.
+   *
+   * SEULE LA FENÊTRE BOUGE, PAS LA BOUCHE. Le prélèvement se resserre dans le shader (uSpan)
+   * tandis que la géométrie du corridor reste posée sur `holeWin` : faire respirer la bouche
+   * elle-même aurait rétroagi sur la cible de la caméra (`divePast` est en demi-largeurs de
+   * bouche), donc une caméra qui poursuit une cible mouvante.
+   */
+  zoomChars: number;
+  zoomSpan: number;
 
   /* ---- LA PLONGÉE : quand et de combien la caméra entre ------------------ */
   /**
@@ -197,15 +255,17 @@ export type PosteTweak = {
    * fois arrivée, en DEMI-LARGEURS DE LA BOUCHE du corridor (et non en unités monde, ce
    * qu'elle était : voir plus bas).
    *
-   * Le défaut 7 place la caméra à une profondeur LOCALE de 7 × REF_HW ≈ 5.9 (REF_HW = 0.84
-   * dans PixelTunnel) — plus loin que le seuil Z0 = 2.2 que cette constante visait quand la
-   * bouche faisait tout l'écran, ET C'EST OBLIGATOIRE depuis qu'elle est calée sur la fenêtre.
-   * Le corridor est auto-similaire le long de son axe (recyclage géométrique), donc s'enfoncer
-   * plus loin n'y change rien À UNE EXCEPTION PRÈS : le plan proche de la caméra est à 0.1
-   * MONDE, une distance qui ne rétrécit pas avec le corridor. À une profondeur locale de 2.5,
-   * les premières tranches tombaient DANS ce plan proche — mesuré au navigateur, un écran noir
-   * sans erreur. Le corridor n'est pas plus loin, il est vu d'aussi près : seul le plan de
-   * coupe est dégagé. L'exprimer dans l'unité de la bouche la rend invariante :
+   * Le défaut 2.7 place la caméra à une profondeur LOCALE de 2.7 × REF_HW ≈ 2.3 (REF_HW = 0.84
+   * dans PixelTunnel), soit 2.7 × Z0 — la position que cette constante a toujours visée, juste
+   * après le seuil.
+   *
+   * IL SE DÉPLACE AVEC Z0, ET PAS SEULEMENT PAR PROPRETÉ. Le corridor est auto-similaire le
+   * long de son axe (recyclage géométrique), donc la profondeur n'a de sens que RELATIVEMENT à
+   * Z0 : c'est le rapport qui décide quelles tranches sont proches, et surtout `vSc = z/Z0`,
+   * qui porte l'atténuation de distance. Mesuré : à Z0 baissé de 2.2 à 0.85 sans toucher à ce
+   * nombre (donc 6.9 × Z0 au lieu de 2.7), les tranches visibles passaient de vSc ≈ 13 à ≈ 37
+   * et l'atténuation de 0.35 à 0.16 — un corridor éteint, sans erreur. Si Z0 rebouge dans
+   * PixelTunnel, ce nombre le suit dans le même rapport. L'exprimer dans l'unité de la bouche la rend invariante :
    * elle suit le cadrage, le viewport ET `Fenêtre`, alors qu'un nombre monde devait être
    * recalibré à chaque fois que l'échelle du corridor changeait. À revoir si COLS ou CELL
    * bougent dans PixelTunnel, puisque REF_HW en dépend.
@@ -223,12 +283,34 @@ export type PosteTweak = {
    * touche le verre. Le poste s'éteint et le corridor s'allume sur LA MÊME fenêtre, donc les
    * deux plans se superposent pendant tout le croisement.
    *
-   * `crossIn` doit rester PETIT : c'est là que le basculement commence, et le geste demande
-   * qu'il n'arrive qu'une fois collé à l'écran, la lettre énorme, juste avant de passer à
-   * travers. `crossOut` doit rester > 0 — à 0 le poste est encore là quand le plan proche
+   * `crossIn` ARBITRE LA DURÉE DU RECOUVREMENT. 0.20 est la valeur retenue : le basculement tombe
+   * au ras du verre, la lettre énorme, ce qui est le geste voulu. Un 0.55 a été essayé pour faire
+   * durer le recouvrement et écarté — il fait apparaître le corridor trop tôt, donc loin du verre,
+   * là où il est vu plus petit que le texte peint (voir `mouthBack`).
+   *
+   * À GARDER EN TÊTE SI LE FONDU SEMBLE SEC : mesuré au navigateur, une fenêtre 0.13 → 0.08 tient
+   * dans ~4 px de scroll — deux ou trois frames, donc une coupe plutôt qu'un fondu — quand
+   * 0.65 → 0.13 en fait 54. Le levier n'est alors pas cette borne mais la vitesse de la caméra au
+   * ras du verre. `crossOut` doit rester > 0 — à 0 le poste est encore là quand le plan proche
    * franchit le verre, et on voit l'intérieur du boîtier (matériaux en DoubleSide).
    */
   crossIn: number;
+  /**
+   * LE PALIER — la distance au verre où le corridor est ENTIÈREMENT LÀ et où le poste commence
+   * seulement à partir. Entre `crossIn` et lui, le corridor monte pendant que le poste reste
+   * PLEIN : les deux scènes se superposent vraiment, au lieu de se croiser à mi-valeur chacune.
+   *
+   * Sans ce troisième nombre, une seule rampe pilotait les deux en sens inverse — donc à
+   * l'instant où l'on voyait le mieux les deux, aucune des deux n'était entière. C'est ce que
+   * « le fondu est mal réalisé » désignait.
+   *
+   * ET LE POSTE DOIT AVOIR FINI DE PARTIR AVANT QU'ON SOIT TRÈS PRÈS, ce qui contraint `crossOut`
+   * par le bas : à 0.09 écran du verre, un poste encore à 11 % laissait lire son BOÎTIER — pas son
+   * écran, le corps de la machine, éclairé par l'HDRI et vu de très près — derrière le corridor.
+   * D'où 0.28 / 0.13 : le corridor arrive sur 0.12 écran, le poste s'efface sur les 0.15 suivants,
+   * et à 0.09 il n'y a plus que du phosphore.
+   */
+  crossHold: number;
   crossOut: number;
   /**
    * LA NAISSANCE DU CORRIDOR — son intensité À L'INSTANT du croisement, en fraction de son
@@ -254,7 +336,10 @@ export type PosteTweak = {
    * tenir cette promesse : dès que la pose d'entrée passait sous elle, la caméra visait déjà
    * la lettre à l'arrivée dans Work.
    *
-   * IL DOIT SE TERMINER LOIN, et c'est tout l'enjeu de ces deux nombres. L'écart au centre
+   * 1.5 ÉCRAN : fini bien avant le croisement (0.40), donc la lettre ne dérive plus pendant la
+   * superposition — mais assez tard pour que la courbe ait de la place entre `aimFrom` et lui.
+   *
+   * IL DOIT SE TERMINER LOIN, et c'est tout l'enjeu de ce nombre. L'écart au centre
    * de l'image est un écart MONDE divisé par la distance à la lettre : un retard de marche
    * qui passe inaperçu de loin explose en fin d'approche, quand le diviseur tend vers zéro.
    * Une marche calée sur `diveArrive` (ce qui était le cas) ne finissait qu'APRÈS la
@@ -262,7 +347,338 @@ export type PosteTweak = {
    * elle est grosse. Fini à `aimBy` écrans, la caméra est déjà sur l'axe de la lettre avant
    * que celle-ci ne remplisse le cadre, et le plongeon se fait droit dedans.
    */
+  /**
+   * OÙ LE RECENTRAGE COMMENCE, en écrans — avant lui, la caméra reste centrée sur L'ORDINATEUR.
+   *
+   * Cette borne avait été retirée puis la rampe ancrée sur la pose d'entrée, pour garantir qu'elle
+   * vaut exactement 0 au départ. Le défaut était ailleurs : ancrée sur l'entrée, la dérive commence
+   * IMMÉDIATEMENT, donc le plan large n'est jamais cadré sur la machine — il glisse déjà vers la
+   * lettre. Ici la caméra tient l'ordinateur au centre jusqu'à `aimFrom`, puis la courbe part.
+   *
+   * Bornée par la pose d'entrée (`min(aimFrom, distance à l'entrée)`) : si l'entrée est déjà plus
+   * près que cette valeur, la rampe repart de l'entrée et vaut toujours 0 au départ.
+   */
+  aimFrom: number;
   aimBy: number;
+
+  /* ---- LA RÉSOLUTION DU PHOSPHORE en approchant --------------------------- */
+  /**
+   * CE QUE DEVIENT L'ÉCRAN DU POSTE QUAND LA CAMÉRA S'EN APPROCHE (voir `uPixel` dans
+   * ChromeTableau) : `pixelHalo` est le FACTEUR appliqué à la halation en fin d'approche — 1 la
+   * laisse telle qu'elle est de loin, en dessous elle s'efface, AU-DESSUS elle s'intensifie. À
+   * 1.35, le phosphore bave de plus en plus fort à mesure qu'on entre dans l'écran, ce qui est le
+   * geste voulu ; la borne de la barre monte à 3. `pixelGamma` est l'exposant de la courbe qui
+   * écrase les demi-teintes — 0 = AUCUNE
+   * courbe, donc l'image de loin (le facteur vaut `pow(luma, exposant)`, qui ne vaut 1 qu'à
+   * l'exposant nul ; la réponse effective du tube est donc luma^(1+exposant), à comparer au
+   * BLOOM_P = 2.4 du corridor).
+   *
+   * `pixelHalo` = 1 ET `pixelGamma` = 0 redonnent EXACTEMENT l'image d'avant cette mécanique,
+   * au bit près — utile pour juger ce qu'elle coûte en définition.
+   *
+   * ILS EXISTENT PARCE QU'UNE COURBE PONCTUELLE NE PEUT PAS SÉPARER LE TROU DES BORDS. La
+   * contreforme du « a » est un gris à ~31 % (mesuré : 67 sur 211) — mais les bords antialiasés
+   * du glyphe le sont aussi. Un `pow` les traite donc identiquement : à 1.4, le cœur du trait
+   * perd 23 % quand un bord faible en perd 72 %, et les lettres maigrissent. D'où deux doses
+   * réglables au lieu d'une valeur cuite, et un défaut prudent.
+   *
+   * LA VRAIE SÉPARATION SERAIT SPATIALE, pas tonale : le halo cuit dans le canvas fait ~22 px
+   * (c'est lui qui remplit la contreforme) là où l'antialiasing en fait ~1. Repeindre le canvas
+   * avec un `shadowBlur` réduit — une seconde texture, mélangée avec la première en
+   * approchant — ouvrirait le trou SANS toucher aux bords. Non fait : ça coûte un sampler et
+   * un repaint de plus, et ces deux molettes disent d'abord si le jeu en vaut la chandelle.
+   */
+  pixelHalo: number;
+  pixelGamma: number;
+
+  /* ---- LE CORRIDOR : sa grille et sa profondeur --------------------------- */
+  /**
+   * LA RÉSOLUTION DE LA GRILLE, en multiples de la grille de référence 48×36. C'est le nombre
+   * de « pixels » du corridor : à 1, une lettre de la fenêtre de 12 caractères ne fait que
+   * ~4 blocs de large, ce qui lit comme des rectangles plutôt que comme du texte traversé.
+   *
+   * LA TAILLE DE CELLULE COMPENSE, ET C'EST CE QUI REND LA MOLETTE UTILISABLE. `CELL` est
+   * dérivée de la résolution pour que `(COLS/2)·CELL` — la demi-largeur de la grille de
+   * référence, donc la BOUCHE du corridor et l'angle de son cône — reste invariante. Sans ça,
+   * doubler la résolution doublerait l'angle du cône (voir Z0 dans PixelTunnel) et déplacerait
+   * la cible de la caméra du même coup : la molette aurait changé trois choses à la fois.
+   *
+   * COLS et ROWS restent exactement 4:3 (des multiples de 4 et 3), la condition pour que les
+   * cellules soient carrées — voir leur commentaire dans PixelTunnel.
+   *
+   * LE COÛT, MESURÉ AU NAVIGATEUR (dans le corridor, médiane sur 40 à 120 frames) — le nombre
+   * d'instances vaut COLS·ROWS·tranches, donc ×4 quand cette molette double :
+   *
+   *    48×36   ·  28k : 15.8 ms        192×144 · 442k : 25 ms  (40 fps)
+   *    96×72   · 111k :  8.4 ms        240×180 · 691k : 42 ms  (24 fps)
+   *   144×108 · 249k :  9 à 17 ms      288×216 · 995k : 50 ms  (20 fps)
+   *   168×126 · 339k :  9.1 ms
+   *
+   * DEUX CHOSES À LIRE LÀ-DEDANS. Sous ~350k le coût ne suit PAS le nombre d'instances et les
+   * mesures sont bruitées — une grille grossière est même reproductiblement plus lente qu'une
+   * fine. La cause n'est pas isolée (le `discard` du fragment désactive le rejet early-Z, donc
+   * le coût suit la surface couverte plutôt que le compte d'instances, mais ça n'explique pas
+   * tout l'écart). Au-delà de ~450k, en revanche, la dégradation est franche et monotone.
+   *
+   * D'où le défaut à 3 et la barre bornée à 5 : au-delà on paye vraiment, et la mesure ci-dessus
+   * a été prise sur une machine de développement — donc à refaire, plus bas, avant de cuire une
+   * valeur pour la prod.
+   */
+  gridScale: number;
+  /**
+   * Le nombre de tranches recyclées — la densité de plans qu'on traverse. Plus il y en a, plus
+   * la profondeur se lit ; le coût est linéaire (voir gridScale).
+   */
+  slices: number;
+  /**
+   * LE BLOC EST-IL UNE PLAQUE (4 sommets) OU UN CUBE (24) ? — LE SEUL RÉGLAGE QUI CHANGE L'ORDRE
+   * DE GRANDEUR DU COÛT.
+   *
+   * Mesuré à dive 0.8, une fois le tri des cellules remonté dans le vertex shader (voir
+   * PixelTunnel) : le corridor est VERTEX-BOUND, pas fill-bound — 6,2 M blocs × 24 sommets =
+   * 150 M sommets par frame, soit 203 ms. Le nombre d'instances qu'on peut se payer est donc
+   * fixé par les sommets qu'elles coûtent, et une plaque en coûte SIX FOIS MOINS qu'un cube.
+   *
+   * CE QUE LA PLAQUE PERD : l'épaisseur en profondeur (`FILL_Z`, sans effet sur une plaque), donc
+   * les faces latérales qu'on aperçoit sur les bords du cadre et le remplissage des interstices
+   * ENTRE tranches. À la taille où ces blocs se voient (fillXY 0.2 d'une case, elle-même une
+   * fraction de l'écran), c'est à juger à l'œil — d'où le bouton plutôt qu'un choix cuit.
+   */
+  blockQuad: boolean;
+  /**
+   * FILL_XY — la part de sa case qu'un bloc occupe, DE LOIN puis DEDANS (`fillIn`). C'est la
+   * largeur des interstices, donc la lisibilité de la trame : à 1 les blocs se touchent et la
+   * grille disparaît, plus bas ils se détachent un à un.
+   *
+   * Interpolé sur l'avancée de la traversée — la même que le défilement (voir uTravel) : de
+   * loin l'image reste une image, et à mesure qu'on entre les blocs se séparent, donc on voit
+   * de quoi elle était faite. C'est aussi ce qui laisse VOIR À TRAVERS : les cellules éteintes
+   * écrivent la profondeur (voir `cellCut`), donc sans interstices les parois lointaines sont
+   * masquées par les proches.
+   */
+  fillXY: number;
+  fillIn: number;
+  /**
+   * G — la croissance géométrique d'une tranche à la suivante. Gouverne l'espacement des plans
+   * en profondeur (et donc la vitesse apparente du défilement), PAS l'angle du cône.
+   */
+  growth: number;
+  /**
+   * ATTEN_K — l'atténuation avec la profondeur, en 1/(1+k·(échelle−1)). Le repère de distance
+   * du corridor : à 0 toutes les tranches sont aussi lumineuses et la profondeur s'aplatit.
+   */
+  atten: number;
+  /**
+   * DISCARD_FRAC — le rayon, en multiples de la profondeur de la caméra, dans lequel les
+   * cellules sont RETIRÉES. C'est ce qui empêche la tranche la plus proche de remplir l'écran
+   * (voir Z0 dans PixelTunnel) ; le baisser rapproche les parois, le monter creuse le vide
+   * devant la caméra.
+   *
+   * ET C'EST LE RÉGLAGE QUI DÉCIDE SI L'ON VOIT LES BLOCS GROSSIR — la raison est géométrique.
+   * Dans ce cône auto-similaire, la taille d'un bloc ET son écart à l'axe sont proportionnels à sa
+   * profondeur, donc son angle vu depuis la caméra vaut θ∞ / (1 − camDepth/z) : CONSTANT tant que
+   * z ≫ camDepth. Le champ lointain est un motif fixe, et le grossissement n'existe que dans les
+   * dernières unités avant la caméra. À 4 (l'ancienne valeur), tout bloc plus proche que
+   * 5 × camDepth était retiré — là où ce facteur ne vaut encore que 1.25 : les blocs mouraient
+   * juste avant de commencer à grossir, et ce qui restait était le motif statique dont des rangs
+   * apparaissaient au fond et disparaissaient à rayon fixe. Le cône étant auto-similaire, le rang
+   * suivant ressemble au précédent — l'œil lit un va-et-vient, pas une progression. Rapporté à
+   * l'écran, puis mesuré : « on ne voit jamais le trou s'élargir ».
+   *
+   * À 0.4 le facteur atteint 2.1 et les stries filent jusqu'aux bords. Ça n'a été possible qu'avec
+   * `cellCut` > 0 : sans lui, la tranche proche qu'on vient d'exposer amène son plancher de
+   * cellules NOIRES, opaques et écrivant la profondeur, qui masque tout le corridor derrière —
+   * l'image devenait noire au lieu de devenir vivante. Coût mesuré à dive 0.68 : 28 ms à 4.0,
+   * 30 ms à 0.4 — le retrait ne se paye quasiment pas.
+   */
+  discard: number;
+
+  /**
+   * PEAK — le sommet de l'arc de luminosité : combien le corridor luit au plus fort de la
+   * traversée, en multiples de son intensité de croisière. L'arc monte jusque-là puis retombe à
+   * 0 exactement à la fin de la plongée (voir le fragment) — c'est déjà le fondu au noir de la
+   * sortie, pas un assombrissement vers une couleur de repos.
+   */
+  peak: number;
+  /**
+   * LE CORRIDOR BOUCLE-T-IL, OU LE TRAVERSE-T-ON UNE FOIS ? — le geste, pas un réglage d'image.
+   *
+   * false (le défaut) : chaque tranche vient à la caméra UNE fois, passe, et ne revient pas. À la
+   * fin il ne reste que les dernières tranches, les plus larges, qui s'écartent puis dégagent —
+   * on SORT du tube, ce qui enchaîne sur le fondu au noir. Le corridor a une fin.
+   *
+   * true : `recycle` (voir tunnelGeom.ts) ramène au fond toute tranche passée trop près, donc le
+   * corridor est sans fond et sans sortie. C'était le comportement d'origine, gardé parce que le
+   * code qui le porte est prouvé (tunnelGeom.test.ts) et qu'un tunnel sans fin est un geste
+   * défendable — simplement pas celui-ci.
+   */
+  /**
+   * LA FORME DU CORRIDOR — UN PUITS DROIT (true, le défaut) OU LE CÔNE AUTO-SIMILAIRE (false).
+   *
+   * C'est le seul réglage qui décide si l'on VOIT les pixels grossir, et la raison est
+   * démontrable plutôt que affaire de goût. Dans le cône, la tranche k est à z0·(1+g)^(k−travel)
+   * et la taille d'un bloc COMME son écart à l'axe sont tous deux ∝ z, toutes les tranches
+   * échantillonnant la même fenêtre du canvas : avancer `travel` de 1 fait donc prendre à chaque
+   * tranche la place, la taille ET l'image de sa voisine. L'image rendue est EXACTEMENT périodique
+   * de période un cran — un zoom infini à la Droste. Les blocs s'écartent, meurent au rayon de
+   * retrait, l'image se réinitialise : aucune progression n'est visible, par construction. C'est
+   * ce que « on a l'impression de faire avant/arrière » décrivait, et aucune molette ne pouvait
+   * le corriger — l'auto-similarité EST la boucle, donc couper `recycle` n'y suffisait pas.
+   *
+   * Le puits garde la section constante (la fenêtre de la lettre, extrudée en profondeur), espace
+   * ses tranches de `tubeStep` et laisse aux blocs leur taille : un bloc à distance d couvre
+   * taille/d, donc il grossit vraiment en approchant, rien ne se répète, et la sortie est littérale
+   * — les derniers blocs filent hors cadre.
+   *
+   * Le cône reste accessible : il donne l'image dense et striée d'un tunnel sans fin, qui est un
+   * geste défendable — simplement pas « on rentre, on pénètre, on ressort ».
+   */
+  tubeShaft: boolean;
+  /**
+   * LE PAS ENTRE DEUX TRANCHES DU PUITS, en demi-largeurs de la bouche (voir REF_HW dans
+   * PixelTunnel, où la conversion est faite). C'est le rapport pas/largeur qui décide si ça se lit
+   * comme un TUYAU court qu'on enfile vite ou comme un long couloir : à 1 les tranches sont aussi
+   * espacées que la bouche est large, en dessous elles se serrent et la trame devient un continuum.
+   * Sans effet sur le cône, dont l'espacement est géométrique (`growth`).
+   */
+  tubeStep: number;
+  /**
+   * LA PAROI DU PUITS EST-ELLE CONTINUE ? — la part du pas qu'un bloc occupe EN PROFONDEUR.
+   *
+   * C'est le réglage qui décide si l'on voit UN tunnel ou QUARANTE anneaux, et c'est ce qui
+   * empêchait de voir le bout s'élargir. Un tunnel n'a qu'une ouverture, celle du fond : en
+   * approchant, son angle croît de façon monotone jusqu'à dépasser le cadre — on sort. Avec des
+   * anneaux séparés (blocs courts en Z, donc du vide entre les tranches), CHAQUE anneau a la
+   * sienne : la plus proche grandit, passe, et la suivante — plus petite puisque plus loin — prend
+   * le relais. Rapporté à l'écran : « je le vois grossir puis de nouveau petit, du fait des
+   * répétitions ». Aucun réglage de forme ni de vitesse ne pouvait le corriger, c'est la
+   * SEGMENTATION de la paroi qui le causait.
+   *
+   * À 1 les blocs se touchent d'une tranche à l'autre : la paroi est un mur continu, la trame de
+   * pixels reste lisible latéralement, et il ne reste qu'une seule ouverture. En dessous, la paroi
+   * se découpe en anneaux — utile si on veut au contraire sentir qu'on franchit des plans, mais
+   * alors le bout du tunnel ne se lit plus.
+   */
+  tubeWall: number;
+  /**
+   * LA PAROI À LA SORTIE — la même grandeur que `tubeWall`, mais à la FIN de la traversée, et
+   * c'est ce couple qui anime la sortie.
+   *
+   * Même motif que `fillXY`/`fillIn` (les blocs se séparent latéralement à mesure qu'on entre) et
+   * interpolé sur la même avancée, pour que les deux racontent un seul mouvement : la paroi part
+   * CONTINUE — donc un tunnel avec une seule ouverture au fond, qui grandit — et se DÉCOUPE en
+   * chemin. Les blocs s'écartent en profondeur comme ils s'écartent en largeur, le mur devient une
+   * grille, la grille devient des points, et le tube se dissout au moment où on en sort.
+   *
+   * L'ordre importe : commencer segmenté puis fermer la paroi produirait l'effet inverse (un
+   * tunnel qui se referme), et c'est en partant de « continue » que le bout du tunnel se lit —
+   * voir `tubeWall`.
+   */
+  tubeWallIn: number;
+  /**
+   * OÙ LA DISSOLUTION EST TERMINÉE, en % de la traversée (même unité que `fallAt`) — c'est-à-dire
+   * l'instant où `Paroi` et `Blocs` atteignent leurs valeurs de fin.
+   *
+   * IL A ÉTÉ DÉDUIT DE `fallAt`, ET C'ÉTAIT FAUX. Le raisonnement — « la dissolution doit être
+   * pleine quand le fondu s'amorce, sinon ses bornes de fin ne se voient jamais » — reste juste,
+   * mais l'instant où l'image meurt À L'ÉCRAN ne se lit pas dans `fallAt` : constaté en scrollant,
+   * la course s'achève visuellement vers 68 % de la dissolution, où la paroi valait encore 0.37 et
+   * les blocs 0.29 au lieu de 0.10 et 0.20. Un nombre dérivé d'une hypothèse sur la fin, dans une
+   * chorégraphie dont la fin dépend du scroll réel, ne pouvait pas tomber juste — d'où une molette
+   * plutôt qu'une formule, calée à l'œil contre la ligne « Anime » du panneau.
+   */
+  dissolveAt: number;
+  tunnelLoop: boolean;
+  /**
+   * OÙ COMMENCE LE FONDU AU NOIR sur la traversée (0 = dès l'arrivée du corridor, 1 = jamais).
+   *
+   * Il valait 0.45, cuit dans le shader, et c'était trop tôt d'un geste entier : en traversée
+   * unique, les dernières tranches — les plus larges — s'écartent et dégagent sur la toute fin,
+   * et c'est ÇA la sortie du tube. Mesuré, à dive 0.979 le corridor était bien épuisé mais l'arc
+   * l'avait déjà éteint à ~7 % : la sortie se jouait dans le noir. Plus haut, on voit le tube
+   * s'ouvrir avant que tout s'éteigne — ce qui enchaîne sur la page noire et les planches.
+   */
+  fallAt: number;
+  /**
+   * COMBIEN DE CORRIDOR ON TRAVERSE sur ce qui reste de la plongée après le croisement, en
+   * multiples de sa longueur entière (« tranches » crans, chaque cran multipliant la profondeur
+   * par 1 + `growth`). À 1, la dernière tranche arrive pile à la fin de la plongée : on ressort
+   * juste au moment où tout s'éteint. En dessous, on s'arrête AVANT d'être sorti ; au-dessus, on
+   * finit dans le vide, le corridor épuisé.
+   *
+   * ENTIER SEULEMENT EN MODE BOUCLE (`tunnelLoop`) : là, `recycle` est périodique de période
+   * « tranches » (tunnelGeom.test.ts), donc seul un nombre entier de tours fait coïncider « la
+   * plongée est finie » et « le corridor a bouclé pile » — à 1.5 la traversée s'arrêterait au
+   * milieu d'un cycle, sur un saut de position des tranches. Sans boucle, cette contrainte
+   * n'existe pas : rien ne se répète, donc rien ne peut sauter.
+   */
+  cycles: number;
+  /**
+   * DE COMBIEN LA BOUCHE DU CORRIDOR SE TIENT DERRIÈRE LE VERRE, en « écrans ».
+   *
+   * ELLE NE PEUT ÊTRE NI À ÉGALITÉ NI LOIN, et c'est tout l'enjeu de ce nombre. À égalité (0) le
+   * corridor est à la même profondeur que la surface du verre : opaque et écrivant la profondeur,
+   * il gagne et MASQUE le texte peint — plus de superposition, donc plus de fondu croisé, juste
+   * un remplacement. Trop loin, il est vu plus petit que ce texte : mesuré, l'ancien ancrage (le
+   * sommet du cône sur le verre, la tranche 0 restant à Z0 derrière) donnait un rapport d'échelle
+   * de ~1.8 — deux images du même mot qui ne coïncidaient qu'en leur centre.
+   *
+   * Le rapport vaut 1 + recul / (distance de la caméra au verre). 0.13 est la valeur retenue à
+   * l'œil, et elle a une raison géométrique que le calcul confirme : les cellules ne sont pas des
+   * plaques mais des TUBES (voir FILL_Z), et leur demi-longueur en profondeur — estimée à ~0.064
+   * écran pour la grille retenue — doit tenir derrière le verre. En dessous, elles le TRAVERSENT :
+   * opaques, elles masquent alors le texte peint dans le rectangle de la bouche pendant que le
+   * reste de l'écran reste visible autour, ce qui se lit comme deux canvas côte à côte. 0.13 laisse
+   * le double de marge, au prix d'un écart d'échelle plus marqué au début du croisement.
+   */
+  mouthBack: number;
+  /**
+   * REST — le masque de phosphore éteint, en fraction de sa couleur. 0 = les cellules sans
+   * lumière ne portent RIEN, donc le trou de la lettre est du vide.
+   */
+  restLevel: number;
+  /**
+   * À 0.03 — LA VALEUR RETENUE, ET ELLE A ÉTÉ À 0. Ce 0 tenait tant que la tranche proche était
+   * retirée très tôt (`discard` 4) : ses cellules noires n'avaient pas le temps de compter. En
+   * baissant le retrait pour qu'on VOIE enfin les blocs grossir (voir `discard`), elles arrivent
+   * plein cadre, et comme le matériau écrit la profondeur elles masquent tout le corridor derrière
+   * — le corridor devenait noir, constaté à l'écran. Un seuil positif retire le vide au lieu de le
+   * peindre en noir, ce qui est aussi la demande d'origine au mot près : « à l'intérieur des
+   * lettres, noir COMME S'IL N'Y AVAIT PAS DE BLOCS ». 0.03 suffit — il ne touche que les cellules
+   * quasi éteintes, bien en dessous de la contreforme du « a » (0.26, voir le repère plus bas).
+   *
+   * Ce qui suit vaut donc pour l'ancien 0 :
+   *
+   * ⚠ RIEN N'EST RETIRÉ ET LE CORRIDOR DEVIENT UN MUR NOIR. Le matériau écrit la profondeur :
+   * une cellule éteinte est un bloc noir, pas du vide. Pendant le fondu, ce mur APPARAÎT par-dessus
+   * le poste — un grand rectangle noir qui monte au milieu de l'image, constaté à l'écran — et plus
+   * loin il masque les parois lointaines. 0.1 retire les cellules que le canvas laisse sombres tout
+   * en gardant les lettres entières : voir plus bas ce que valent les luminances réelles.
+   *
+   * LE SEUIL SOUS LEQUEL UNE CELLULE N'EXISTE PAS, en luminance du canvas (0..1) — retirée,
+   * pas noircie : le matériau écrit la profondeur, donc une cellule noire masquerait la paroi
+   * derrière elle (voir son commentaire dans le fragment).
+   *
+   * Repère mesuré sur le canvas réel : la contreforme du « a » est à 0.26 (67 sur 255, le halo
+   * cuit du phosphore), les bords antialiasés entre 0.40 et 0.63, le cœur des traits à 0.83.
+   * Un seuil à 0.33 retire donc le trou et garde la lettre entière ; au-delà de 0.45 les
+   * lettres commencent à se creuser par les bords.
+   */
+  cellCut: number;
+
+  /**
+   * LE CALAGE FIN DE L'ÉCRITURE DU CORRIDOR, en pixels du canvas — décale ce qu'il PRÉLÈVE, pas
+   * où il est posé (voir son usage dans PixelTunnel).
+   *
+   * POURQUOI UN RÉGLAGE À L'ŒIL ICI, alors que tout le reste est mesuré : un cône montre la
+   * MÊME fenêtre à une échelle différente sur chacune de ses tranches. Il n'existe donc pas
+   * d'alignement exact avec l'écran plat du poste — seulement un alignement de la tranche qui
+   * DOMINE l'image à l'instant du croisement, et laquelle domine dépend du retrait, du nombre
+   * de tranches et de la course de la caméra. Le défilement qui part du croisement (voir
+   * uTravel) met la tranche 0 à la bouche ; ces deux nombres finissent le travail.
+   */
+  corrX: number;
+  corrY: number;
 
   /* ---- Le texte dans le canvas du tube ---------------------------------- */
   /**
@@ -325,14 +741,28 @@ export type PosteTweak = {
  *
  * TOUT LE RESTE VIENT D'UNE SESSION DE RÉGLAGE (2026-08-05), pas de la mesure d'origine.
  *
- * L'écran : le rectangle relevé sur capture était min (-2.464, -0.303) / max (1.254,
- * 2.701) — trop large et trop bas, le texte sortait par le haut du verre. Retenu :
- * min (-2.373, 0.513) / max (-0.223, 2.355), soit centre (-1.298, 1.434) et 2.150 × 1.842
- * ici. Le texte suit : descendu à y = 30, corps 31 px, et un halo poussé à 22.5 — trois
+ * L'ÉCRAN A ÉTÉ RE-DÉRIVÉ D'UNE MESURE, PAS D'UNE CAPTURE. Les valeurs d'avant — centre
+ * (-1.298, 1.434), 2.150 × 1.842 — avaient été relevées à l'œil, et elles collaient le canvas au
+ * coin HAUT-GAUCHE de l'écran du poste en n'en couvrant que 56 % de la largeur. Mesuré au
+ * framebuffer (le creux sombre du tube encadré par le boîtier clair, à comparer aux quatre coins
+ * du canvas projetés par la visée manuelle), sur le viewport 1512×863 :
+ *
+ *   écran du poste : -244 → +144 px (388 de large), -230 → +59 px (289 de haut)
+ *   canvas d'avant : -238 → -21 px (217 de large), -233 → -48 px (185 de haut)
+ *
+ * D'où le facteur 1.79 en largeur et 1.56 en hauteur, et le recentrage : centre (-0.51, 0.88),
+ * 3.85 × 2.88. Le rapport tombe à 1.34, celui de l'écran mesuré, quand le canvas vaut 1.333
+ * (512/384) — l'agrandissement ne déforme donc rien.
+ *
+ * C'EST LE BON LEVIER POUR GROSSIR LE TEXTE, et pas son corps : à corps constant, le texte
+ * grandit dans le même rapport (1.79) sans qu'une ligne d'habillage change. Grossir la police,
+ * lui, coûte un caractère par ligne à chaque cran (voir tubeLines). Le texte suit : descendu à y = 30, corps 31 px, et un halo poussé à 22.5 — trois
  * fois celui d'origine, un phosphore qui bave franchement dans le verre.
  *
- * LE CADRAGE : `fill` descendu de 0.5 à 0.42 (réglé à la molette, en passant par 0.32 —
- * trop petit sur un écran de bureau). Ce n'est pas neutre pour la plongée : le rectangle du
+ * LE CADRAGE : `fill` remonté à 0.5 pour que le poste — et donc le texte de son écran —
+ * paraisse plus grand. Il était descendu à 0.42 (en passant par 0.32, trop petit), puis remonté
+ * quand grossir le seul texte s'est avéré coûter une ligne d'habillage pour rien : c'est
+ * l'objet entier qu'il fallait rapprocher, pas le corps du texte. Ce n'est pas neutre pour la plongée : le rectangle du
  * tube, et avec lui `tubeMouth.frontZ`, rétrécit d'autant ; voir la note de
  * DIVE_FADE_START/END dans ChromeTableau.
  *
@@ -354,33 +784,63 @@ const DEFAULTS: Omit<PosteTweak, "textNonce" | "replayNonce"> = {
   skinTint: "#c2c2c2",
   skinSat: 0.36,
   skinGain: 1.36,
-  fill: 0.42,
-  scrX: -1.298,
-  scrY: 1.434,
-  scrW: 2.15,
-  scrH: 1.842,
+  fill: 0.5,
+  scrX: -0.51,
+  scrY: 0.88,
+  scrW: 3.85,
+  scrH: 2.88,
   aimAuto: true,
   // Le centre du canvas — jamais utilisé tant que `aimAuto` tient, et remplacé par le point
   // mesuré à la seconde où on bascule (voir le panneau) : ces deux nombres ne sont un défaut
   // que pour le premier rendu, pas une visée que quelqu'un aurait choisie.
   aimX: 256,
   aimY: 192,
-  holeWin: 2,
+  dragX: -2,
+  dragY: 4.8,
+  holeWin: 8,
+  zoomChars: 5,
+  zoomSpan: 0.6,
   diveArrive: 0.5,
-  divePast: 7,
-  crossIn: 0.13,
-  crossOut: 0.08,
+  divePast: 2.7,
+  crossIn: 0.06,
+  crossHold: 0.04,
+  crossOut: 0.03,
   birthDim: 0.4,
   birthSpan: 1,
-  aimBy: 2,
-  textX: 26,
+  aimFrom: 3.5,
+  aimBy: 1.5,
+  gridScale: 5.5,
+  slices: 40,
+  blockQuad: true,
+  fillXY: 0.48,
+  fillIn: 0.2,
+  growth: 0.59,
+  atten: 0,
+  discard: 0.6,
+  mouthBack: 0.06,
+  peak: 2.8,
+  cycles: 1,
+  tubeShaft: true,
+  tubeStep: 0.2,
+  tubeWall: 0.95,
+  tubeWallIn: 0.1,
+  dissolveAt: 0.5,
+  tunnelLoop: false,
+  fallAt: 0.8,
+  restLevel: 0,
+  cellCut: 0,
+  corrX: 0,
+  corrY: 0,
+  pixelHalo: 0.85,
+  pixelGamma: 1.15,
+  textX: 12,
   textY: 30,
-  textSize: 31,
-  textGlow: 22.5,
+  textSize: 20,
+  textGlow: 14,
   textFull: false,
   textStack: false,
   textChar: 0.07,
-  textHold: 1.4,
+  textHold: 1.6,
 };
 
 /** Les clés dont le mouvement oblige le tube à repeindre son canvas. */
@@ -429,6 +889,17 @@ export const posteTweak = {
   },
 };
 
+/**
+ * UN HUBLOT DE DÉVELOPPEMENT — `window.__poste` en dev, rien en prod. Même motif que
+ * `window.__form` (formClock) et `window.__tunnel` (PixelTunnel) : le store est un singleton
+ * de module, donc assignable une fois pour toutes hors composant. Sert à MESURER (régler une
+ * barre depuis un script et lire le coût de frame) sans avoir à cliquer dans le panneau, et
+ * accessoirement à rejouer un état exact d'une session à l'autre.
+ */
+if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__poste = posteTweak;
+}
+
 export function usePosteTweak(): PosteTweak {
   return useSyncExternalStore(posteTweak.subscribe, posteTweak.get, posteTweak.get);
 }
@@ -440,6 +911,26 @@ export function usePosteTweak(): PosteTweak {
  * fait re-rendre la scène à chaque pixel de drag sur les onze autres barres — même motif
  * que useBlobOpen dans blobTweak : un primitif, un abonnement étroit.
  */
+/**
+ * S'abonner à la SEULE clé qui oblige PixelTunnel à reconstruire son tableau d'instances : la
+ * résolution de la grille et le nombre de tranches. Rendue comme une CHAÎNE et non comme un
+ * objet — `useSyncExternalStore` compare les snapshots par identité, donc un objet neuf à
+ * chaque lecture ferait boucler le rendu. Même motif que `usePosteEnv` juste en dessous : un
+ * primitif, un abonnement étroit, pour ne pas re-rendre la scène à chaque pixel de drag sur
+ * les vingt autres barres.
+ */
+export function useTunnelGrid(): string {
+  const key = () => {
+    const s = posteTweak.get();
+    return `${s.gridScale}|${Math.round(s.slices)}|${s.blockQuad ? "q" : "c"}`;
+  };
+  return useSyncExternalStore(
+    posteTweak.subscribe,
+    key,
+    () => `${DEFAULTS.gridScale}|${DEFAULTS.slices}|${DEFAULTS.blockQuad ? "q" : "c"}`
+  );
+}
+
 export function usePosteEnv(): PosteEnv {
   return useSyncExternalStore(
     posteTweak.subscribe,
@@ -519,8 +1010,12 @@ export function posteTweakAsSource(): string {
     `const BIRTH_DIM = ${n(s.birthDim, 2)};`,
     `const BIRTH_SPAN = ${n(s.birthSpan, 2)};`,
     `const CROSS_IN = ${n(s.crossIn, 3)};`,
+    `const CROSS_HOLD = ${n(s.crossHold, 3)};`,
     `const CROSS_OUT = ${n(s.crossOut, 3)};`,
     `const AIM_BY = ${n(s.aimBy, 2)};`,
+    `// dans FRAG_FRAME — la résolution du phosphore en approchant (uPixel)`,
+    `const PIXEL_HALO = ${n(s.pixelHalo, 2)};`,
+    `const PIXEL_GAMMA = ${n(s.pixelGamma, 2)};`,
     ...(s.crossOut <= 0
       ? [
           `// ⚠ CROSS_OUT EST À 0 : le poste est encore rendu quand le plan proche franchit le`,
@@ -539,8 +1034,48 @@ export function posteTweakAsSource(): string {
           `// sans l'autre, c'est le désaccord que cette molette existe pour rendre impossible.`,
         ]),
     ``,
+    `// src/components/chrome/PixelTunnel.tsx — la grille du corridor`,
+    `const COLS = ${4 * Math.max(1, Math.round(12 * s.gridScale))};`,
+    `const ROWS = ${3 * Math.max(1, Math.round(12 * s.gridScale))};`,
+    `const CELL = ${(1.68 / (4 * Math.max(1, Math.round(12 * s.gridScale)))).toFixed(5)};`,
+    `const SLICES = ${Math.round(s.slices)};`,
+    `const G = ${n(s.growth, 3)};`,
+    `const FILL_XY = ${n(s.fillXY, 3)};`,
+    `const FILL_IN = ${n(s.fillIn, 3)};`,
+    `const FILL_Z = ${n(21 * s.gridScale, 2)};`,
+    `const float ATTEN_K = ${n(s.atten, 3)};`,
+    `const float DISCARD_FRAC = ${n(s.discard, 2)};`,
+    ...(s.restLevel === 0
+      ? [`// REST retiré du fragment (uRest = 0) : les cellules éteintes n'existent plus.`]
+      : [`const float REST_LEVEL = ${n(s.restLevel, 2)};`]),
+    `// dans ChromeTableau — la correction du tirage du verre, px de canvas`,
+    `const dragU = ${n(s.dragX, 1)} / 512;`,
+    `const dragV = ${n(s.dragY, 1)} / 384;`,
+    `const float CELL_CUT = ${n(s.cellCut, 3)};`,
+    `// la forme du corridor, et l'animation de la sortie`,
+    `const SHAFT = ${s.tubeShaft};`,
+    ...(s.tubeShaft
+      ? [
+          `const STEP = ${n(s.tubeStep, 2)}; // × REF_HW`,
+          `const WALL = ${n(s.tubeWall, 2)};`,
+          `const WALL_IN = ${n(s.tubeWallIn, 2)};`,
+        ]
+      : []),
+    `const BLOCK = ${s.blockQuad ? `"ruban"` : `"cube"`};`,
+    `const LOOP = ${s.tunnelLoop};`,
+    `const FALL_AT = ${n(s.fallAt, 2)};`,
+    `const DISSOLVE_AT = ${n(s.dissolveAt, 2)};`,
+    `const MOUTH_BACK = ${n(s.mouthBack, 3)};`,
+    `const float PEAK = ${n(s.peak, 2)};`,
+    `const CYCLES = ${Math.round(s.cycles)};`,
+    ...(s.corrX === 0 && s.corrY === 0
+      ? []
+      : [`// le calage fin du prélèvement, px de canvas`, `const CORR_X = ${Math.round(s.corrX)};`, `const CORR_Y = ${Math.round(s.corrY)};`]),
+    ``,
     `// src/lib/tubeHole.ts`,
     `const WINDOW_CHARS = ${n(s.holeWin, 2)};`,
+    `const ZOOM_CHARS = ${n(s.zoomChars, 2)};`,
+    `const ZOOM_SPAN = ${n(s.zoomSpan, 2)};`,
     ...(s.aimAuto
       ? [`// (visée AUTO : le « a » mesuré est resté le bon point — rien à cuire, measure() suffit.)`]
       : [

@@ -177,7 +177,10 @@ body::after {
      0.14 → 2.5 / 1.7, and this → about 3.1 / 2.3. Past ~0.2 the void starts reading
      grey and the chrome loses its edge; going further than that is not a louder
      grain, it is a different universe (photocopy, not paper). */
-  opacity: 0.175;
+  /* × --grain, que ChromeTableau baisse à 0 en entrant dans l'écran du poste : passé le
+     verre on n'est plus sur la page imprimée mais dans un tube (voir son useFrame). Le
+     défaut 1 vaut partout ailleurs, y compris si le canvas n'est jamais monté. */
+  opacity: calc(0.175 * var(--grain, 1));
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1 0 0 0 -0.5'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)'/%3E%3C/svg%3E");
   background-size: 180px 180px;
 }

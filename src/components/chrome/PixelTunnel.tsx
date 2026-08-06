@@ -2,16 +2,25 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { BoxGeometry, InstancedBufferAttribute, ShaderMaterial, Vector2 } from "three";
+import {
+  BoxGeometry,
+  DoubleSide,
+  FrontSide,
+  InstancedBufferAttribute,
+  PlaneGeometry,
+  ShaderMaterial,
+  Vector2,
+} from "three";
 import type { InstancedMesh, PerspectiveCamera } from "three";
 import { formState } from "@/lib/formClock";
 import { smoothstep } from "@/lib/formChoreo";
-import { screenFill, tubeMouth, tunnelCross } from "@/lib/tubeMouth";
+import { screenFill, screenFillUnit, tubeMouth, tunnelCross } from "@/lib/tubeMouth";
+import { tunnelLive } from "@/lib/tunnelLive";
 import { tubeHole } from "@/lib/tubeHole";
 // Une SEULE molette est lue ici, `diveArrive` — pas un panneau pour ce fichier (voir « PAS DE
 // PANNEAU DEV ICI » dans l'en-tête, qui vaut toujours pour G/Z0/CELL/REST) : c'est le seuil
 // que formClock possède et que ce fragment recopiait en dur.
-import { posteTweak } from "@/lib/posteTweak";
+import { posteTweak, useTunnelGrid } from "@/lib/posteTweak";
 import { tubeScreen } from "@/lib/tubeScreen";
 import { TV_LINES } from "@/lib/tubeLines";
 
@@ -47,12 +56,20 @@ import { TV_LINES } from "@/lib/tubeLines";
  * plutôt que de dépendre d'une garantie d'ordre de rendu de React que ce fichier ne
  * vérifie pas.
  *
- * LES CELLULES ÉTEINTES EXISTENT. Le masque de phosphore couvre tout le tube, pas
- * seulement les lettres allumées : chaque cellule porte une couleur de repos sombre
- * (REST) à laquelle s'ADDITIONNE l'échantillon du canvas — jamais un mix, un phosphore
- * émet (même doctrine que FRAG_CANVAS/FRAG_FRAME dans ChromeTableau). Sans REST, le
- * canvas étant noir à ~95 % de sa surface (voir tubeScreen.draw), le corridor serait une
- * bande de texte flottant dans le vide plutôt qu'un tunnel dont on voit les parois.
+ * LES CELLULES ÉTEINTES N'EXISTENT PLUS, ET C'EST UN RENVERSEMENT ASSUMÉ. Elles existaient :
+ * le masque de phosphore couvrait tout le tube, chaque cellule portant une couleur de repos
+ * sombre (REST) à laquelle s'ADDITIONNE l'échantillon du canvas — jamais un mix, un phosphore
+ * émet (même doctrine que FRAG_CANVAS/FRAG_FRAME dans ChromeTableau). L'argument était que
+ * sans REST, le canvas étant noir à ~95 % de sa surface, le corridor serait « une bande de
+ * texte flottant dans le vide plutôt qu'un tunnel dont on voit les parois ».
+ *
+ * CET ARGUMENT VALAIT POUR UNE AUTRE GÉOMÉTRIE. Il a été écrit quand chaque tranche
+ * échantillonnait le canvas ENTIER : les parois étaient alors le masque, faute de mieux.
+ * Depuis que le corridor prélève une fenêtre de texte et que la caméra entre DANS la
+ * contreforme du « a », les parois sont les TRAITS de la lettre — et le masque, lui, remplit
+ * précisément le trou qu'on est censé traverser. `uRest` (défaut 0) et `uCut` (le seuil de
+ * luminance sous lequel une cellule est retirée) rendent donc le vide au vide. Les deux sont
+ * au panneau : c'est un réglage d'image, pas une vérité.
  *
  * PAS DE PANNEAU DEV ICI. Les constantes géométriques ci-dessous (G, Z0, CELL, …) sont
  * des points de départ RAISONNABLES, réglés par le calcul (voir leurs commentaires). REST
@@ -82,8 +99,10 @@ const ROWS = 36;
  *  profondeur illimitée ». Réduire ici EN PREMIER si le budget de frame déborde (voir plus
  *  bas) : la profondeur du corridor se remarque moins que la résolution de sa grille. */
 const SLICES = 16;
-/** 48 × 36 × 16 — le nombre d'instances du mesh. */
-const COUNT = COLS * ROWS * SLICES;
+/* LE NOMBRE D'INSTANCES N'EST PLUS UNE CONSTANTE : il est calculé dans le composant depuis la
+ * grille vivante (`gridOf`) et passé au mesh — voir `count` là-bas pour ce que la constante
+ * cassait. COLS/ROWS/SLICES ne servent plus qu'à la grille RÉFÉRENCE (REF_HW/REF_HH) et aux
+ * valeurs initiales des uniformes. */
 
 /**
  * Le taux de croissance géométrique entre deux tranches. PAS une constante exportée par
@@ -124,11 +143,26 @@ const G = 0.35;
  * qui compte réellement ici (celui de la tranche la plus proche, pas celui « de loin »).
  *
  * Z0 GARDE NÉANMOINS SON RÔLE DE T6 : la profondeur locale à laquelle vise la caméra de
- * plongée est choisie légèrement AU-DELÀ de Z0 (voir CAM_DIVE_PAST_GLASS dans formClock.ts,
- * ≈ 1.14 · Z0, même rapport qu'avant cette tâche) — Z0 reste donc « le seuil », seulement il
- * ne fixe plus, seul, l'angle du cône.
+ * plongée est choisie AU-DELÀ de Z0 (voir `divePast` dans posteTweak) — Z0 reste donc « le
+ * seuil », seulement il ne fixe plus, seul, l'angle du cône.
+ *
+ * 2.2 → 0.85, ET LA RAISON EST UNE ERREUR DE CALIBRAGE, PAS UN GOÛT. Tout le raisonnement
+ * ci-dessus compare le cône au demi-champ de la caméra en citant « fov=42° ⇒ 21° » : c'est le
+ * demi-champ VERTICAL. Le demi-champ HORIZONTAL vaut atan(tan(21°)·aspect) — 35.2° sur le
+ * viewport de bureau mesuré (1999×1088). Le cône, lui, valait
+ * atan(FILL_XY·(1+DISCARD_FRAC)/DISCARD_FRAC·(COLS/2)·CELL/Z0) = 22.1° : il ne couvrait donc
+ * que des viewports jusqu'à 1.06:1. MESURÉ AU NAVIGATEUR : deux bandes noires sur les côtés,
+ * et — même cause — aucune paroi latérale qui défile, donc un corridor qui lisait comme « la
+ * même lettre en plus gros » au lieu d'une traversée.
+ *
+ * 0.85 porte le demi-angle à 46.4°, ce qui couvre jusqu'à 2.74:1 (un 21:9 est à 2.33). LE
+ * RISQUE EST DE L'AUTRE CÔTÉ et il est documenté juste au-dessus : trop large, la caméra bute
+ * sur la tranche la plus proche qui remplit l'écran — c'est ce que Z0=0.2 (72°) donnait en T5.
+ * Ce qui a changé depuis, et qui rend 46° tenable là où 72° ne l'était pas, c'est
+ * DISCARD_FRAC=4.0 (T7) : la tranche proche est RETIRÉE, pas seulement assombrie. Le
+ * commentaire de CELL, plus bas, porte le calcul de ce demi-angle-là.
  */
-const Z0 = 2.2;
+const Z0 = 0.85;
 /**
  * Taille d'une cellule (unités monde) à l'échelle de référence (tranche 0). DEPUIS CETTE
  * TÂCHE (T7), CELL FIXE DEUX CHOSES À LA FOIS, ET C'EST LA SOURCE DE LA TENSION RÉSOLUE
@@ -193,6 +227,23 @@ const REF_HW = (COLS / 2) * CELL;
 const REF_HH = (ROWS / 2) * CELL;
 
 /**
+ * LA GRILLE VIVANTE, dérivée de `gridScale` (posteTweak). COLS et ROWS restent des multiples
+ * de 4 et 3 — donc exactement 4:3, la condition des cellules carrées — et CELL est déduite de
+ * l'INVARIANT `(COLS/2)·CELL = REF_HW` : la bouche du corridor et l'angle de son cône ne
+ * bougent pas quand on change la résolution, seule la finesse des blocs change. FILL_Z suit
+ * l'inverse de CELL pour que l'étendue des cellules EN PROFONDEUR reste la même — sans quoi
+ * une grille fine laisserait des trous entre les tranches (voir la condition de la tranche
+ * proche dans le commentaire de CELL).
+ */
+function gridOf(scale: number) {
+  const base = Math.max(1, Math.round(12 * scale));
+  const cols = 4 * base;
+  const rows = 3 * base;
+  const cell = (2 * REF_HW) / cols;
+  return { cols, rows, cell, fillZ: (FILL_Z * CELL) / cell };
+}
+
+/**
  * Combien de « tranches » on traverse sur la PLONGÉE ENTIÈRE (dive 0→1). Choisi égal à
  * SLICES : c'est la seule valeur qui fait coïncider exactement « la plongée est finie »
  * et « le corridor a bouclé une fois pile » — recycle() est périodique de période SLICES
@@ -202,7 +253,9 @@ const REF_HH = (ROWS / 2) * CELL;
  * choix tout aussi défendable pour la VITESSE perçue ; celle-ci est retenue pour ce
  * qu'elle rend exact plutôt que pour son effet, qui reste à juger à l'écran.
  */
-const TRAVEL_PER_DIVE = SLICES;
+/* TRAVEL_PER_DIVE A DÉMÉNAGÉ DANS LE useFrame (`grid.slices`) — le raisonnement ci-dessus est
+ * inchangé, mais le nombre de tranches est réglable depuis le panneau, et une constante figée
+ * ici aurait fait boucler le corridor sur un cycle qui n'est plus le sien. */
 
 /**
  * Sous ce seuil de `dive`, le corridor n'existe pas visuellement — voir le useFrame plus
@@ -224,20 +277,86 @@ uniform vec2 uHoleUv;
 uniform float uSpan;
 attribute vec2 aCell;
 attribute float aSlice;
-varying vec2 vUvCell;
+varying float vLuma;
 varying float vSc;
-varying float vDepth;
+varying float vNear;
 
-const float G = ${G};
-const float Z0 = ${Z0};
+/** La largeur du fondu d'ENTRÉE juste après le retrait, en unités du seuil — voir vNear. */
+const float FADE_FRAC = 0.15;
+
+/*
+ * LE TRI DES BLOCS EST ICI, PLUS DANS LE FRAGMENT — ET C'EST CE QUI REND LA GRILLE FINE
+ * JOUABLE.
+ *
+ * Les deux « discard » du fragment shader (la tranche proche retirée, et la cellule éteinte
+ * sous uCut) testaient des grandeurs CONSTANTES PAR INSTANCE : vDepth ne dépend que de
+ * aSlice, la luminance que de aCell. On rastérisait donc un bloc entier, on shadait chacun
+ * de ses pixels, puis on les jetait tous — pour la grande majorité des blocs, le canvas du
+ * terminal étant presque partout noir. Pire : « discard » interdit au GPU l'early-Z, donc
+ * les blocs SURVIVANTS se repeignaient les uns par-dessus les autres sur toute la
+ * profondeur du corridor.
+ *
+ * Mesuré à dive 0.8 : 1 728 000 blocs = 79,7 ms/frame avant, et 6 238 080 (le réglage
+ * « Pixels » poussé) = 291 ms — injouable. Le même test fait ici sort l'instance du volume
+ * de clip (gl_Position hors [-1,1], donc zéro fragment), et le fragment shader n'a plus de
+ * discard du tout : l'early-Z revient pour ceux qui restent.
+ *
+ * LA LECTURE DE TEXTURE DANS LE VERTEX SHADER coûte 36 fetches par bloc (le cube) là où le
+ * fragment n'en faisait qu'un par pixel — mais les 36 tombent sur LE MÊME texel, donc dans
+ * le cache L1 de la texture, et elle remplace l'échantillonnage du fragment (vLuma, ci-
+ * dessous, remplace vUvCell : le fragment n'a plus besoin du canvas).
+ */
+uniform sampler2D uScreen;
+uniform float uCut;
+uniform float uCamDepth;
+uniform float uDiscard;
+// 1 = le corridor boucle (recycle), 0 = on le traverse une fois — voir main().
+uniform float uLoop;
+/*
+ * uShaft — 1 = LE PUITS (blocs de taille FIXE, tranches à espacement CONSTANT), 0 = le cône
+ * auto-similaire d'origine. Ce n'est pas un réglage d'image, c'est le seul moyen de voir les
+ * pixels grossir, et la raison est démontrable :
+ *
+ * dans le cône, z(k) = z0·(1+g)^(k−travel), et la taille d'un bloc COMME son écart à l'axe sont
+ * tous deux ∝ z, toutes les tranches échantillonnant la même fenêtre du canvas. Avancer travel
+ * de 1 fait donc prendre à chaque tranche la place, la taille ET l'image de sa voisine : l'image
+ * rendue est EXACTEMENT périodique de période un cran. Un zoom infini à la Droste — les blocs
+ * s'écartent, meurent au rayon de retrait, l'image se réinitialise. Aucune progression n'est
+ * visible par construction, et c'est ce que le va-et-vient rapporté à l'écran décrivait. Enlever
+ * la boucle « recycle » n'y pouvait rien : l'auto-similarité EST la boucle.
+ *
+ * Dans le puits, la section est constante (la fenêtre de la lettre, extrudée), les tranches sont
+ * espacées de uStep et les blocs gardent leur taille : un bloc à distance d couvre taille/d, donc
+ * il grossit vraiment en approchant, rien ne se répète, et la sortie est littérale — les derniers
+ * blocs filent hors cadre.
+ */
+uniform float uShaft;
+// Le pas entre deux tranches du puits, en unites locales (voir « tubeStep » dans posteTweak).
+uniform float uStep;
+// La part de ce pas qu'un bloc occupe en profondeur : a 1 la paroi est continue (voir « tubeWall »).
+uniform float uWall;
+
+/*
+ * LA GEOMETRIE DU CORRIDOR EST EN UNIFORMES, PLUS EN CONSTANTES CUITES — et ce n'est pas une
+ * preference de style. Ces sept nombres sont exactement ceux que le panneau dev regle : cuits
+ * par interpolation de template, chaque cran de barre reconstruisait la source GLSL et
+ * relancait une compilation, donc un panneau injouable. En uniformes, seul le tableau
+ * d'instances (aCell/aSlice) se reconstruit, et seulement quand la RESOLUTION change.
+ *
+ * Z0 reste calibre contre le demi-champ HORIZONTAL de la camera (voir son commentaire plus
+ * haut) : il n'est pas au panneau, parce que la profondeur ou s'arrete la camera (<< divePast >>
+ * dans posteTweak) est exprimee dans une unite qui en depend.
+ */
+uniform float uG;
+uniform float uZ0;
 // D, pas SLICES : le fichier de test (tunnelGeom.test.ts) nomme sa constante de boucle D
 // pour la même quantité — repris ici pour que les deux se lisent côte à côte.
-const float D = ${SLICES}.0;
-const float COLS = ${COLS}.0;
-const float ROWS = ${ROWS}.0;
-const float CELL = ${CELL};
-const float FILL_XY = ${FILL_XY};
-const float FILL_Z = ${FILL_Z}${Number.isInteger(FILL_Z) ? ".0" : ""};
+uniform float uD;
+uniform float uCols;
+uniform float uRows;
+uniform float uCell;
+uniform float uFillXY;
+uniform float uFillZ;
 
 /*
  * sliceZ ET recycle — RETRANSCRITES de src/lib/tunnelGeom.ts, vérifiées ligne à ligne
@@ -274,46 +393,170 @@ float recycle(float z, float travel, float z0, float g, float slices) {
 }
 
 void main() {
-  float z = recycle(sliceZ(aSlice, Z0, G), uTravel, Z0, G, D);
-  float sc = z / Z0;
+  /*
+   * UNE SEULE TRAVERSÉE, OU LA BOUCLE — voir « tunnelLoop » dans posteTweak pour le geste.
+   *
+   * Sans boucle, « avancer » se réduit à décaler l'INDICE de la tranche : sliceZ(k − travel) au
+   * lieu de sliceZ(k), ce qui est exact et pas une approximation, la suite étant géométrique
+   * (z0·(1+g)^k). Une tranche dont l'indice décalé devient négatif passe donc derrière la caméra
+   * et n'est plus jamais redessinée — le retrait de la tranche proche (plus bas) s'en occupe
+   * avant qu'elle ne balaye tout le cadre. C'est ce qui donne une FIN au corridor : les dernières
+   * tranches, les plus larges du cône, s'écartent puis dégagent.
+   *
+   * « recycle », lui, ramène au fond ce qui est passé trop près : c'est la boucle, donc un tube
+   * sans sortie.
+   */
+  /*
+   * z = LA PROFONDEUR DE LA TRANCHE depuis la bouche, sc = L'ÉCHELLE de son motif.
+   *
+   * Puits : espacement constant (uStep) et sc = 1 — les blocs ne changent JAMAIS de taille dans le
+   * monde, donc leur taille à l'écran ne dépend que de leur distance à la caméra. En boucle, la
+   * tranche passée devant repart au fond (modulo sur les crans, pas sur les logarithmes).
+   *
+   * Cône : la suite géométrique d'origine (voir uShaft pour ce qu'elle empêche de voir).
+   */
+  float z;
+  float sc;
+  if (uShaft > 0.5) {
+    float k = uLoop > 0.5 ? mod(mod(aSlice - uTravel, uD) + uD, uD) : aSlice - uTravel;
+    z = k * uStep;
+    sc = 1.0;
+  } else {
+    z = uLoop > 0.5
+      ? recycle(sliceZ(aSlice, uZ0, uG), uTravel, uZ0, uG, uD)
+      : sliceZ(aSlice - uTravel, uZ0, uG);
+    sc = z / uZ0;
+  }
+
+  // uHoleUv + (aCell − 0.5) · uSpan, PAS aCell BRUT — voir l'en-tête du fichier. "aCell"
+  // reste la position de la cellule dans la grille DE RÉFÉRENCE (0..1, inchangé, c'est ce qui
+  // place le bloc dans "cellRef" plus bas) ; c'est SEULEMENT le point du canvas qu'elle
+  // échantillonne qui change — recentré sur le trou et resserré à sa fenêtre au lieu de courir
+  // sur les 512×384 px entiers. "(aCell − 0.5)" est déjà centré sur 0 (comme "cellRef"), donc
+  // à "uSpan" = l'étendue pleine de la fenêtre, une cellule en bord de grille (aCell ≈ 0 ou 1)
+  // atterrit exactement sur le bord de la fenêtre, pas au-delà.
+  vec2 uvCell = uHoleUv + (aCell - 0.5) * uSpan;
+  // LE SEUIL PORTE SUR LA LUMINANCE BRUTE, AVANT uNeon (voir FRAG) : la naissance du corridor
+  // divise la luminance par plus de deux, donc seuiller après ferait disparaître le corridor
+  // ENTIER à l'instant du fondu, puis réapparaître par morceaux.
+  vLuma = dot(texture2D(uScreen, uvCell).rgb, vec3(0.2126, 0.7152, 0.0722));
+  /*
+   * LE RETRAIT DE CE QUI EST TROP PRÈS — et son unité change avec la forme.
+   *
+   * Puits : la distance à la caméra est z − uCamDepth (SIGNÉE : négative derrière l'œil, donc
+   * retirée du même coup), et le seuil se compte en PAS. Un bloc gardé jusqu'à 0.4 pas grossit
+   * 2.5 fois par rapport à un bloc à un pas — c'est ce facteur qui se voit.
+   *
+   * Cône : la distance ABSOLUE, seuillée en multiples de la profondeur caméra (voir uDiscard).
+   */
+  float dCam = uShaft > 0.5 ? z - uCamDepth : abs(z - uCamDepth);
+  float cutoff = uShaft > 0.5 ? uDiscard * uStep : uDiscard * max(uCamDepth, 1e-3);
+  if (dCam < cutoff || vLuma < uCut) {
+    // HORS DU VOLUME DE CLIP, pas une échelle nulle : un triangle dégénéré serait tout de même
+    // assemblé et clippé au cas par cas, alors qu'un w=1 avec x/y/z=2 sort franchement de
+    // [-1,1] — le clipping le supprime avant tout balayage, pour les huit sommets à la fois.
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
 
   // La cellule à l'échelle de référence (tranche 0) : centrée sur la grille, Y inversé
   // pour que le haut du canvas (aCell.y → 0, où le terminal écrit) devienne le haut du
   // corridor (Y local positif) — un choix de présentation, pas une contrainte de
   // tunnelGeom, qui ne connaît que des grandeurs scalaires.
-  vec2 cellRef = vec2((aCell.x - 0.5) * COLS, (0.5 - aCell.y) * ROWS) * CELL;
+  vec2 cellRef = vec2((aCell.x - 0.5) * uCols, (0.5 - aCell.y) * uRows) * uCell;
   // « position » : le cube unité de BoxGeometry(1,1,1), en [-0.5, 0.5] par axe. Sa propre
   // taille ET son décalage dans la grille grossissent tous deux par « sc » : c'est
   // l'invariant du tube droit appliqué à un bloc entier, pas seulement à son centre —
   // sans quoi les blocs resteraient à taille constante dans un cône qui, lui, s'évase.
-  vec3 boxRef = vec3(cellRef, 0.0) + position * vec3(CELL * FILL_XY, CELL * FILL_XY, CELL * FILL_Z);
+  /*
+   * LA LONGUEUR DU BLOC EN PROFONDEUR, et pourquoi elle ne peut pas être la même dans les deux
+   * formes. uFillZ (21 × la résolution) est calibré POUR LE CÔNE, où il compense la taille de
+   * cellule pour que l'étendue en profondeur reste constante quand la grille s'affine. Repris tel
+   * quel dans le puits, il donnait des barres de ~4,4 PAS de long : les blocs se chevauchaient sur
+   * toute la profondeur du tube, ce qui redonnait des stries continues au lieu de pixels qu'on
+   * dépasse un par un — vu à l'écran.
+   *
+   * Dans le puits, la longueur d'un bloc est donc une fraction du PAS (uWall, la molette
+   * « Paroi ») — et à 1 les blocs se touchent d'une tranche à l'autre : la paroi devient un mur
+   * continu. Ce n'est pas cosmétique, c'est ce qui fait qu'il n'y a qu'UNE ouverture au fond du
+   * tube, donc un bout de tunnel dont l'angle croît de façon monotone jusqu'à la sortie. Avec des
+   * blocs courts, chaque tranche a la sienne, la plus proche grandit puis cède la place à une plus
+   * petite, et le geste se lit comme un va-et-vient — voir « tubeWall » dans posteTweak.
+   */
+  float fz = uShaft > 0.5 ? uStep * uWall : uCell * uFillZ;
+  // Dans le puits, « sc » vaut 1 : la même ligne place donc des blocs de taille constante sur une
+  // section constante, sans qu'aucun cas particulier soit nécessaire ici.
+  vec3 boxRef = vec3(cellRef, 0.0) + position * vec3(uCell * uFillXY, uCell * uFillXY, fz);
   // Z NÉGATIF : la caméra par défaut de la scène est à z=+10, tournée vers -Z (voir
   // ChromeCanvas) — s'éloigner dans le corridor, c'est donc aller vers les z locaux
   // négatifs. tunnelGeom ne porte que des magnitudes positives (z0>0 précisé dans son
   // en-tête) ; le signe est une décision de présentation prise ICI, une seule fois.
   vec3 p = vec3(boxRef.xy * sc, -z + boxRef.z * sc);
 
-  // uHoleUv + (aCell − 0.5) · uSpan, PAS aCell BRUT — voir l'en-tête du fichier. "aCell"
-  // reste la position de la cellule dans la grille DE RÉFÉRENCE (0..1 sur 48×36, inchangé,
-  // c'est ce qui place le bloc dans "cellRef" ci-dessus) ; c'est SEULEMENT le point du canvas
-  // qu'elle échantillonne qui change — recentré sur le trou et resserré à sa fenêtre au lieu
-  // de courir sur les 512×384 px entiers. "(aCell − 0.5)" est déjà centré sur 0 (comme
-  // "cellRef"), donc à "uSpan" = l'étendue pleine de la fenêtre, une cellule en bord de grille
-  // (aCell ≈ 0 ou 1) atterrit exactement sur le bord de la fenêtre, pas au-delà.
-  vUvCell = uHoleUv + (aCell - 0.5) * uSpan;
-  vSc = sc;
-  // La profondeur RECYCLÉE, en unités locales — voir uCamDepth dans FRAG : le fondu de
-  // proximité en a besoin pour savoir à quelle distance de la caméra (le long du SEUL axe
-  // qui varie ici, l'axe du corridor) cette instance se trouve, sans reconstruire une
-  // distance 3D complète pour un fondu qui n'a besoin que de la profondeur.
-  vDepth = z;
+#ifdef RIBBON
+  /*
+   * LE BLOC EN RUBAN — MÊME SILHOUETTE QUE LE CUBE, QUATRE SOMMETS AU LIEU DE VINGT-QUATRE.
+   *
+   * Ce qui fait la strie radiale du corridor n'est PAS le volume du cube : c'est sa LONGUEUR en
+   * profondeur (uFillZ — les cellules sont des tubes, voir mouthBack) vue de biais depuis l'axe.
+   * Et ce fragment shader ne connaît aucune lumière : la couleur est plate sur toute l'instance
+   * (elle ne dépend que de vLuma/vSc/vDepth, constants par bloc). Deux formes de MÊME silhouette
+   * sortent donc EXACTEMENT les mêmes pixels — d'où le ruban, un quad face caméra étiré le long
+   * de l'axe, qui redessine le flanc du tube que la caméra voyait réellement.
+   *
+   * Une plaque plate (le premier essai) ne suffisait pas : sans étirement il ne reste qu'un point
+   * par cellule, et les stries disparaissent — mesuré ET vu, capture à l'appui.
+   *
+   * LA CAMÉRA EST SUR L'AXE, à la profondeur locale -uCamDepth (voir uCamDepth dans le useFrame :
+   * un point à z = uCamDepth est exactement sur elle). « across » est donc la tangentielle, et
+   * « along » la direction de l'axe RABATTUE dans le plan face caméra — la longueur vue du tube
+   * vaut sa longueur réelle × sin(angle axe/regard), qui tombe à zéro pile au point de fuite. On
+   * la borne à la largeur du bloc : au centre du cadre, le tube est vu par le bout, donc carré.
+   */
+  vec3 pc = vec3(cellRef * sc, -z);
+  vec3 v = normalize(pc - vec3(0.0, 0.0, -uCamDepth));
+  vec3 axis = vec3(0.0, 0.0, 1.0);
+  vec3 across = cross(axis, v);
+  float al = length(across);
+  across = al > 1e-4 ? across / al : vec3(1.0, 0.0, 0.0);
+  vec3 along = normalize(cross(v, across));
+  float w = uCell * uFillXY * sc;
+  /*
+   * LA POINTE DU TUBE NE DÉPASSE JAMAIS LA CAMÉRA — la borne qui rend le RETRAIT réglable.
+   *
+   * Ces tubes sont longs (uFillZ ≈ 1500 fois la largeur d'une cellule) pour que les tranches se
+   * recouvrent en profondeur. Un tube dont le CENTRE est à peine devant la caméra la traverse
+   * donc : la moitié avant passe derrière l'œil, ce qui reste se projette en polygone plein cadre
+   * et, ce matériau écrivant la profondeur, MASQUE tout le corridor derrière. Constaté à l'écran
+   * en baissant « Retrait » — l'image devenait noire au lieu de devenir vivante, et c'est ce que
+   * le retrait large d'origine évitait, au prix du grossissement qu'on cherche ici.
+   *
+   * Plafonner la demi-longueur à 0.9 · (z − profondeur caméra) supprime le cas par construction,
+   * quel que soit le retrait : le tube se RACCOURCIT en approchant, donc il grossit et redevient un
+   * bloc carré juste avant de filer — ce qui est précisément ce qu'on veut voir arriver.
+   */
+  float lenZ = min(fz * sc, 1.8 * max(z - uCamDepth, 0.0));
+  float lproj = max(lenZ * al, w);
+  p = pc + across * (position.x * w) + along * (position.y * lproj);
+#endif
+
+  /*
+   * LE FONDU D'ENTRÉE EST CALCULÉ ICI, PLUS DANS LE FRAGMENT — il ne dépend que de la tranche,
+   * donc il est constant par bloc, et le fragment n'a plus besoin ni de uCamDepth ni de uDiscard.
+   * Plancher à 0.4 : voir FADE_FRAC et le commentaire de uDiscard côté FRAG.
+   */
+  vNear = mix(0.4, 1.0, smoothstep(cutoff, cutoff + FADE_FRAC * max(uShaft > 0.5 ? uStep : uCamDepth, 1e-3), dCam));
+  // L'ATTÉNUATION SE LIT EN DISTANCE, PAS EN ÉCHELLE, dans le puits : sc y vaut 1 partout (voir
+  // plus haut), donc c'est la distance à la caméra, comptée en pas, qui dit « loin ».
+  vSc = uShaft > 0.5 ? 1.0 + dCam / max(uStep, 1e-4) : sc;
   vec4 wp = modelMatrix * vec4(p, 1.0);
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
 `;
 
 const FRAG = /* glsl */ `
-uniform sampler2D uScreen;
+// PAS DE uScreen ICI : le canvas n'est lu que dans le vertex shader (voir son en-tête), une
+// fois par bloc au lieu d'une fois par pixel.
 uniform float uDive;
 // Le point où la caméra a fini d'avancer (CAM_DIVE_ARRIVE, aujourd'hui la molette
 // « diveArrive » de posteTweak) — voir L'ARC DE LUMINOSITÉ plus bas. UN UNIFORME ET PAS UNE
@@ -332,10 +575,18 @@ uniform float uEnter;
 // sortie les laisse SATURES et ne se voit pas. En entree, il change ce que le superlineaire
 // amplifie -- c'est la seule facon de rendre le corridor moins neon plutot que moins visible.
 uniform float uNeon;
-uniform float uCamDepth;
-varying vec2 vUvCell;
+uniform float uAtten;
+// Le masque de phosphore eteint (voir REST). uCut, le seuil sous lequel une cellule n'existe
+// pas, est passe dans le VERTEX shader — c'est lui qui retire les blocs desormais.
+uniform float uRest;
+// Le sommet de l'arc de luminosite : combien le corridor "luit" au plus fort de la traversee.
+uniform float uPeak;
+// Ou commence le fondu au noir, sur la traversee (0 = tout de suite, 1 = jamais) — voir main().
+uniform float uFallAt;
+varying float vLuma;
 varying float vSc;
-varying float vDepth;
+// Le fondu de proximité, calculé dans le vertex (il est constant par bloc) — voir vNear là-bas.
+varying float vNear;
 
 // Couleur de repos du masque de phosphore éteint — voir l'en-tête du fichier : sans elle
 // le corridor n'est qu'une bande de texte dans le vide. Vert-gris, du même esprit que le
@@ -382,7 +633,7 @@ const float BLOOM_K = 2.2;
 // rester lisibles avant que le fond ne s'assombrisse franchement, ce qu'une chute
 // linéaire en sc (qui grossit vite, géométriquement) aurait rendu trop abrupte dès les
 // toutes premières tranches. Choisi à l'œil sans navigateur — voir l'en-tête du fichier.
-const float ATTEN_K = 0.15;
+// EN UNIFORME (uAtten) — voir la note des uniformes du vertex.
 
 /*
  * L'ARC DE LUMINOSITÉ DU CORRIDOR (uArrive→1 de la plongée) — T6, table du plan : « le
@@ -401,7 +652,7 @@ const float ATTEN_K = 0.15;
  * fragment (REST compris) s'éteint plutôt que de simplement s'assombrir vers une couleur de
  * repos qui resterait visible.
  */
-const float PEAK = 3.2;
+// EN UNIFORME (uPeak) — voir la note des uniformes du vertex.
 
 /*
  * LA TRANCHE PROCHE — POURQUOI UN ASSOMBRISSEMENT NE SUFFIT PAS, ET CE QUE CETTE TÂCHE (T7)
@@ -449,7 +700,7 @@ const float PEAK = 3.2;
  * 0.406", atan ≈ 22° — à un degré du demi-champ (21°) de la caméra, vérifié au navigateur
  * (voir le rapport de tâche : dive 0.3/0.5/0.7/0.9, quatre captures).
  */
-const float DISCARD_FRAC = 4.0;
+// EN UNIFORME (uDiscard) — voir la note des uniformes du vertex.
 /**
  * La largeur du fondu d'ENTRÉE juste après le retrait — voir main() : sans lui, la première
  * tranche non retirée apparaîtrait à pleine intensité d'un coup, un pop plutôt qu'une
@@ -460,13 +711,12 @@ const float DISCARD_FRAC = 4.0;
  * étroite laisse donc la quasi-totalité du cycle à pleine luminosité, et ne s'active que
  * pour la minorité de tranches qui viennent tout juste de passer le retrait.
  */
-const float FADE_FRAC = 0.15;
+// FADE_FRAC A DÉMÉNAGÉ DANS LE VERTEX SHADER avec le fondu qu'elle règle (vNear) — le
+// raisonnement ci-dessus sur sa largeur est inchangé.
 
 void main() {
-  float d = abs(vDepth - uCamDepth);
-  float cutoff = DISCARD_FRAC * max(uCamDepth, 1e-3);
-  if (d < cutoff) discard;
-  vec3 lit = texture2D(uScreen, vUvCell).rgb;
+  // TOUT CE QUI EST CONSTANT PAR BLOC A DÉMÉNAGÉ DANS LE VERTEX SHADER — les deux « discard »
+  // (voir son en-tête) et le fondu de proximité (vNear). Ce fragment ne fait plus que colorer.
   // ADDITIF, jamais mélangé — un phosphore ÉMET (même doctrine que ChromeTableau) :
   // mélanger éteindrait REST là où le canvas est sombre, qui est presque partout.
   /*
@@ -479,24 +729,45 @@ void main() {
    * elle qui dessine les jambages et laisse le trou noir) et on lui substitue une teinte :
    * la couleur du canvas ne sert plus qu'à dire OÙ ça brille, plus de quelle couleur.
    */
-  float luma = dot(lit, vec3(0.2126, 0.7152, 0.0722)) * uNeon;
+  /*
+   * LES CELLULES ETEINTES N'EXISTENT PLUS — retirees, pas noircies, et la difference est
+   * entiere. Ce materiau est OPAQUE et ecrit la profondeur : une cellule noire devant en
+   * masquerait une eclairee derriere, donc le corridor paraitrait plus vide qu'il ne l'est au
+   * lieu de laisser voir sa paroi. "discard" est le seul geste qui vaut "il n'y a pas de bloc
+   * ici", et il epargne au passage le remplissage.
+   *
+   * LE SEUIL PORTE SUR LA LUMINANCE BRUTE, AVANT uNeon : la naissance du corridor divise la
+   * luminance par plus de deux (voir birthDim), donc appliquer le seuil apres aurait fait
+   * disparaitre le corridor ENTIER a l'instant du fondu, puis reapparaitre par morceaux.
+   */
+  // vLuma VIENT DU VERTEX SHADER, où elle est déjà lue et seuillée — le canvas n'est plus
+  // échantillonné par pixel : la luminance est constante sur le bloc (une cellule = un texel),
+  // donc l'interpoler d'un sommet à l'autre rend exactement la même valeur.
+  float luma = vLuma * uNeon;
   // Le halo, superlinéaire — voir BLOOM_P. Additif comme tout le reste de ce fichier : un
   // phosphore ÉMET, il ne se mélange pas au fond (même doctrine que REST ci-dessus et que
   // le tube dans ChromeTableau).
-  vec3 col = REST + NEON * (luma + BLOOM_K * pow(luma, BLOOM_P));
+  vec3 col = REST * uRest + NEON * (luma + BLOOM_K * pow(luma, BLOOM_P));
   // Le point de fuite s'assombrit : vSc croît géométriquement avec la profondeur
   // recyclée (voir le vertex shader), donc l'atténuer directement évite de reconvertir
   // une distance qui n'existe déjà plus une fois recyclée dans [Z0, Z0·(1+g)^D).
-  col *= 1.0 / (1.0 + ATTEN_K * (vSc - 1.0));
+  col *= 1.0 / (1.0 + uAtten * (vSc - 1.0));
   // PLANCHER À 0.4, PAS 0 — voir DISCARD_FRAC : AU cutoff, le demi-angle de la tranche
   // exposée est PAR CONSTRUCTION proche de celui de la caméra (≈22° contre 21°), pas cent
   // fois trop grand ; partir de zéro assombrissait pour rien la fraction (mesurée ≈10 %,
   // voir FADE_FRAC) du cycle où le voisin non retiré tombe tout juste après le cutoff.
-  col *= mix(0.4, 1.0, smoothstep(cutoff, cutoff + FADE_FRAC * max(uCamDepth, 1e-3), d));
+  col *= vNear;
   float p = clamp((uDive - uArrive) / max(1.0 - uArrive, 1e-3), 0.0, 1.0);
   float rise = smoothstep(0.0, 0.45, p);
-  float fall = smoothstep(0.45, 1.0, p);
-  float mult = (1.0 + (PEAK - 1.0) * rise) * (1.0 - fall);
+  /*
+   * LE FONDU AU NOIR COMMENCE À uFallAt, PLUS À 0.45 CUIT — sans quoi il recouvre toute la
+   * traversée. Constaté à l'écran : en mode « on sort », le corridor est bien épuisé vers la fin
+   * (travel 38.6 sur 40), mais l'arc l'avait déjà éteint à 7 % — donc la sortie du tube, qui EST
+   * l'élargissement des dernières tranches, se jouait dans le noir. Repousser ce départ laisse
+   * voir le tube s'ouvrir, puis éteint.
+   */
+  float fall = smoothstep(uFallAt, 1.0, p);
+  float mult = (1.0 + (uPeak - 1.0) * rise) * (1.0 - fall);
   col *= mult * uEnter;
   gl_FragColor = vec4(col, 1.0);
 }
@@ -508,16 +779,28 @@ void main() {
  *  quelle tranche du corridor (aSlice). Aucun instanceMatrix — la position de chaque
  *  instance est entièrement recalculée dans le vertex shader à partir de ces deux
  *  attributs, jamais posée depuis le CPU. */
-function buildGrid(): BoxGeometry {
-  const geo = new BoxGeometry(1, 1, 1);
-  const cell = new Float32Array(COUNT * 2);
-  const slice = new Float32Array(COUNT);
+function buildGrid(
+  cols: number,
+  rows: number,
+  slices: number,
+  quad: boolean
+): BoxGeometry | PlaneGeometry {
+  /*
+   * PLAQUE OU CUBE — voir `blockQuad` dans posteTweak pour ce que ça coûte et ce que ça perd.
+   * PlaneGeometry(1,1) est bien dans le même repère que BoxGeometry(1,1,1) sur X/Y ([-0.5, 0.5],
+   * donc « position » garde le même sens dans le vertex shader) et vaut z=0 partout, ce qui
+   * annule simplement le terme uFillZ.
+   */
+  const geo = quad ? new PlaneGeometry(1, 1) : new BoxGeometry(1, 1, 1);
+  const count = cols * rows * slices;
+  const cell = new Float32Array(count * 2);
+  const slice = new Float32Array(count);
   let i = 0;
-  for (let k = 0; k < SLICES; k++) {
-    for (let row = 0; row < ROWS; row++) {
-      for (let col = 0; col < COLS; col++) {
-        cell[i * 2] = (col + 0.5) / COLS;
-        cell[i * 2 + 1] = (row + 0.5) / ROWS;
+  for (let k = 0; k < slices; k++) {
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        cell[i * 2] = (col + 0.5) / cols;
+        cell[i * 2 + 1] = (row + 0.5) / rows;
         slice[i] = k;
         i++;
       }
@@ -561,7 +844,35 @@ function buildGrid(): BoxGeometry {
  */
 export function PixelTunnel() {
   const meshRef = useRef<InstancedMesh>(null);
-  const geometry = useMemo(() => buildGrid(), []);
+  /*
+   * LA GÉOMÉTRIE SE RECONSTRUIT QUAND LA RÉSOLUTION CHANGE, et seulement là : c'est le seul
+   * des réglages du corridor qui touche à une RESSOURCE (le tableau d'instances) plutôt qu'à
+   * un uniforme. Abonnement étroit à une CLÉ TEXTE et pas à un objet — `useSyncExternalStore`
+   * compare les snapshots par identité, donc rendre un objet neuf à chaque lecture bouclerait
+   * le rendu à l'infini (même motif que usePosteEnv dans posteTweak).
+   */
+  // L'instant du croisement, latché — voir le calcul de uTravel dans le useFrame.
+  const travelFrom = useRef(-1);
+
+  const gridKey = useTunnelGrid();
+  const grid = useMemo(() => {
+    const [scale, slices, shape] = gridKey.split("|");
+    return { ...gridOf(Number(scale)), slices: Number(slices), quad: shape === "q" };
+  }, [gridKey]);
+  const geometry = useMemo(
+    () => buildGrid(grid.cols, grid.rows, grid.slices, grid.quad),
+    [grid.cols, grid.rows, grid.slices, grid.quad]
+  );
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  /*
+   * LE NOMBRE D'INSTANCES DESSINÉES SUIT LA GRILLE, PAS LA CONSTANTE. three ne regarde pas la
+   * taille des attributs d'un InstancedMesh, il dessine `object.count` instances
+   * (WebGLRenderer.renderBufferDirect). Passer COUNT (48×36×16) ici tronquait donc tout
+   * réglage de « Pixels » aux 27 648 PREMIÈRES entrées du tableau — et comme buildGrid remplit
+   * tranche par tranche, ça ne laissait qu'un morceau de la tranche 0 : la bouche amputée par
+   * le haut et zéro profondeur, quel que soit le réglage.
+   */
+  const count = grid.cols * grid.rows * grid.slices;
   // .tex seulement : ce composant ne peint jamais le canvas, il ne fait que le lire (voir
   // l'en-tête du fichier pour pourquoi TV_LINES vient de ChromeTableau plutôt que d'être
   // redéclarée ici).
@@ -583,6 +894,26 @@ export function PixelTunnel() {
           uSpan: { value: 1 },
           // Écrasé par frame comme uDive, dont il est le seuil — voir sa déclaration dans FRAG.
           uArrive: { value: posteTweak.get().diveArrive },
+          // La géométrie du corridor — écrits par frame comme le reste (voir la note sur les
+          // uniformes dans VERT pour pourquoi ils ne sont plus cuits dans la source).
+          uG: { value: G },
+          uZ0: { value: Z0 },
+          uD: { value: SLICES },
+          uLoop: { value: 0 },
+          uShaft: { value: 1 },
+          uStep: { value: 0.2 },
+          uWall: { value: 1 },
+          uFallAt: { value: 0.45 },
+          uCols: { value: COLS },
+          uRows: { value: ROWS },
+          uCell: { value: CELL },
+          uFillXY: { value: FILL_XY },
+          uFillZ: { value: FILL_Z },
+          uAtten: { value: 0.15 },
+          uRest: { value: 1 },
+          uPeak: { value: 3.2 },
+          uCut: { value: 0 },
+          uDiscard: { value: 4 },
           uEnter: { value: 0 },
           uNeon: { value: 1 },
         },
@@ -594,8 +925,23 @@ export function PixelTunnel() {
         // donne gratuitement. Un matériau transparent aurait exigé un tri par profondeur
         // que three ne fait pas pour un InstancedMesh, et aurait mélangé les tranches
         // entre elles au lieu de les empiler.
+        /*
+         * RIBBON — le bloc en ruban plutôt qu'en cube (voir le vertex shader). Un `define` et pas
+         * un uniforme : la branche disparaît à la compilation, donc le mode cube ne paye rien du
+         * calcul de billboard et le mode ruban rien du `if`. Le matériau se reconstruit au
+         * changement (le seul moment où une recompilation est acceptable, comme la géométrie).
+         */
+        defines: grid.quad ? { RIBBON: "" } : {},
+        /*
+         * DOUBLE FACE EN MODE RUBAN, ET SEULEMENT LÀ. Le quad est réorienté dans le vertex shader
+         * (across/along), donc l'ordre de ses sommets ne dit plus rien de son orientation : à
+         * FrontSide (le défaut) la moitié des rubans partait en back-face culling — corridor
+         * entièrement noir, constaté à l'écran. Le cube, lui, garde son culling : ses faces
+         * arrière sont vraiment cachées, les retirer est gratuit.
+         */
+        side: grid.quad ? DoubleSide : FrontSide,
       }),
-    [screenTex]
+    [screenTex, grid.quad]
   );
 
   useFrame(({ camera }) => {
@@ -621,13 +967,15 @@ export function PixelTunnel() {
     // `birthSpan` écrans plus loin. Même unité que le croisement, donc les deux se raccordent
     // exactement là où l'un s'arrête.
     const birth =
-      1 - smoothstep(pt.crossOut - Math.max(pt.birthSpan, 1e-3), pt.crossOut, x);
+      1 - smoothstep(pt.crossHold - Math.max(pt.birthSpan, 1e-3), pt.crossHold, x);
+    // Le corridor monte entre `crossIn` et le PALIER, pendant que le poste reste plein (voir
+    // `crossHold` dans posteTweak) : c'est là que les deux se superposent.
     const enter = tunnelCross(
       camera.position.z,
       camera.near,
       Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360),
       pt.crossIn,
-      pt.crossOut
+      pt.crossHold
     );
     // Rien à dessiner avant que le croisement ne commence — même sortie anticipée que
     // ci-dessus, et c'est ce qui fait que le corridor n'existe plus « depuis dive ≈ 0 ».
@@ -685,10 +1033,62 @@ export function PixelTunnel() {
      * seule.
      */
     const hole = tubeHole();
+    // La bouche reste calée sur la fenêtre LARGE (`holeWin`) : c'est elle qui doit recouvrir
+    // l'écran au moment du fondu, et elle ne bouge plus ensuite (voir `zoomChars`).
     const mouth = 2 * hole.half;
     const sx = (Math.max(tubeMouth.hw, 1e-4) * mouth) / REF_HW;
     const sy = (Math.max(tubeMouth.hh, 1e-4) * mouth) / REF_HH;
-    mesh.position.set(tubeMouth.holeX, tubeMouth.holeY, tubeMouth.frontZ);
+    /*
+     * LA TRANCHE 0 EST POSÉE SUR LE VERRE, PAS L'ORIGINE DU CÔNE — d'où le « + Z0 · sx ». Le
+     * sommet du cône est à l'origine du mesh et la tranche 0 vit à Z0 en unités LOCALES derrière
+     * lui : ancrer l'origine au verre mettait donc la première tranche EN ARRIÈRE du verre, vue
+     * plus petite que le texte que le poste y peint. Mesuré au moment du fondu : un rapport
+     * d'échelle d'environ 1.8, donc deux images du même texte qui ne coïncidaient qu'en leur
+     * centre et divergeaient partout ailleurs — le désalignement visible pendant le croisement.
+     *
+     * Décalée en avant de Z0 · sx, la tranche 0 tombe exactement dans le plan du verre, à
+     * l'échelle exacte de la fenêtre qu'elle prélève (voir `mouth` plus haut) : les deux scènes
+     * se recouvrent. Ce qui la met VRAIMENT là au bon moment est le défilement qui part du
+     * croisement (voir uTravel) — sans lui, la tranche 0 aurait déjà glissé.
+     *
+     * La caméra s'enfonce d'autant en unités locales (Z0 + divePast · REF_HW au lieu de
+     * divePast · REF_HW), ce qui ne change pas ce qu'elle voit : le corridor est auto-similaire
+     * le long de son axe.
+     */
+    /*
+     * … MOINS UN RECUL, sans quoi la tranche 0 est À ÉGALITÉ avec la surface du verre : ce mesh
+     * est opaque et écrit la profondeur, donc il masquerait le texte peint au lieu de s'y
+     * superposer — mesuré, la superposition disparaissait entièrement. Voir `mouthBack` dans
+     * posteTweak pour l'arbitrage entre « visible à travers » et « à la bonne échelle ».
+     */
+    /*
+     * LE RECUL EST CE SEUL RÉGLAGE, SANS PLANCHER — et il y en a eu un, à retenir comme un
+     * contre-exemple. Il valait la DEMI-LONGUEUR D'UNE CELLULE, au motif que ces blocs sont des
+     * tubes (voir FILL_Z) et qu'un recul plus court les laisse traverser le verre. Le raisonnement
+     * était juste, la conséquence non : ce plancher vaut 0.5 · FILL_Z · CELL · sx, où le grid.cell
+     * et le grid.fillZ s'annulent — donc une CONSTANTE (≈0.41 unité monde au viewport testé),
+     * insensible à la résolution comme à la fenêtre, les deux choses qu'il prétendait couvrir. Or
+     * le réglage lui-même vaut ≈0.34 à mouthBack 0.13 : le plancher écrasait donc en silence TOUTE
+     * la moitié basse de la molette (tout ce qui est sous ≈0.16), c'est-à-dire exactement le sens
+     * « rapprocher la scène 2 » — d'où un corridor bloqué trop loin et trop petit pendant le
+     * fondu, sans que rien ne l'indique.
+     *
+     * Ce que le plancher voulait empêcher reste vrai (des tubes qui traversent le verre masquent
+     * le texte peint dans le rectangle de la bouche), mais ça se règle à l'œil sur CETTE molette,
+     * qui peut désormais aller jusqu'à passer devant le verre — d'autant que le croisement se joue
+     * maintenant à ras du verre (crossHold 0.05), où le poste a déjà presque disparu.
+     */
+    const recul =
+      pt.mouthBack * screenFillUnit(Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360));
+    /*
+     * LE DÉCALAGE Z0·sx N'EXISTE QUE POUR LE CÔNE — c'est ce qui amène sa tranche 0, qui vit à Z0
+     * DERRIÈRE le sommet, dans le plan du verre (voir juste au-dessus). Le puits, lui, met sa
+     * tranche 0 à z = 0 par construction (k · uStep avec k = 0), donc son origine EST la bouche :
+     * ajouter le décalage l'aurait posé Z0·sx trop en avant, et la première tranche aurait crevé
+     * le verre.
+     */
+    const apex = pt.tubeShaft ? 0 : Z0 * sx;
+    mesh.position.set(tubeMouth.holeX, tubeMouth.holeY, tubeMouth.frontZ + apex - recul);
     mesh.scale.set(sx, sy, sx);
     // La fenêtre de prélèvement — voir tubeHole.ts et l'en-tête du fichier. `half` est une
     // DEMI-largeur ; `uSpan`, lui, porte l'étendue PLEINE de la fenêtre (voir son usage dans
@@ -708,11 +1108,114 @@ export function PixelTunnel() {
      * haut, sans jamais être relevé.
      */
     const uniforms = (mesh.material as ShaderMaterial).uniforms;
-    uniforms.uHoleUv.value.set(hole.u, hole.v);
-    uniforms.uSpan.value = hole.half * 2;
-    uniforms.uTravel.value = s.dive * TRAVEL_PER_DIVE;
+    /*
+     * LE CALAGE FIN DU PRÉLÈVEMENT, en pixels du canvas — sur uHoleUv SEULEMENT, jamais sur la
+     * position monde de la bouche. Déplacer le contenu dans la fenêtre décale l'écriture à
+     * l'écran ; déplacer la bouche déplacerait aussi l'axe que la caméra vise et le trou qu'on
+     * traverse. La correction du tirage du verre (voir ChromeTableau) est déjà appliquée à la
+     * bouche, elle : ces deux nombres ne servent qu'à finir à l'œil ce qu'aucune mesure ne
+     * dit — quelle tranche du cône domine l'image au moment du croisement.
+     */
+    uniforms.uHoleUv.value.set(hole.u + pt.corrX / 512, hole.v + pt.corrY / 384);
+    /*
+     * LE RESSERREMENT SUR LA LETTRE — le prélèvement se rétrécit vers `zoomChars` pendant que
+     * la caméra achève sa course, donc le « a » grossit jusqu'à la traversée. Piloté par la
+     * distance au verre, comme le fondu : les deux se raccordent exactement là où l'un finit
+     * (`crossOut`). La bouche, elle, ne bouge pas — voir plus haut.
+     */
+    const zoom = 1 - smoothstep(pt.crossHold - Math.max(pt.zoomSpan, 1e-3), pt.crossHold, x);
+    const narrow = hole.half * (pt.zoomChars / Math.max(pt.holeWin, 1e-3));
+    uniforms.uSpan.value = 2 * (hole.half + (narrow - hole.half) * zoom);
+    /*
+     * LE DÉFILEMENT PART DU FONDU, PAS DU DÉBUT DE LA PLONGÉE — et c'est ce qui cale l'écriture.
+     * `dive × tranches` faisait démarrer le cycle à dive 0 : au moment du croisement (vers dive
+     * 0.36) le corridor avait donc déjà parcouru un bon tiers de son cycle, aucune tranche
+     * n'était restée à la bouche, et comme chaque tranche montre la MÊME fenêtre à une échelle
+     * différente, le texte en blocs ne pouvait pas se poser sur celui de l'écran.
+     *
+     * L'instant du croisement est latché plutôt que calculé : il dépend de la course de la
+     * caméra, donc du viewport et de la pose d'entrée. Le verrou tient tant que le corridor est
+     * visible et ne se relâche qu'une fois éteint — sans quoi la sortie de Work rembobinerait le
+     * défilement d'un coup, un saut au milieu d'un fondu.
+     *
+     * Le cycle reste ENTIER sur ce qui reste de la plongée (le facteur `/(1 − début)`) : c'est
+     * l'invariant que TRAVEL_PER_DIVE portait — « la plongée est finie » et « le corridor a
+     * bouclé une fois pile » coïncident, voir tunnelGeom.test.ts sur la périodicité.
+     */
+    if (enter <= DIVE_EPS) travelFrom.current = -1;
+    else if (travelFrom.current < 0 && enter >= 1 - DIVE_EPS) travelFrom.current = s.dive;
+    const from = travelFrom.current;
+    uniforms.uLoop.value = pt.tunnelLoop ? 1 : 0;
+    uniforms.uFallAt.value = pt.fallAt;
+    uniforms.uShaft.value = pt.tubeShaft ? 1 : 0;
+    /*
+     * LE PAS DU PUITS EST EXPRIMÉ EN DEMI-LARGEURS DE LA BOUCHE, pas en unités locales brutes :
+     * c'est le rapport pas/largeur qui décide si le corridor se lit comme un TUYAU (pas court, la
+     * section défile vite) ou comme un couloir long. Le convertir ici, contre REF_HW, garde ce
+     * rapport quand la résolution ou la fenêtre changent — les mêmes raisons que pour `mouthBack`,
+     * exprimé lui en « écrans ».
+     */
+    uniforms.uStep.value = pt.tubeStep * REF_HW;
+    // L'ARRONDI N'A DE SENS QU'EN BOUCLE — voir `cycles` dans posteTweak : c'est la périodicité de
+    // `recycle` qui exige un nombre ENTIER de tours. Une traversée unique ne répète rien, donc
+    // aucune valeur ne peut l'interrompre au milieu d'un cycle.
+    const laps = pt.tunnelLoop ? Math.round(pt.cycles) : pt.cycles;
+    uniforms.uTravel.value =
+      from < 0
+        ? 0
+        : (Math.max(0, s.dive - from) * grid.slices * laps) / Math.max(1e-3, 1 - from);
     uniforms.uDive.value = s.dive;
     uniforms.uArrive.value = pt.diveArrive;
+    uniforms.uG.value = pt.growth;
+    uniforms.uD.value = grid.slices;
+    uniforms.uCols.value = grid.cols;
+    uniforms.uRows.value = grid.rows;
+    uniforms.uCell.value = grid.cell;
+    /*
+     * LES BLOCS SE SÉPARENT À MESURE QU'ON ENTRE — sur l'avancée de la traversée, la même que
+     * le défilement (`travel` ci-dessus) pour que les deux racontent le même mouvement. De loin
+     * la paroi est une image continue ; dedans, chaque cellule se détache, et les interstices
+     * qui s'ouvrent laissent voir les tranches lointaines que les proches masquaient.
+     */
+    /*
+     * LA DISSOLUTION SE TERMINE QUAND LE FONDU COMMENCE, PAS À LA FIN DU SCROLL — sans quoi ses
+     * deux bornes de fin sont des valeurs que PERSONNE NE VOIT JAMAIS.
+     *
+     * Mesuré : sur `through` (qui n'atteint 1 qu'à dive = 1), la paroi arrivait bien à 0.10 et les
+     * blocs à 0.20 — mais à dive = 1, où l'arc de luminosité (voir uFallAt) a déjà tout éteint. Le
+     * dernier état visible à pleine lumière était ~0.28 / ~0.26, donc les deux molettes annonçaient
+     * une valeur et en montraient une autre.
+     *
+     * CET INSTANT A ÉTÉ DÉDUIT DE `fallAt`, ET C'ÉTAIT FAUX : l'instant où l'image meurt à l'écran
+     * ne se lit pas dans le réglage du fondu (constaté en scrollant — la course s'achevait vers
+     * 68 % de la dissolution, paroi encore à 0.37 au lieu de 0.10). C'est donc `dissolveAt`, une
+     * molette, pas une formule — voir posteTweak. Le DÉFILEMENT, lui, garde son avancée sur la
+     * plongée entière (voir uTravel plus haut) : la traversée doit se finir avec le scroll, pas
+     * avant — deux gestes qui partagent le même départ (le croisement latché), pas la même arrivée.
+     */
+    const dissolveDive = pt.diveArrive + pt.dissolveAt * (1 - pt.diveArrive);
+    const dissolve =
+      from < 0 ? 0 : Math.min(1, Math.max(0, (s.dive - from) / Math.max(1e-3, dissolveDive - from)));
+    uniforms.uFillXY.value = pt.fillXY + (pt.fillIn - pt.fillXY) * dissolve;
+    /*
+     * LA PAROI SE DÉCOUPE SUR LA MÊME AVANCÉE — c'est l'animation de la sortie, et elle ne peut
+     * pas être ailleurs : `through` est déjà l'avancée du défilement et de la séparation
+     * latérale des blocs, donc la paroi qui s'ouvre raconte le MÊME mouvement plutôt qu'un
+     * deuxième, désynchronisé. Continue au départ (une seule ouverture, celle du fond, qui
+     * grandit — voir tubeWall), découpée à l'arrivée : le mur devient grille, la grille devient
+     * points, et le tube se dissout au moment où on en sort.
+     */
+    uniforms.uWall.value = pt.tubeWall + (pt.tubeWallIn - pt.tubeWall) * dissolve;
+    // Publié pour le panneau, qui AFFICHE ces deux nombres — voir tunnelLive.ts pour pourquoi ils
+    // ne peuvent pas être recalculés là-bas.
+    tunnelLive.wall = uniforms.uWall.value as number;
+    tunnelLive.blocks = uniforms.uFillXY.value as number;
+    uniforms.uFillZ.value = grid.fillZ;
+    uniforms.uAtten.value = pt.atten;
+    uniforms.uRest.value = pt.restLevel;
+    uniforms.uPeak.value = pt.peak;
+    uniforms.uCut.value = pt.cellCut;
+    uniforms.uDiscard.value = pt.discard;
     // DEUX uniformes, deux rôles : `uEnter` est la PRÉSENCE (le croisement, qui éteint tout —
     // REST compris — avant l'instant du relais), `uNeon` est l'INTENSITÉ (la naissance sourde
     // puis la montée), dosée sur la luminance en entrée du bloom. Les confondre en un seul
@@ -752,6 +1255,9 @@ export function PixelTunnel() {
         const u = (mesh.material as ShaderMaterial).uniforms;
         return {
           visible: mesh.visible,
+          // Le nombre d'instances RÉELLEMENT dessinées (voir `count` plus haut) — la seule
+          // façon de vérifier de l'extérieur que le réglage « Pixels » arrive au mesh.
+          count: mesh.count,
           position: mesh.position.toArray(),
           scale: mesh.scale.toArray(),
           uTravel: u.uTravel.value as number,
@@ -759,6 +1265,14 @@ export function PixelTunnel() {
           uCamDepth: u.uCamDepth.value as number,
           uHoleUv: (u.uHoleUv.value as Vector2).toArray(),
           uSpan: u.uSpan.value as number,
+          /* Tous les autres uniformes, à plat : ce hublot a servi à diagnostiquer un corridor
+           * devenu noir, et il ne montrait alors ni le fondu croisé, ni la géométrie, ni le néon —
+           * donc rien de ce qui pouvait l'éteindre. */
+          u: Object.fromEntries(
+            Object.entries(u)
+              .filter(([, v]) => typeof (v as { value: unknown }).value === "number")
+              .map(([k, v]) => [k, (v as { value: number }).value])
+          ),
         };
       },
     };
@@ -767,7 +1281,7 @@ export function PixelTunnel() {
   return (
     <instancedMesh
       ref={meshRef}
-      args={[geometry, material, COUNT]}
+      args={[geometry, material, count]}
       visible={false}
       // Les instances sont déplacées en vertex shader ; la boîte englobante que three
       // calculerait depuis le cube unité (1×1×1 à l'origine) n'a aucun rapport avec

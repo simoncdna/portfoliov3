@@ -69,9 +69,13 @@ export const tubeMouth = {
  * plutôt qu'un `dive` brut : elle dit « à quel point on est collé à l'écran », donc elle
  * garde le même sens quel que soit le viewport, la pose d'entrée de Theatre ou le cadrage.
  */
+/** La distance à laquelle l'écran remplit tout juste la hauteur du cadre — l'unité « écran ». */
+export function screenFillUnit(tanHalfFov: number): number {
+  return Math.max(tubeMouth.hh, 1e-4) / Math.max(tanHalfFov, 1e-4);
+}
+
 export function screenFill(camZ: number, near: number, tanHalfFov: number): number {
-  const fill = Math.max(tubeMouth.hh, 1e-4) / Math.max(tanHalfFov, 1e-4);
-  return (camZ - near - tubeMouth.frontZ) / fill;
+  return (camZ - near - tubeMouth.frontZ) / screenFillUnit(tanHalfFov);
 }
 
 /** 0 = le poste seul, 1 = le tunnel seul. Entre les deux, les deux plans sont dessinés. */
