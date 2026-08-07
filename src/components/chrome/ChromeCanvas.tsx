@@ -8,6 +8,7 @@ import type { BlobShape } from "./ChromeBlob";
 import { FormDriver } from "./FormDriver";
 import { ChromeTableau } from "./ChromeTableau";
 import { PixelTunnel } from "./PixelTunnel";
+import { TheatrePieces } from "./TheatrePieces";
 import { LiquidDna } from "./LiquidDna";
 import { ChromeSkull } from "./ChromeSkull";
 import { DnaParticles } from "./DnaParticles";
@@ -387,6 +388,13 @@ export function ChromeCanvas({
               InstancedMesh construit sur un BoxGeometry(1,1,1) est prêt dès le premier
               rendu. */}
           <PixelTunnel />
+          {/* LA SALLE, après la plongée. Elle se monte inconditionnellement, comme le
+              tunnel juste au-dessus et pour la même raison : sa géométrie est calculée
+              (aucun glb, aucune texture), donc rien à suspendre, et elle se cache
+              elle-même tant que sa présence est nulle — un montage conditionnel
+              paierait la construction de ses nuages au moment précis où le lecteur
+              arrive, c'est-à-dire à l'image la plus chargée de la page. */}
+          <TheatrePieces />
           {/* The skull mesh — the About section's form, so always present. */}
           {/* Its glb is ~1 MB, so it keeps its own boundary: inside the outer one it
               would hold the liquid (which needs nothing but a shader) off the

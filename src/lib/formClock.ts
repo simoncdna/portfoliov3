@@ -11,6 +11,7 @@ import { tubeHole } from "./tubeHole";
 // Le panneau du poste, lu par frame comme blobTweak au-dessus : la plongée y a ses deux
 // nombres tant que ce panneau vit (voir le bloc de la caméra plus bas).
 import { posteTweak } from "./posteTweak";
+import { CAM_RADIUS, STATIONS, shortestDelta, theatreCamera, theatreReveal } from "./theatre";
 
 /**
  * The central form's live state: one clock, one turntable, one eased scroll
@@ -78,6 +79,24 @@ export type FormState = FormChoreo & {
   camY: number;
   camX: number;
   camFov: number;
+  /**
+   * LE LACET DE LA CAMÉRA. Il est resté nul pendant toute la vie de ce fichier : les
+   * sections se composent en DÉPLAÇANT la caméra dans un plan, jamais en la tournant.
+   * La salle est la première à en avoir besoin — elle se regarde de l'extérieur du
+   * cercle, donc l'œil doit pivoter vers l'intérieur. Zéro hors de la salle, ce qui
+   * rend l'ajout invisible partout ailleurs.
+   */
+  camRotY: number;
+  /**
+   * LA SALLE — voir theatre.ts. `on` est sa présence, `phi` l'angle courant de la
+   * caméra sur son cercle, et `cx/cy/cz` le centre en coordonnées monde.
+   *
+   * Le centre est calé pour que la caméra en sorte EXACTEMENT là où la plongée l'a
+   * laissée : à la station 0 (angle 0) la pose de salle est celle d'arrivée de la
+   * plongée, au bit près. Le raccord entre les deux plans n'a donc aucune transition à
+   * jouer — il n'y a rien à raccorder.
+   */
+  theatre: { on: number; phi: number; cx: number; cy: number; cz: number };
   /**
    * The plates' wave phase — a SECOND clock, because the wind has to be able to stop while
    * the metal keeps breathing.
@@ -359,6 +378,19 @@ const FORM_RATE = 0.0005;
  */
 const HOVER_RATE = 0.05;
 
+/**
+ * La vitesse à laquelle la caméra rallie la station visée, en 1/secondes d'une
+ * exponentielle. 2,0 met le trajet à ~1,5 s : assez lent pour qu'on voie la salle
+ * défiler pendant qu'on la longe, assez vif pour que la molette réponde.
+ */
+const THEATRE_RATE = 2.0;
+
+/** La focale de la salle — plus longue que celle du poste, la salle est plus profonde. */
+const THEATRE_FOV = 47;
+
+/** L'angle courant de la caméra sur le cercle de la salle. Voir le bloc de la caméra. */
+let theatrePhi = 0;
+
 const state: FormState = {
   ...formChoreo(0, 0, 0, 0),
   time: 0,
@@ -371,6 +403,8 @@ const state: FormState = {
   camY: CAM_REST.y,
   camX: CAM_REST.x,
   camFov: CAM_REST.fov,
+  camRotY: 0,
+  theatre: { on: 0, phi: 0, cx: 0, cy: 0, cz: 0 },
   mood: {
     sx: MOOD_REST.stretch[0],
     sy: MOOD_REST.stretch[1],
@@ -725,6 +759,59 @@ export function advanceFormClock(
   const uAim = Math.max(0, Math.min(1, 1 - (1 - tAim) * shrink));
   state.camX = confine(entranceX, tubeMouth.holeX, uAim);
   state.camY = confine(entranceY, tubeMouth.holeY, uAim);
+
+  /*
+   * LA SALLE, PAR-DESSUS LA PLONGÉE — troisième couche de `confine`, composée comme les
+   * deux précédentes plutôt que substituée. À présence nulle, camX/Y/Z valent EXACTEMENT
+   * ce que la plongée vient d'écrire : l'identité arithmétique que confine() garantit se
+   * recompose sans rien perdre, donc ajouter cette scène ne peut pas déplacer d'un bit la
+   * caméra de toutes les autres.
+   *
+   * LE CENTRE EST CALÉ SUR LA SORTIE DE LA PLONGÉE. La caméra tourne à CAM_RADIUS du
+   * centre, donc placer celui-ci un CAM_RADIUS plus loin que le point d'arrivée met la
+   * station 0 pile sur ce point, à l'angle 0 — et l'angle 0 vaut aussi un lacet nul, qui
+   * est l'orientation par défaut. Le raccord est donc une identité, pas une transition :
+   * il n'y a littéralement rien à jouer entre les deux plans.
+   */
+  const diveZ = tubeMouth.frontZ - dv.divePast * mouthHw;
+  state.theatre.cx = tubeMouth.holeX;
+  state.theatre.cy = tubeMouth.holeY;
+  state.theatre.cz = diveZ - CAM_RADIUS;
+  /*
+   * LA PRÉSENCE SE DÉDUIT DE LA PLONGÉE, ELLE N'A PAS SON PONT. `state.dive` fait déjà
+   * exactement le travail : il monte avec le film, et il retombe tout seul à la sortie
+   * de section (il est multiplié par `tableauOn` — voir plus haut). Un second booléen
+   * écrit par le DOM aurait dupliqué cette retombée, avec la certitude qu'un jour l'un
+   * des deux l'oublie et laisse la salle allumée au-dessus de Contact.
+   *
+   * 0,72 À 0,96 ET NON 0,88 À 1 : la salle monte pendant le DERNIER QUART du film, pas
+   * sur ses toutes dernières images, et elle est entière avant que la plongée ne le soit.
+   * Deux raisons. Elle arrivait trop tard — on traversait un noir avant qu'elle
+   * n'apparaisse, ce qui coupait la séquence en deux plans au lieu d'un enchaînement. Et
+   * finir avant la plongée laisse le corridor s'éteindre PAR-DESSUS une salle déjà là,
+   * qui est le sens de lecture juste : on débouche dedans, on ne la voit pas se
+   * construire.
+   */
+  const th = smoothstep(0.72, 0.96, state.dive);
+  state.theatre.on = th;
+
+  /*
+   * L'ANGLE POURSUIT LA STATION VISÉE, PAR LE PLUS COURT CHEMIN. C'est le seul état
+   * intégré de ce bloc, et il l'est délibérément : la station est un ENTIER qui saute
+   * (quatre paliers, voir theatreReveal), donc quelque chose doit fabriquer le trajet
+   * entre deux valeurs discrètes. Le faire en polaire est ce qui donne l'arc — interpolé
+   * en cartésien, le même déplacement tirerait une corde à travers la salle.
+   */
+  const wanted = STATIONS[Math.max(0, Math.min(STATIONS.length - 1, theatreReveal.station))].phi;
+  theatrePhi += shortestDelta(theatrePhi, wanted) * (reduced ? 1 : 1 - Math.exp(-delta * THEATRE_RATE));
+  state.theatre.phi = theatrePhi;
+
+  const hall = theatreCamera(theatrePhi, state.theatre.cx, state.theatre.cy, state.theatre.cz, 0);
+  state.camX = confine(state.camX, hall.x, th);
+  state.camY = confine(state.camY, hall.y, th);
+  state.camZ = confine(state.camZ, hall.z, th);
+  state.camRotY = confine(0, hall.rotY, th);
+  state.camFov = confine(state.camFov, THEATRE_FOV, th);
   // NOTE the hover's step forward is NOT here. It used to multiply this scale, which is the
   // whole form's — so pointing at one project's name grew every picture in the gallery,
   // neighbours included. It belongs to the slot being read, and it is applied there (uGrow in

@@ -1,0 +1,143 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  APPROACH,
+  PIECE_OF_WORK,
+  RING_RADIUS,
+  STATIONS,
+  shortestDelta,
+  stationPosition,
+  theatreCamera,
+} from "../src/lib/theatre.ts";
+import { buildPiece } from "../src/lib/theatreShapes.ts";
+
+const TAU = Math.PI * 2;
+
+/**
+ * L'INVARIANT DE LA SALLE. Si le rayon passe sous la distance d'approche, la caméra
+ * traverse le centre et se retrouve de l'autre côté, dos à la pièce visée. C'est
+ * exactement l'erreur qui a été commise une fois, et elle ne se voit pas dans le code —
+ * seulement à l'écran, sous la forme d'une salle vide.
+ */
+test("le rayon de la salle reste plus grand que la distance d'approche", () => {
+  assert.ok(RING_RADIUS > APPROACH, `${RING_RADIUS} doit dépasser ${APPROACH}`);
+});
+
+test("la caméra se tient dehors, à la distance d'approche de la pièce visée", () => {
+  for (const s of STATIONS) {
+    const piece = stationPosition(s, 0, 0, 0);
+    const cam = theatreCamera(s.phi, 0, 0, 0, 0);
+    const rCam = Math.hypot(cam.x, cam.z);
+    assert.ok(rCam > RING_RADIUS, `caméra à ${rCam}, dedans le cercle ${RING_RADIUS}`);
+    // à la hauteur près, qui est le décalage vertical propre de la pièce
+    const d = Math.hypot(cam.x - piece.x, cam.z - piece.z);
+    assert.ok(Math.abs(d - APPROACH) < 1e-9, `distance ${d} ≠ ${APPROACH}`);
+  }
+});
+
+test("la caméra regarde le centre de la salle", () => {
+  for (const s of STATIONS) {
+    const cam = theatreCamera(s.phi, 0, 0, 0, 0);
+    // Une rotation de rotY autour de Y appliquée à la direction de vue par défaut (0,0,-1)
+    const fx = -Math.sin(cam.rotY);
+    const fz = -Math.cos(cam.rotY);
+    // …doit pointer de la caméra vers le centre
+    const toCentre = Math.hypot(cam.x, cam.z);
+    assert.ok(Math.abs(fx - -cam.x / toCentre) < 1e-9, "l'axe de visée s'écarte du centre en x");
+    assert.ok(Math.abs(fz - -cam.z / toCentre) < 1e-9, "l'axe de visée s'écarte du centre en z");
+  }
+});
+
+/**
+ * LE TRAJET SUIT L'ARC, PAS LA CORDE. C'est la raison d'être de l'interpolation
+ * polaire : à mi-chemin entre deux stations, une corde rapprocherait la caméra du
+ * centre, l'arc la garde à distance constante.
+ */
+test("interpoler l'angle garde la caméra à rayon constant, une corde ne le ferait pas", () => {
+  const a = STATIONS[0].phi;
+  const b = STATIONS[1].phi;
+  const rCam = RING_RADIUS + APPROACH;
+  const camA = theatreCamera(a, 0, 0, 0, 0);
+  const camB = theatreCamera(b, 0, 0, 0, 0);
+
+  for (let i = 0; i <= 8; i++) {
+    const t = i / 8;
+    const arc = theatreCamera(a + shortestDelta(a, b) * t, 0, 0, 0, 0);
+    assert.ok(Math.abs(Math.hypot(arc.x, arc.z) - rCam) < 1e-9, "l'arc quitte le cercle");
+  }
+
+  const midChord = { x: (camA.x + camB.x) / 2, z: (camA.z + camB.z) / 2 };
+  assert.ok(
+    Math.hypot(midChord.x, midChord.z) < rCam - 0.4,
+    "la corde devrait couper vers le centre — sinon ce test ne prouve rien"
+  );
+});
+
+test("le plus court chemin ne repart jamais en arrière d'un tour", () => {
+  for (const [from, to] of [
+    [STATIONS[3].phi, STATIONS[0].phi],
+    [STATIONS[0].phi, STATIONS[3].phi],
+    [0, Math.PI * 1.9],
+  ]) {
+    const d = shortestDelta(from, to);
+    assert.ok(Math.abs(d) <= Math.PI + 1e-9, `écart de ${d}, plus d'un demi-tour`);
+    const arrived = ((from + d) % TAU + TAU) % TAU;
+    const wanted = ((to % TAU) + TAU) % TAU;
+    assert.ok(Math.abs(arrived - wanted) < 1e-9, `arrive à ${arrived} au lieu de ${wanted}`);
+  }
+});
+
+/**
+ * Le seuil vaut 14° et n'est pas arbitraire : voir le calcul de recouvrement sur
+ * ANGLES_DEG. En dessous, la pièce du fond se superpose à celle qu'on regarde.
+ */
+const MARGE_OPPOSITION = (14 * Math.PI) / 180;
+
+test("aucune station ne se cache derrière une autre", () => {
+  for (let i = 0; i < STATIONS.length; i++) {
+    for (let j = i + 1; j < STATIONS.length; j++) {
+      const d = Math.abs(shortestDelta(STATIONS[i].phi, STATIONS[j].phi));
+      const ecart = Math.abs(d - Math.PI);
+      assert.ok(
+        ecart > MARGE_OPPOSITION,
+        `stations ${i} et ${j} à ${((ecart * 180) / Math.PI).toFixed(1)}° de l'opposition`
+      );
+    }
+  }
+});
+
+/* --- les nuages ---------------------------------------------------------- */
+
+test("chaque pièce tient dans le cube unité et sature à 1 sur au moins un axe", () => {
+  for (const kind of PIECE_OF_WORK) {
+    const c = buildPiece(kind, 24);
+    let max = 0;
+    for (let i = 0; i < c.pos.length; i++) max = Math.max(max, Math.abs(c.pos[i]));
+    assert.ok(max <= 1 + 1e-6, `${kind} déborde à ${max}`);
+    assert.ok(max > 1 - 1e-6, `${kind} ne remplit pas le cube (${max}) — mise à l'échelle ratée`);
+  }
+});
+
+test("la saillance reste dans [0,1] et désigne vraiment une minorité de points", () => {
+  for (const kind of PIECE_OF_WORK) {
+    const c = buildPiece(kind, 24);
+    assert.equal(c.sal.length, c.count);
+    assert.equal(c.pos.length, c.count * 3);
+    let hot = 0;
+    for (const v of c.sal) {
+      assert.ok(v >= 0 && v <= 1, `${kind} : saillance ${v} hors bornes`);
+      if (v > 0.8) hot++;
+    }
+    // Une pièce dont TOUT est saillant n'a plus de pointes : la décomposition n'aurait
+    // plus rien à désigner et rongerait le volume entier d'un coup.
+    assert.ok(hot / c.count < 0.6, `${kind} : ${((hot / c.count) * 100) | 0}% de points saillants`);
+  }
+});
+
+test("la densité fait varier le nombre de points, pas l'encombrement", () => {
+  for (const kind of PIECE_OF_WORK) {
+    const lo = buildPiece(kind, 16);
+    const hi = buildPiece(kind, 32);
+    assert.ok(hi.count > lo.count * 2, `${kind} : ${lo.count} → ${hi.count}, la densité ne porte pas`);
+  }
+});

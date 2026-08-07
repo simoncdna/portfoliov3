@@ -11,6 +11,7 @@ import { formState } from "@/lib/formClock";
 import { tubeGate } from "@/lib/tubeGate";
 import { posteTweak } from "@/lib/posteTweak";
 import { lockPageScroll, scrollPageTo } from "@/lib/pageScroll";
+import { theatreReveal } from "@/lib/theatre";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -108,6 +109,64 @@ const BEAT = { name: 0.64, tail: 0.25 };
 const DWELL = 900;
 
 /**
+ * À quelle distance de l'endroit où le film s'est terminé la molette vers le haut le rembobine
+ * encore (px de scroll). Au-delà, le geste appartient à la marche des plaques — voir `freeAt` dans
+ * la retenue.
+ *
+ * 300 px, DIMENSIONNÉ SUR LA BANDE ET PAS AU JUGÉ : la bande fait ~5700 px de travel (mesuré au
+ * navigateur, viewport 1512×863), les quatre plaques en occupent p 0.14 → 0.78, donc UNE PLAQUE
+ * ≈ 910 px. À 300 px la portée reste largement dans la plaque où la plongée s'achève (p ≈ 0,40, soit
+ * le projet 02) — elle ne peut donc pas manger un changement de projet — tout en étant assez
+ * généreuse pour un geste de retour franc, qui fait facilement 150 px.
+ *
+ * EN PIXELS ET NON EN FRACTION DE BANDE, volontairement : ce que ce seuil mesure est un GESTE (de
+ * combien le poignet a bougé la page), pas une part de chorégraphie. Un geste ne se dilate pas
+ * quand la bande s'allonge.
+ */
+const REWIND_REACH = 300;
+
+/**
+ * OÙ LA SALLE COMMENCE — MESURÉ, PAS SUPPOSÉ.
+ *
+ * Ce fut d'abord une constante à 0,40, lue dans le message du commit qui a fait de la
+ * plongée un film. C'était faux, et de la pire façon : la salle s'ouvrait déjà au bout
+ * de sa propre fenêtre, donc elle arrivait sur sa QUATRIÈME station, et le premier coup
+ * de molette ne pouvait plus qu'aller vers la sortie de section. Trois symptômes, une
+ * seule cause — un nombre deviné.
+ *
+ * Le point de reprise ne peut pas être une constante de toute façon : il dépend de
+ * l'endroit où `mood.flat` atteint 1 et `mood.dev` passe 0,55, donc de la chorégraphie
+ * d'entrée, donc de la hauteur de la fenêtre. La fenêtre de la salle se cale donc sur la
+ * position réelle du scroll à l'instant où elle s'allume, et se réarme si le lecteur
+ * remonte pour redescendre.
+ *
+ * Elle a sa PROPRE fenêtre et sa propre marche, plutôt que de réutiliser celle des
+ * plaques juste au-dessus : à la reprise, la marche des plaques en est déjà à son
+ * deuxième bac, et il ne resterait pas quatre stations pour quatre pièces.
+ */
+/** Combien d'un bac il faut dépasser le bord pour changer de station. Voir le handler. */
+const HALL_HYST = 0.25;
+
+/**
+ * COMBIEN DE SCROLL PAR STATION, EN HAUTEURS DE FENÊTRE — une mesure ABSOLUE, et c'est
+ * la correction de fond.
+ *
+ * La première rédaction partageait « ce qui reste de la bande » entre les quatre
+ * stations. Mesuré : 0,09 du travel chacune, soit 290 px. Avec Lenis à 0,5, un seul
+ * flick de trackpad les traversait toutes et sortait de la section — d'où l'impression
+ * que le scroll ne servait à rien dans la salle et agissait globalement.
+ *
+ * Pire, la part était RELATIVE : le point de reprise n'est pas fixe (il dépend de
+ * l'endroit où le métal finit de se former, donc de la lecture), donc chaque descente
+ * donnait aux quatre pièces une portion différente. Une station doit coûter le même
+ * geste à chaque fois, quoi qu'ait fait le lecteur avant.
+ *
+ * 0,58 hauteur de fenêtre ≈ 490 px, soit une dizaine de crans de molette : assez pour
+ * qu'un flick n'en traverse pas deux, assez peu pour que quatre tiennent dans la bande.
+ */
+const HALL_STATION_VH = 0.58;
+
+/**
  * Les touches qu'un scroll natif consulterait — copiées de SmoothScroll (qui les
  * garde privées, une par verrouilleur plutôt qu'une exportée à partager) plutôt que
  * factorisées : ce fichier n'a que ça à emprunter, et l'exporter de SmoothScroll pour
@@ -160,6 +219,19 @@ export function Work() {
   /** is a plate presented at all — false through the entrance and past the exit */
   const live = useRef(false);
 
+  /* LA MARCHE DE LA SALLE — même machine que celle des plaques, sur sa propre fenêtre.
+     Ses trois refs jouent les mêmes rôles : ce qui est visé, ce qui est montré, et
+     quand la dernière station a été prise. */
+  const hallShown = useRef(0);
+  const hallTarget = useRef(0);
+  const hallAt = useRef(0);
+  const hallTimer = useRef(0);
+  /** La station affichée par le menu — un state, lui, parce qu'il rend du DOM. */
+  const [hall, setHall] = useState(0);
+  const hallEl = useRef<HTMLDivElement>(null);
+  /** Où la salle s'est allumée, en fraction du travel. -1 tant qu'elle est éteinte. */
+  const hallFrom = useRef(-1);
+
   /** The band's document position and the scroll distance the whole band spans. */
   const geometry = useCallback(() => {
     const el = ref.current;
@@ -210,11 +282,67 @@ export function Work() {
     [present]
   );
 
+  /**
+   * La marche de la salle : une station à la fois, jamais plus vite que DWELL.
+   *
+   * Le plancher de temps est ce qui fait les « paliers » : sans lui, un flick traverse
+   * les quatre pièces d'un geste et la caméra ne longe rien du tout — elle saute d'un
+   * bout à l'autre de l'abside. Avec, chaque station est tenue le temps que la caméra
+   * finisse son arc et que la pièce se laisse regarder.
+   */
+  const hallWalk = useCallback(function step() {
+    window.clearTimeout(hallTimer.current);
+    if (hallTarget.current === hallShown.current) return;
+    const wait = DWELL - (performance.now() - hallAt.current);
+    if (wait > 0) {
+      hallTimer.current = window.setTimeout(step, wait);
+      return;
+    }
+    hallShown.current += Math.sign(hallTarget.current - hallShown.current);
+    hallAt.current = performance.now();
+    theatreReveal.station = hallShown.current;
+    setHall(hallShown.current);
+    if (hallShown.current !== hallTarget.current) hallTimer.current = window.setTimeout(step, DWELL);
+  }, []);
+
   useEffect(() => {
     const onScroll = () => {
       const g = geometry();
       if (!g) return;
       const p = (window.scrollY - g.top) / g.span;
+
+      /* LA SALLE, sur la portion que la plongée libère. Bacs égaux comme au-dessus, et
+         pour la même raison : `round` donnerait une demi-part à la première et à la
+         dernière pièce. */
+      const from = hallFrom.current;
+      if (from >= 0 && p >= from && p <= 1) {
+        /* En PIXELS depuis le point de reprise, pas en fraction de ce qui reste : voir
+           HALL_STATION_VH. La borne basse est mesurée (voir le ticker) ; il n'y a plus de
+           borne haute, la dernière station tient simplement jusqu'à la sortie. */
+        const stationPx = Math.max(160, window.innerHeight * HALL_STATION_VH);
+        const r = Math.min(1, ((p - from) * g.span) / (stationPx * works.length));
+        /*
+         * UNE HYSTÉRÉSIS SUR LES BORDS DE BAC, et c'est ce qui rend le geste franc.
+         *
+         * Chaque station ne dispose que d'environ 36 vh — la salle n'a que la portion
+         * que la plongée libère — donc un bord de bac tombe tous les tiers d'écran. Sans
+         * marge, le moindre flottement du scroll autour d'un bord relance un trajet de
+         * caméra de 62° : la section paraissait répondre au doigt, alors qu'elle
+         * réagissait à du bruit.
+         *
+         * Il faut désormais dépasser le bord de 25 % d'un bac pour changer de station.
+         * La marge est symétrique, donc elle ne décale pas les stations : elle rend
+         * seulement le franchissement délibéré.
+         */
+        const raw = Math.min(works.length - 1e-6, r * works.length);
+        const cur = hallTarget.current;
+        const cand = Math.min(LAST, Math.floor(raw));
+        if (cand !== cur && Math.abs(raw - (cur + 0.5)) > 0.5 + HALL_HYST) {
+          hallTarget.current = cand;
+        }
+        hallWalk();
+      }
+
       // Only the four plates belong to this handler. The setting-up and the putting
       // away are owned by their timelines — including releasing the metal — because
       // both are sequences with an order, and the order is what the user reads. A
@@ -241,9 +369,10 @@ export function Work() {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
       window.clearTimeout(timer.current);
+      window.clearTimeout(hallTimer.current);
       workPlate.clear();
     };
-  }, [geometry, walk]);
+  }, [geometry, walk, hallWalk]);
 
   /**
    * LA RETENUE — voir tubeGate et pageScroll. Elle tient sur TOUTE la séquence : le terminal
@@ -314,6 +443,29 @@ export function Work() {
      *  tick, lu par la molette et le clavier pour savoir s'ils ont quoi que ce soit à
      *  faire. */
     let locked = false;
+    /**
+     * OÙ LA PAGE A ÉTÉ RENDUE quand le film s'est terminé, en scrollY. −1 = pas encore.
+     *
+     * C'EST LA PORTÉE DU REMBOBINAGE, et sans elle la molette vers le haut rembobinait la plongée
+     * DEPUIS N'IMPORTE OÙ dans les quatre projets. Les trois gardes de `onWheel` — `tubeGate.done`,
+     * `flat === 1 && dev > 0.55`, `progress() >= 1` — décrivent toutes « le poste est développé et
+     * le film est fini », c'est-à-dire l'intégralité de la bande des plaques : aucune ne dit OÙ est
+     * le lecteur. Reproduit au navigateur, un seul cran de molette depuis le troisième projet
+     * (p = 0.60, workPlate.index = 2) suffisait — `reversed` passait à true, `dive` retombait de 1
+     * à 0.947, et comme `done` devient faux tandis que `ready` reste vrai, la retenue REVERROUILLAIT
+     * le scroll : le lecteur était épinglé à regarder le tunnel à reculons au lieu de remonter d'un
+     * projet.
+     *
+     * ANCRÉ SUR LA POSITION PLUTÔT QUE SUR UN `p` DE BANDE : le `p` où la plongée se joue dépend du
+     * viewport (la bande fait 5696 px de travel au viewport mesuré), alors que « là où le film s'est
+     * terminé » est connu exactement, à l'instant où il se termine, sans rien calculer.
+     *
+     * PAS REMIS À −1 QUAND `done` RETOMBE, seulement quand le film est remis à zéro en quittant la
+     * section (voir plus bas) : pendant un rembobinage `done` est faux, et effacer l'ancre là
+     * empêcherait la molette de relancer le film vers l'avant — le lecteur resterait coincé au début
+     * de la plongée, ce qui est le piège que ce mécanisme existe pour éviter.
+     */
+    let freeAt = -1;
 
     const tick = () => {
       const s = formState();
@@ -342,6 +494,9 @@ export function Work() {
        */
       if (film && (s.mood.flat < 1 || s.mood.dev < 0.5) && film.progress() > 0) {
         film.reversed(false).pause(0);
+        // …et l'ancre du rembobinage avec le film : elle désignerait sinon un endroit de la descente
+        // précédente, donc une portée ouverte au mauvais endroit à la suivante.
+        freeAt = -1;
       }
       /*
        * LE VERROU TIENT JUSQU'À LA FIN DU FILM, pas seulement de la frappe (voir l'en-tête). La
@@ -356,6 +511,10 @@ export function Work() {
        */
       const done = film ? film.progress() >= 1 && !film.reversed() : false;
       const rewound = film ? film.progress() <= 0 && film.reversed() : false;
+      // L'ancre est posée à l'instant où le film rend la page, pas avant : c'est exactement le point
+      // depuis lequel un retour en arrière veut dire « rejoue-moi la plongée » plutôt que « montre-moi
+      // le projet précédent ».
+      if (done && freeAt < 0) freeAt = window.scrollY;
       const want = ready && !done && !rewound;
       if (want === locked) return;
       locked = want;
@@ -397,6 +556,13 @@ export function Work() {
       const s = formState();
       if (s.mood.flat < 1 || s.mood.dev <= 0.55) return;
       /*
+       * LA GARDE DE POSITION — voir `freeAt` dans la retenue pour le bug qu'elle corrige. Les trois
+       * conditions au-dessus sont vraies sur TOUTE la bande des plaques ; celle-ci est la seule qui
+       * dise où est le lecteur. Passé cette portée, la molette n'appartient plus à la plongée : elle
+       * appartient à la marche des plaques, qui est le seul autre à l'attendre.
+       */
+      if (freeAt < 0 || Math.abs(window.scrollY - freeAt) > REWIND_REACH) return;
+      /*
        * UN PLAN NE S'INTERROMPT PAS — « on ne peut pas rembobiner pendant le film, on doit
        * attendre la fin ». La molette n'est donc écoutée qu'aux DEUX BOUTS de la timeline : à la
        * fin elle rembobine, au début elle relance. Pendant que ça joue, dans un sens ou dans
@@ -434,6 +600,80 @@ export function Work() {
       lockPageScroll("tube", false);
     };
   }, []);
+
+  /**
+   * LA PRÉSENCE DE LA SALLE, PUBLIÉE EN VARIABLE CSS — même pont que celui par lequel
+   * le rendu publie déjà --plate-px-* et --form-lift : la valeur vit dans l'horloge du
+   * WebGL, elle change à chaque frame, et un state React par frame ferait re-rendre la
+   * section entière pour une opacité.
+   *
+   * SON PROPRE TICKER, et pas celui de la retenue juste au-dessus : celui-là se retire
+   * entièrement en reduced motion, et le menu doit rester lisible dans ce mode-là aussi.
+   * Le pointeur est ouvert en JS plutôt que par une règle CSS lisant la variable — une
+   * comparaison de chaîne sur un attribut style est le genre de chose qu'un navigateur
+   * casse en changeant d'espacement, sans erreur.
+   */
+  useEffect(() => {
+    const el = hallEl.current;
+    if (!el) return;
+    const tick = () => {
+      const on = formState().theatre.on;
+      el.style.opacity = on.toFixed(3);
+      el.style.pointerEvents = on > 0.6 ? "auto" : "none";
+
+      /*
+       * LE CALAGE DE LA FENÊTRE. On note où le scroll se trouve à l'instant où la salle
+       * s'allume : c'est le point de reprise réel, celui que le verrou de la plongée
+       * vient de libérer, et il n'est connu que là. Réarmé quand la salle s'éteint, pour
+       * qu'une remontée puis une nouvelle descente le remesure plutôt que de garder un
+       * repère pris dans une autre passe.
+       */
+      if (on > 0.01) {
+        if (hallFrom.current < 0) {
+          const g = geometry();
+          if (g) hallFrom.current = (window.scrollY - g.top) / g.span;
+        }
+      } else if (hallFrom.current >= 0) {
+        hallFrom.current = -1;
+      }
+    };
+    gsap.ticker.add(tick);
+
+    /* UN HUBLOT, comme __form et __dive : la fenêtre de la salle est mesurée à
+       l'exécution, donc « pourquoi j'arrive sur la quatrième ? » ne se répond pas sans
+       voir le point de reprise et la place qu'il laisse. */
+    if (process.env.NODE_ENV === "development") {
+      (window as unknown as Record<string, unknown>).__hall = () => {
+        const g = geometry();
+        const p = g ? (window.scrollY - g.top) / g.span : NaN;
+        const from = hallFrom.current;
+        const stationPx = Math.max(160, window.innerHeight * HALL_STATION_VH);
+        return {
+          p: +p.toFixed(3),
+          from: +from.toFixed(3),
+          restePx: g ? Math.round(g.span * (1 - EXIT - from)) : 0,
+          besoinPx: Math.round(stationPx * works.length),
+          parStationPx: Math.round(stationPx),
+          station: hallShown.current,
+          vise: hallTarget.current,
+          on: +formState().theatre.on.toFixed(3),
+        };
+      };
+    }
+
+    return () => {
+      gsap.ticker.remove(tick);
+    };
+  }, [geometry]);
+
+  /** Scroll au milieu du bac de la station i — voir le binning de la salle plus haut. */
+  const goHall = (i: number) => {
+    const g = geometry();
+    const from = hallFrom.current;
+    if (!g || from < 0) return;
+    const stationPx = Math.max(160, window.innerHeight * HALL_STATION_VH);
+    scrollPageTo(g.top + g.span * from + (i + 0.5) * stationPx);
+  };
 
   /** Scroll to the middle of plate i's bin — see the binning in the handler above. */
   const go = (i: number) => {
@@ -770,6 +1010,37 @@ export function Work() {
               <span className="font-display plate-row-name">{w.title.toUpperCase()}</span>
             </button>
           ))}
+        </div>
+
+        {/* LE MENU DE LA SALLE — le projet lu, puis quatre crans dont un allumé.
+            Une liste des quatre noms côte à côte a été essayée : elle occupait toute la
+            largeur du bas de l'écran et se lisait comme une navigation de site, alors
+            que c'est un repère. Le nom du seul projet courant, plus des crans muets pour
+            dire où l'on en est, tient dans un tiers de la place et dit la même chose.
+
+            Il n'apparaît qu'avec la salle, dont il lit la présence par la variable posée
+            plus haut. Un clic SCROLLE vers la station, il ne la sélectionne pas : le
+            scroll est la seule source de vérité de cette section, et un contrôle qui
+            écrirait l'index serait défait par l'évènement de scroll suivant. */}
+        <div className="hall-index" ref={hallEl}>
+          {/* Le nom SEUL. Le numéro « 04 · » qui le précédait disait déjà ce que les crans
+              disent en dessous, et deux fois le même renseignement sur deux lignes fait lire
+              le bloc comme une fiche plutôt que comme un titre. */}
+          <p className="hall-now">{works[hall].title.toUpperCase()}</p>
+          <div className="hall-steps" role="group" aria-label="Projects">
+            {works.map((w, i) => (
+              <button
+                key={w.title}
+                type="button"
+                className="hall-step"
+                onClick={() => goHall(i)}
+                aria-current={i === hall ? "true" : "false"}
+                aria-label={`${w.index} — ${w.title}`}
+              >
+                <span className="hall-mark" aria-hidden="true" />
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* The photograph is the link now — the print is drawn by the fixed stage, so

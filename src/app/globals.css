@@ -194,27 +194,6 @@ body::after {
   }
 }
 
-/* LES OUTILS DE DEV GARDENT LE CURSEUR NATIF. Le réticule custom est fait pour lire la
-   page ; sur un panneau de réglage il faut VISER — une barre de 6 px de haut se pointe au
-   pixel, et un réticule en mix-blend-mode difference sur du texte gris ne dit pas où est
-   le point chaud.
-
-   `!important` et un sélecteur d'attribut : la règle au-dessus est `body *` en !important,
-   qu'un style inline ne peut pas battre (un !important de feuille gagne contre l'inline).
-   `[data-dev-panel] *` pèse (0,1,0) contre (0,0,2), donc il passe devant — sans média
-   query, la spécificité tranche seule entre deux !important. */
-[data-dev-panel],
-[data-dev-panel] * {
-  cursor: auto !important;
-}
-[data-dev-panel] button {
-  cursor: pointer !important;
-}
-[data-dev-panel] [data-dev-bar],
-[data-dev-panel] [data-dev-bar] * {
-  cursor: ew-resize !important;
-}
-
 ::selection {
   background: var(--silver-bright);
   color: var(--void);
@@ -329,7 +308,14 @@ a {
    on the form — and so a flick of the wheel cannot swallow one whole. */
 .plate-band {
   position: relative;
-  height: 480vh;
+  /* 760vh ET NON 480 — la salle a besoin de place, et elle ne l'avait pas.
+     Mesuré : la plongée rend la main vers 42 % du travel, ce qui laissait 0,36 du travel
+     pour quatre stations, soit 290 px chacune — un seul flick de trackpad les traversait
+     toutes et sortait de la section. À 660vh de travel, les quatre stations à 0,58 hauteur
+     de fenêtre (voir HALL_STATION_VH) tiennent entre la reprise et le rangement.
+     L'entrée et la sortie s'allongent dans la même proportion, puisqu'elles sont exprimées
+     en fractions du travel : c'est le prix de la place, et il est assumé. */
+  height: 760vh;
 }
 .plate-screen {
   position: sticky;
@@ -518,6 +504,84 @@ a {
 .plate-row:focus-visible {
   outline: 1px solid var(--silver-bright);
   outline-offset: 6px;
+}
+
+/* LE MENU DE LA SALLE — le projet lu, puis quatre crans. Posé contre l'écran collant et
+   non contre la bande, comme tout le reste du mobilier de cette section : il doit rester
+   au même endroit pendant que la bande défile dessous.
+
+   Son opacité est écrite par frame depuis l'horloge du WebGL (voir Work.tsx) : pas de
+   transition ici, la valeur EST déjà une rampe et en superposer une seconde décalerait
+   son apparition de l'extinction du corridor qu'elle doit accompagner. */
+.hall-index {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(22px, 5.2vh, 58px);
+  transform: translateX(-50%);
+  z-index: 3;
+  /* EMPILÉ, PAS EN LIGNE : le nom au-dessus, les crans dessous. Côte à côte, les deux
+     s'étalaient sur un tiers de la largeur du bas de l'écran et le nom se lisait comme la
+     première entrée d'une barre de navigation — la rangée de traits juste à sa droite
+     avait tout d'une suite de liens. Empilé, le nom redevient un titre et les crans une
+     règle graduée sous lui, ce qu'ils sont. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(10px, 1.4vh, 16px);
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.hall-now {
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.3em;
+  color: var(--silver-bright);
+  /* L'interlettrage pose un blanc APRÈS la dernière lettre aussi : la boîte du texte est donc
+     0.3em plus large que ses glyphes, et la centrer laisse le nom 0.15em à gauche du milieu.
+     Invisible tant qu'il était seul sur sa ligne, net dès qu'une rangée de crans symétrique
+     se range dessous. On rend le même blanc à gauche pour retrouver la symétrie. */
+  margin-left: 0.3em;
+}
+.hall-steps {
+  display: flex;
+  gap: 10px;
+}
+/* Le cran est un bouton, donc une cible : la barre visible fait 1 px de haut, mais le
+   bouton en fait 14 pour rester attrapable. Sans ça la cible ferait la hauteur du trait,
+   ce qui est intouchable au doigt et pénible à la souris. */
+.hall-step {
+  background: none;
+  border: 0;
+  padding: 6px 0;
+  cursor: pointer;
+  display: block;
+}
+.hall-mark {
+  display: block;
+  width: clamp(20px, 2.6vw, 34px);
+  height: 1px;
+  background: var(--steel-2);
+  transition: background 240ms linear;
+}
+/* Blanc franc pour le cran actif, pas la crème du reste du site : c'est le seul repère
+   d'état de cette scène, et il se lit sur un fond quasi noir où la crème passe pour un
+   gris de plus. */
+.hall-step[aria-current="true"] .hall-mark {
+  background: #fff;
+}
+@media (hover: hover) {
+  .hall-step:hover .hall-mark {
+    background: var(--silver-bright);
+  }
+  .hall-step[aria-current="true"]:hover .hall-mark {
+    background: #fff;
+  }
+}
+.hall-step:focus-visible {
+  outline: 1px solid var(--silver-bright);
+  outline-offset: 4px;
 }
 /* The photograph's hit box — the print itself is WebGL, so its link is this invisible
    rectangle the renderer keeps sized and placed over it (the --plate-px vars). The

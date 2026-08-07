@@ -2,7 +2,6 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { ChromeStage } from "@/components/chrome/ChromeStage";
 import { ControlPanel } from "@/components/ControlPanel";
-import { PosteDevPanelMount } from "@/components/PosteDevPanelMount";
 import { SectionNav } from "@/components/SectionNav";
 import { Hero } from "@/sections/Hero";
 import { About } from "@/sections/About";
@@ -26,8 +25,6 @@ export default function Home() {
 			<Footer />
 			<SectionNav />
 			<ControlPanel />
-			{/* DEV seulement — règle la scène du poste ; supprimer quand les nombres sont cuits. */}
-			<PosteDevPanelMount />
 		</>
 	);
 }

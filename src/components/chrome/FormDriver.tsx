@@ -41,6 +41,11 @@ export function FormDriver({ about, work, scroll, reduced }: Props) {
     // vivante à chaque frame, donc il suit sans une ligne de plus.
     const s = formState();
     camera.position.set(s.camX, s.camY, s.camZ);
+    // LE LACET AUSSI, DEPUIS QUE LA SALLE EXISTE. Il vaut zéro partout ailleurs — les
+    // autres sections se composent en déplaçant la caméra, jamais en la tournant — donc
+    // cette ligne ne change rien pour elles ; la salle, elle, se regarde depuis
+    // l'extérieur de son cercle et l'œil doit pivoter vers l'intérieur.
+    if (camera.rotation.y !== s.camRotY) camera.rotation.y = s.camRotY;
     // La perspective ne change pas toute seule : le fov n'entre dans la matrice de
     // projection qu'une fois recalculée. Sans ceci, dialer le fov ne fait rien du tout —
     // et c'est le genre d'oubli qui se diagnostique en une heure.
