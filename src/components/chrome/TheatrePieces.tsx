@@ -340,8 +340,13 @@ export function TheatrePieces() {
     const pts = points.current;
     if (!pts) return;
     const st = formState();
+    // DEUX PRÉSENCES — les pièces et la poussière montent sur des fenêtres distinctes, pour que
+    // le noir entre le corridor et la salle soit peuplé de poussière seule (voir formClock). Le
+    // nuage n'est caché que quand les DEUX sont éteintes : sur la fenêtre où seule la poussière
+    // est là, `on` vaut encore zéro et un test sur lui seul aurait sauté toute la traversée.
     const on = st.theatre.on;
-    pts.visible = on > 0.002;
+    const dustOn = st.theatre.dust;
+    pts.visible = Math.max(on, dustOn) > 0.002;
     if (!pts.visible) return;
 
     const u = material.uniforms;
@@ -389,7 +394,7 @@ export function TheatrePieces() {
     xf[DUST_SLOT].set(c.cx, c.cy, c.cz, 1);
     // …et w = 1, LE DRAPEAU DE POUSSIÈRE, qui part au fragment via vDust (voir sa déclaration dans
     // le vertex). Les pièces gardent 0, posé juste au-dessus.
-    rot[DUST_SLOT].set(0, 0, on * g.dustGain, 1);
+    rot[DUST_SLOT].set(0, 0, dustOn * g.dustGain, 1);
 
     // Le grain est relatif à l'ESPACEMENT des particules : à ×1 elles se touchent tout
     // juste, quelle que soit la densité. Régler la densité ne dérègle donc pas la matière.

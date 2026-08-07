@@ -612,8 +612,40 @@ export type PosteTweak = {
    * et c'est ÇA la sortie du tube. Mesuré, à dive 0.979 le corridor était bien épuisé mais l'arc
    * l'avait déjà éteint à ~7 % : la sortie se jouait dans le noir. Plus haut, on voit le tube
    * s'ouvrir avant que tout s'éteigne — ce qui enchaîne sur la page noire et les planches.
+   *
+   * REDESCENDU DE 0.8 À 0.56 POUR LA SALLE, et le raisonnement ci-dessus est intact : il disait
+   * « pas avant que le tube ait fini de s'ouvrir », et 0.56 en p est exactement l'instant qui
+   * SUIT la fin de la dissolution (`dissolveAt` la place à p = 0.5). À 0.8 l'extinction ne
+   * s'amorçait qu'à dive 0.90 — le corridor restait donc allumé pendant 15 % du film sans plus
+   * rien avoir à montrer, et il n'existait aucune fenêtre où il soit éteint avant que la salle
+   * n'arrive. Le fondu ne se termine plus à p = 1 mais à FALL_BY : voir PixelTunnel.
    */
   fallAt: number;
+  /**
+   * OÙ LE FONDU AU NOIR S'ACHÈVE, dans la même unité que `fallAt` (l'avancée de la plongée
+   * APRÈS `diveArrive`, remise sur 0..1). Le corridor est donc entièrement éteint à
+   * `diveArrive + fallBy · (1 − diveArrive)`, soit 0,90 par défaut.
+   *
+   * IL EXISTE PARCE QUE TROIS ENDROITS ONT BESOIN DE CE MÊME INSTANT, et qu'ils l'obtenaient
+   * chacun autrement :
+   *
+   *   · le fragment du corridor, pour terminer son arc d'extinction ;
+   *   · le useFrame de PixelTunnel, pour CACHER le mesh — obligatoire, ce matériau est opaque
+   *     et écrit la profondeur, donc laissé visible il découperait la salle en noir ;
+   *   · le film de la plongée (Work.tsx), dont le deuxième temps freine jusqu'ici.
+   *
+   * ET C'EST CE TROISIÈME QUI IMPOSE QU'IL SOIT SÉPARÉ DE `fallAt`. Le film le dérivait de
+   * `fallAt` — ce qui était juste tant que « le fondu commence » et « l'image est morte »
+   * tombaient au même endroit. En avançant l'amorce du fondu (0.8 → 0.56) pour laisser la salle
+   * arriver après l'extinction, la borne du frein a suivi de 0,90 à 0,78 : or `power4.out` a une
+   * vitesse NULLE à son terme, donc la plongée s'arrêtait net au milieu de la décoloration du
+   * corridor, puis redémarrait d'un coup au temps suivant. Une pause en plein plan.
+   *
+   * Le raisonnement d'origine du film reste valable, il portait juste sur le mauvais nombre :
+   * on freine jusqu'à l'instant où l'image MEURT, parce qu'un frein dans le noir ne se voit pas.
+   * Cet instant, c'est celui-ci.
+   */
+  fallBy: number;
   /**
    * COMBIEN DE CORRIDOR ON TRAVERSE sur ce qui reste de la plongée après le croisement, en
    * multiples de sa longueur entière (« tranches » crans, chaque cran multipliant la profondeur
@@ -842,7 +874,8 @@ const DEFAULTS: Omit<PosteTweak, "textNonce" | "replayNonce"> = {
   tubeWallIn: 0.1,
   dissolveAt: 0.5,
   tunnelLoop: false,
-  fallAt: 0.8,
+  fallAt: 0.56,
+  fallBy: 0.8,
   restLevel: 0,
   cellCut: 0,
   corrX: 0,
@@ -1081,6 +1114,7 @@ export function posteTweakAsSource(): string {
     `const BLOCK = ${s.blockQuad ? `"ruban"` : `"cube"`};`,
     `const LOOP = ${s.tunnelLoop};`,
     `const FALL_AT = ${n(s.fallAt, 2)};`,
+    `const FALL_BY = ${n(s.fallBy, 2)};`,
     `const DISSOLVE_AT = ${n(s.dissolveAt, 2)};`,
     `const MOUTH_BACK = ${n(s.mouthBack, 3)};`,
     `const float PEAK = ${n(s.peak, 2)};`,

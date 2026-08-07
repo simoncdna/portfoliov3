@@ -264,6 +264,38 @@ function gridOf(scale: number) {
  */
 const DIVE_EPS = 1e-4;
 
+/**
+ * LA FENÊTRE DU DÉCROCHAGE, en unités de `dive` — voir `uBreak` dans le vertex shader pour ce
+ * qu'elle porte, et le useFrame pour pourquoi elle est dans cette unité et pas dans celle de
+ * l'arc de luminosité.
+ *
+ * ELLE S'INSCRIT DANS UNE SUITE DE BORNES QUI DOIT ÊTRE LUE DANS L'ORDRE, et qui est répartie
+ * sur trois fichiers — de quoi la casser sans s'en apercevoir. La séquence complète :
+ *
+ *   0.75  la dissolution du corridor s'achève (`dissolveAt`, posteTweak)
+ *   0.68 → 0.88  LE DÉCROCHAGE : les stries deviennent des points et quittent leurs cases
+ *   0.78 → 0.90  l'extinction du corridor (`fallAt` → `fallBy` en p, voir posteTweak)
+ *   0.80 → 0.90  la poussière de la salle monte (formClock)
+ *   0.90 → 0.93  le noir : plus de corridor, pas encore de pièces, de la poussière seule
+ *   0.93 → 1.00  les pièces se condensent (formClock)
+ *
+ * CES NOMBRES SONT DES POINTS DE DÉPART, à juger à l'écran et pas au calcul — en particulier
+ * BREAK_GRAIN et la durée du recouvrement : le grain du tunnel et celui de la salle ne
+ * coïncident pas par construction (0,0013 contre 0,0097 unité monde), mais le tunnel est à
+ * quelques centièmes de la caméra et la salle à onze unités, donc à l'écran le rapport
+ * s'inverse d'un facteur ~29. Il n'y a aucun réglage « juste » à dériver de là, seulement une
+ * continuité à obtenir à l'œil.
+ */
+const BREAK_AT = 0.68;
+const BREAK_BY = 0.88;
+
+/**
+ * COMBIEN LA COURSE ACCÉLÈRE — la part de `u²` mélangée à `u` dans l'avancée de la traversée
+ * (voir son usage dans le useFrame). 0 = vitesse constante, ce qu'elle était ; 1 = quadratique
+ * pure, où le départ traîne trop pour que le corridor se lise pendant qu'il naît.
+ */
+const TRAVEL_ACCEL = 0.35;
+
 /* -------------------------------------------------------------------------- */
 /* shaders                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -283,6 +315,86 @@ varying float vNear;
 
 /** La largeur du fondu d'ENTRÉE juste après le retrait, en unités du seuil — voir vNear. */
 const float FADE_FRAC = 0.15;
+
+/**
+ * LA DISLOCATION — ce qui fait des blocs du corridor la poussière de la salle. "uBreak" court de
+ * 0 à 1 sur la fin de la plongée (voir BREAK_AT/BREAK_BY dans le useFrame) et porte trois termes.
+ *
+ * LE PREMIER EST LE SUJET, les deux autres l'accompagnent. Ce qui fait l'identité visuelle de ce
+ * corridor n'est pas le volume des blocs, c'est leur ÉTIREMENT RADIAL : en mode ruban, "lproj"
+ * est la longueur du tube de la cellule rabattue dans le plan face caméra (voir le bloc RIBBON),
+ * et c'est elle qui dessine les stries en fuite. La faire retomber sur la largeur "w" change
+ * chaque strie en un carré face caméra — un grain. Le passage de « traits de lumière en fuite »
+ * à « grains suspendus » n'est donc pas un fondu entre deux scènes, c'est un changement de LOI
+ * dans la même matière, ce qui est exactement le sujet de ce raccord.
+ *
+ * Les deux autres suivent : le bloc quitte sa case (BREAK_REACH) et rétrécit vers la taille d'un
+ * grain (BREAK_GRAIN). Le déplacement est en uBreak AU CARRÉ et non linéaire — ils doivent
+ * LÂCHER, pas sauter : au début du seuil le décrochage doit être à peine perceptible.
+ */
+uniform float uBreak;
+
+/** Jusqu'où un bloc dérive, en CELLULES de la grille de phosphore — l'unité naturelle ici,
+ *  puisqu'une cellule est le « pixel » dont le corridor est fait. */
+const float BREAK_REACH = 10.0;
+/**
+ * Ce qu'il reste de la largeur d'un bloc au bout du décrochage.
+ *
+ * REMONTÉ DE 0.45 À 0.7 : rétrécir, perdre sa strie et s'éteindre en même temps vidait l'image
+ * au moment précis où elle doit être la plus intense. Les blocs gardent donc l'essentiel de leur
+ * présence, et c'est l'extinction seule qui les emporte.
+ */
+const float BREAK_GRAIN = 0.7;
+/**
+ * L'écart à la radiale, en fraction de celle-ci — voir breakDir. 0 = une étoile parfaitement
+ * géométrique, 1 = presque isotrope, donc le grouillement qu'on vient de corriger.
+ */
+const float BREAK_SPREAD = 0.55;
+/** La part de dérive en PROFONDEUR, qui casse la lecture « tout part dans un même plan ». */
+const float BREAK_Z = 0.3;
+/**
+ * À partir de quelle avancée du décrochage la strie commence à s'arrondir — voir son usage.
+ * Sous ce seuil les blocs dérivent en gardant leur étirement, donc en gardant la vitesse.
+ *
+ * REMONTÉ DE 0.45 À 0.7, pour la même raison que BREAK_GRAIN : la strie est le seul signal de
+ * vitesse de ce corridor, et la retirer avant la fin de la course laisse un plan qui ralentit
+ * alors qu'il accélère. Elle ne s'arrondit plus que sur le tout dernier tiers du décrochage,
+ * quand les grains sont déjà en train de s'éteindre.
+ */
+const float STREAK_HOLD = 0.7;
+
+/**
+ * La direction de fuite d'un bloc — tirée UNE FOIS de sa case et de sa tranche, donc stable pour
+ * un bloc donné d'une frame à l'autre. Pas d'attribut de plus à téléverser : "aCell" et "aSlice"
+ * sont déjà là.
+ *
+ * RADIALE, PAS ISOTROPE, ET C'EST UNE CORRECTION. Le premier essai tirait une direction uniforme
+ * sur la sphère, ce qui paraissait le choix neutre. C'était le mauvais : la caméra est SUR L'AXE,
+ * donc la moitié des blocs partait vers elle et l'autre moitié s'en éloignait. Le flux optique
+ * cohérent — tout ce qui, dans ce corridor, dit qu'on avance — devenait un grouillement, et le
+ * décrochage se lisait comme un ARRÊT au milieu de la plongée, exactement là où la course est
+ * censée être la plus rapide.
+ *
+ * Écartés depuis l'axe, les blocs balaient au contraire vers les bords du cadre et sortent par
+ * les côtés : c'est le mouvement qu'on voit en traversant un nuage, et il AJOUTE de la vitesse au
+ * lieu d'en retirer. Le décrochage devient une accélération plutôt qu'une dispersion.
+ *
+ * Le désordre reste, mais dans l'écart à la radiale (BREAK_SPREAD) et sur une petite composante
+ * en profondeur (BREAK_Z) : assez pour que ce ne soit pas une explosion géométrique en étoile,
+ * trop peu pour rendre le flux incohérent.
+ */
+vec3 breakDir(vec2 cellRef, vec2 cell, float slice) {
+  float a = fract(sin(dot(cell, vec2(127.1, 311.7)) + slice * 74.7) * 43758.5453);
+  float b = fract(sin(dot(cell, vec2(269.5, 183.3)) + slice * 51.3) * 43758.5453);
+  // La radiale depuis l'axe. Repli sur une direction fixe au centre exact, où elle n'existe pas.
+  float l = length(cellRef);
+  vec2 rad = l > 1e-5 ? cellRef / l : vec2(1.0, 0.0);
+  // Le désordre est ajouté AVANT de renormaliser plutôt que par une rotation : même effet, et
+  // pas de sin/cos de plus dans un shader qui en compte déjà deux par bloc (voir le garde à
+  // l'appel pour ce que coûte une transcendante ici).
+  vec2 dir = normalize(rad + vec2(a - 0.5, b - 0.5) * BREAK_SPREAD);
+  return vec3(dir, (fract(a * 7.3 + b * 3.1) - 0.5) * BREAK_Z);
+}
 
 /*
  * LE TRI DES BLOCS EST ICI, PLUS DANS LE FRAGMENT — ET C'EST CE QUI REND LA GRILLE FINE
@@ -484,9 +596,12 @@ void main() {
    * petite, et le geste se lit comme un va-et-vient — voir « tubeWall » dans posteTweak.
    */
   float fz = uShaft > 0.5 ? uStep * uWall : uCell * uFillZ;
+  // La largeur d'un bloc, RÉTRÉCIE par la dislocation (voir uBreak) — sortie en variable parce
+  // que le mode ruban la relit plus bas, et que deux copies dériveraient au premier réglage.
+  float bxy = uCell * uFillXY * mix(1.0, BREAK_GRAIN, uBreak);
   // Dans le puits, « sc » vaut 1 : la même ligne place donc des blocs de taille constante sur une
   // section constante, sans qu'aucun cas particulier soit nécessaire ici.
-  vec3 boxRef = vec3(cellRef, 0.0) + position * vec3(uCell * uFillXY, uCell * uFillXY, fz);
+  vec3 boxRef = vec3(cellRef, 0.0) + position * vec3(bxy, bxy, fz);
   // Z NÉGATIF : la caméra par défaut de la scène est à z=+10, tournée vers -Z (voir
   // ChromeCanvas) — s'éloigner dans le corridor, c'est donc aller vers les z locaux
   // négatifs. tunnelGeom ne porte que des magnitudes positives (z0>0 précisé dans son
@@ -520,7 +635,7 @@ void main() {
   float al = length(across);
   across = al > 1e-4 ? across / al : vec3(1.0, 0.0, 0.0);
   vec3 along = normalize(cross(v, across));
-  float w = uCell * uFillXY * sc;
+  float w = bxy * sc;
   /*
    * LA POINTE DU TUBE NE DÉPASSE JAMAIS LA CAMÉRA — la borne qui rend le RETRAIT réglable.
    *
@@ -537,8 +652,46 @@ void main() {
    */
   float lenZ = min(fz * sc, 1.8 * max(z - uCamDepth, 0.0));
   float lproj = max(lenZ * al, w);
+  /*
+   * LA STRIE DEVIENT UN POINT — le terme qui porte tout le raccord, voir uBreak. À collapse = 1
+   * la longueur rabattue vaut la largeur : le ruban est un carré face caméra, donc un grain.
+   *
+   * MAIS PAS TOUT DE SUITE — STREAK_HOLD, ET C'EST UNE CORRECTION, pas un raffinement. La strie
+   * EST le signal de vitesse : c'est son étirement radial, et lui seul, qui dit qu'on avance
+   * (le fragment ne connaît aucune lumière, donc rien d'autre ne porte le mouvement). La faire
+   * retomber dès le début du décrochage éteignait la vitesse à l'instant où les blocs lâchent —
+   * vu à l'écran : ça faisait une PAUSE au milieu de la traversée, la course s'arrêtait pour
+   * laisser jouer une dispersion.
+   *
+   * Décalée, la lecture redevient juste : les blocs quittent leurs cases EN ÉTANT ENCORE des
+   * stries — donc on continue de foncer pendant qu'ils se détachent — et ils ne s'arrondissent
+   * qu'à la toute fin, quand la course est de toute façon finie.
+   */
+  lproj = mix(lproj, w, smoothstep(STREAK_HOLD, 1.0, uBreak));
   p = pc + across * (position.x * w) + along * (position.y * lproj);
 #endif
+
+  /*
+   * …ET LE BLOC QUITTE SA CASE. Après les deux branches, sur le "p" commun : la dérive est un
+   * déplacement du grain, elle n'a rien à voir avec la façon dont sa silhouette a été construite.
+   * En cellules (voir BREAK_REACH), et en uBreak² pour que le décrochage s'amorce doucement.
+   *
+   * LE GARDE N'EST PAS UNE MICRO-OPTIMISATION, C'EST LA DIFFÉRENCE ENTRE FLUIDE ET SACCADÉ.
+   * GLSL n'évalue pas paresseusement : écrit sans le "if", breakDir() tourne sur CHAQUE sommet
+   * survivant de CHAQUE frame de toute la plongée, y compris pendant les deux tiers où uBreak
+   * vaut exactement zéro et où son résultat est multiplié par 0. À gridScale 5.5 la grille fait
+   * 264×198×40 instances, soit 8,4 millions d'invocations du vertex shader par frame — le
+   * commentaire d'en-tête qui annonce 27 648 date d'un gridScale de ~1 et est périmé. Quelques
+   * transcendantes gratuites à cette échelle se paient en millisecondes.
+   *
+   * ET C'EST UNE BRANCHE SUR UN UNIFORME, donc sans divergence : toutes les invocations d'un
+   * même draw call prennent le même chemin, ce qui est le seul cas où un "if" est gratuit sur
+   * GPU. La règle habituelle (« pas de branche dans un shader chaud ») vise les branches sur des
+   * données par sommet ; celle-ci est l'inverse.
+   */
+  if (uBreak > 0.0) {
+    p += breakDir(cellRef, aCell, aSlice) * (uBreak * uBreak * BREAK_REACH * uCell);
+  }
 
   /*
    * LE FONDU D'ENTRÉE EST CALCULÉ ICI, PLUS DANS LE FRAGMENT — il ne dépend que de la tranche,
@@ -558,6 +711,15 @@ const FRAG = /* glsl */ `
 // PAS DE uScreen ICI : le canvas n'est lu que dans le vertex shader (voir son en-tête), une
 // fois par bloc au lieu d'une fois par pixel.
 uniform float uDive;
+// L'avancée du décrochage — le MÊME uniforme que le vertex shader, déclaré des deux côtés
+// parce que les deux en ont besoin : là-bas il défait la forme, ici il défait la couleur. Un
+// seul objet "uniforms" les alimente, donc rien à synchroniser.
+uniform float uBreak;
+
+// Où l'extinction s'achève — voir "fallBy" dans posteTweak, qui explique pourquoi ce seuil est
+// un réglage partagé et non une constante : le JS s'en sert pour cacher le mesh, et le film de
+// la plongée pour savoir jusqu'où freiner.
+uniform float uFallBy;
 // Le point où la caméra a fini d'avancer (CAM_DIVE_ARRIVE, aujourd'hui la molette
 // « diveArrive » de posteTweak) — voir L'ARC DE LUMINOSITÉ plus bas. UN UNIFORME ET PAS UNE
 // CONSTANTE GLSL : ce nombre appartient à la chorégraphie de la caméra (formClock), et il
@@ -618,6 +780,27 @@ const vec3 REST = vec3(0.005, 0.045, 0.018);
  * aplat de couleur.
  */
 const vec3 NEON = vec3(0.10, 1.0, 0.32);
+/**
+ * LE DÉCOLORATION DU NÉON — le corridor part au blanc pendant qu'il se disloque.
+ *
+ * C'EST LE PONT DE MATIÈRE ENTRE LES DEUX MONDES, et c'est pour ça qu'il vaut mieux qu'un
+ * fondu. Le corridor est du phosphore VERT ; la salle est de l'argent BLANC. Tant que les deux
+ * gardent leur couleur, le raccord ne peut être qu'une substitution — une chose s'en va, une
+ * autre arrive. En blanchissant les grains du corridor AVANT qu'ils ne s'éteignent, les
+ * derniers points qu'on voit mourir sont déjà de la même matière que les premiers qu'on voit
+ * naître : la poussière de la salle monte sur la fenêtre 0.80 → 0.90 (formClock), le corridor
+ * blanchit sur 0.68 → 0.88. Ils se croisent en blanc.
+ *
+ * SUR uBreak ET NON SUR L'ARC DE LUMINOSITÉ : la décoloration est le MÊME geste que le
+ * décrochage — la matière change de loi, elle change donc de couleur en même temps qu'elle
+ * change de forme. Deux signaux auraient permis de les désynchroniser, ce qu'on ne veut pas.
+ *
+ * Effet de bord assumé : mixer vers le blanc REMONTE les canaux rouge et bleu, donc la
+ * luminance monte pendant la décoloration. Le corridor se surexpose en blanchissant plutôt que
+ * de virer à un gris de même valeur — c'est le comportement d'un phosphore saturé (voir le
+ * canal rouge non nul de NEON, posé pour cette raison), et l'extinction le rattrape ensuite.
+ */
+const float BLEACH_AT = 0.2;
 /**
  * L'exposant du bloom. Le halo ne s'ajoute pas linéairement à la luminance : il monte en
  * puissance, donc les cellules faibles restent nettes pendant que les fortes bavent — ce
@@ -747,7 +930,11 @@ void main() {
   // Le halo, superlinéaire — voir BLOOM_P. Additif comme tout le reste de ce fichier : un
   // phosphore ÉMET, il ne se mélange pas au fond (même doctrine que REST ci-dessus et que
   // le tube dans ChromeTableau).
-  vec3 col = REST * uRest + NEON * (luma + BLOOM_K * pow(luma, BLOOM_P));
+  // Le néon décoloré vers le blanc — voir BLEACH_AT. Appliqué à la TEINTE et non à la couleur
+  // finale : le halo (BLOOM_K) et l'atténuation en profondeur continuent de se calculer sur la
+  // même luminance, donc seule la matière change, pas le régime lumineux.
+  vec3 neon = mix(NEON, vec3(1.0), smoothstep(BLEACH_AT, 1.0, uBreak));
+  vec3 col = REST * uRest + neon * (luma + BLOOM_K * pow(luma, BLOOM_P));
   // Le point de fuite s'assombrit : vSc croît géométriquement avec la profondeur
   // recyclée (voir le vertex shader), donc l'atténuer directement évite de reconvertir
   // une distance qui n'existe déjà plus une fois recyclée dans [Z0, Z0·(1+g)^D).
@@ -765,8 +952,18 @@ void main() {
    * (travel 38.6 sur 40), mais l'arc l'avait déjà éteint à 7 % — donc la sortie du tube, qui EST
    * l'élargissement des dernières tranches, se jouait dans le noir. Repousser ce départ laisse
    * voir le tube s'ouvrir, puis éteint.
+   *
+   * ET IL FINIT À uFallBy, PLUS À 1.0 — c'est ce qui CREUSE LE NOIR. Terminée à p = 1, donc à
+   * dive = 1, l'extinction s'achevait à l'instant même où le film rend le scroll : il n'existait
+   * aucune fenêtre où le corridor soit éteint ET la salle pas encore montée. Or dive ne va pas
+   * au-delà de 1, donc le seuil entre les deux mondes ne peut pas être ajouté APRÈS — il doit
+   * être creusé DEDANS. 0.80 en p vaut dive 0.90, soit trois centièmes de film avant que les
+   * pièces ne commencent à se condenser (voir formClock) : de la poussière seule, dans le noir.
+   *
+   * Constante et non uniforme : le panneau dev qui réglait ces nombres n'existe plus, et un
+   * uniforme de plus pour une valeur que personne ne peut plus écrire serait un mécanisme mort.
    */
-  float fall = smoothstep(uFallAt, 1.0, p);
+  float fall = smoothstep(uFallAt, uFallBy, p);
   float mult = (1.0 + (uPeak - 1.0) * rise) * (1.0 - fall);
   col *= mult * uEnter;
   gl_FragColor = vec4(col, 1.0);
@@ -904,6 +1101,8 @@ export function PixelTunnel() {
           uStep: { value: 0.2 },
           uWall: { value: 1 },
           uFallAt: { value: 0.45 },
+          uFallBy: { value: 0.8 },
+          uBreak: { value: 0 },
           uCols: { value: COLS },
           uRows: { value: ROWS },
           uCell: { value: CELL },
@@ -958,6 +1157,17 @@ export function PixelTunnel() {
       return;
     }
     const pt = posteTweak.get();
+    /*
+     * …ET SORTIE PAR LE HAUT, une fois le corridor éteint — voir `fallBy` (posteTweak) pour pourquoi ce n'est
+     * pas une économie mais une nécessité (matériau opaque, il continuerait à découper la salle
+     * en noir). Le seuil est DÉRIVÉ de diveArrive plutôt que posé : l'arc de luminosité du
+     * fragment est défini sur la plongée RESTANTE après l'arrêt de la caméra, donc écrire 0.90
+     * en dur ici se décalerait silencieusement au premier réglage de diveArrive ou de fallBy.
+     */
+    if (s.dive >= pt.diveArrive + pt.fallBy * (1 - pt.diveArrive)) {
+      mesh.visible = false;
+      return;
+    }
     const x = screenFill(
       camera.position.z,
       camera.near,
@@ -1147,6 +1357,24 @@ export function PixelTunnel() {
     const from = travelFrom.current;
     uniforms.uLoop.value = pt.tunnelLoop ? 1 : 0;
     uniforms.uFallAt.value = pt.fallAt;
+    uniforms.uFallBy.value = pt.fallBy;
+    /*
+     * LA DISLOCATION — voir uBreak dans le vertex shader pour ce qu'elle fait, et formClock pour
+     * ce qu'elle raccorde.
+     *
+     * SUR `dive` ET NON SUR `p` (l'arc de luminosité), bien que l'extinction, elle, soit sur `p` :
+     * la fenêtre du décrochage doit se lire dans la même unité que celles de la salle, qui sont
+     * écrites en `dive` dans formClock. Un décrochage exprimé en `p` obligerait à retraduire
+     * mentalement chaque borne dès qu'on veut savoir laquelle des deux scènes bouge en premier —
+     * et c'est précisément l'enchaînement de ces bornes qui est le sujet.
+     *
+     * ELLE COMMENCE AVANT L'EXTINCTION, ET C'EST L'ORDRE QUI COMPTE. 0,68 tombe pendant que la
+     * dissolution finit (0,75) et bien avant que le fondu ne s'amorce (`fallAt` 0,56 en p, soit
+     * dive 0,78) : les blocs lâchent donc EN PLEINE LUMIÈRE, on les voit se détacher, et ils ne
+     * s'éteignent qu'ensuite, en dérivant. L'inverse — s'éteindre puis décrocher — ne montrerait
+     * rien du tout : ce serait un fondu au noir suivi d'un mouvement invisible.
+     */
+    uniforms.uBreak.value = smoothstep(BREAK_AT, BREAK_BY, s.dive);
     uniforms.uShaft.value = pt.tubeShaft ? 1 : 0;
     /*
      * LE PAS DU PUITS EST EXPRIMÉ EN DEMI-LARGEURS DE LA BOUCHE, pas en unités locales brutes :
@@ -1160,10 +1388,23 @@ export function PixelTunnel() {
     // `recycle` qui exige un nombre ENTIER de tours. Une traversée unique ne répète rien, donc
     // aucune valeur ne peut l'interrompre au milieu d'un cycle.
     const laps = pt.tunnelLoop ? Math.round(pt.cycles) : pt.cycles;
-    uniforms.uTravel.value =
-      from < 0
-        ? 0
-        : (Math.max(0, s.dive - from) * grid.slices * laps) / Math.max(1e-3, 1 - from);
+    /*
+     * LA COURSE ACCÉLÈRE — elle était LINÉAIRE en `dive`, donc à vitesse rigoureusement
+     * constante du croisement jusqu'au bout. Ce qui donnait l'impression de vitesse était la
+     * seule perspective ; rien dans la traversée ne poussait.
+     *
+     * `u` est l'avancée normalisée depuis le croisement, et la courbe mélange `u` et `u²`. Les
+     * DEUX BOUTS SONT PRÉSERVÉS (0 → 0 et 1 → 1), donc on parcourt exactement le même nombre de
+     * tranches qu'avant et la dernière arrive toujours pile à la fin de la plongée — voir
+     * `cycles` dans posteTweak, dont c'est l'invariant. Seule la RÉPARTITION change : à 0.35, la
+     * vitesse vaut 0,65× au départ et 1,35× à l'arrivée, soit un rapport d'un peu plus de deux
+     * entre le début et la fin de la traversée.
+     *
+     * Une puissance pure (`u^n`) donnait la même accélération mais écrasait le départ, où le
+     * corridor est encore en train de naître et a besoin d'être lisible.
+     */
+    const u = from < 0 ? 0 : Math.max(0, s.dive - from) / Math.max(1e-3, 1 - from);
+    uniforms.uTravel.value = (u * (1 - TRAVEL_ACCEL) + u * u * TRAVEL_ACCEL) * grid.slices * laps;
     uniforms.uDive.value = s.dive;
     uniforms.uArrive.value = pt.diveArrive;
     uniforms.uG.value = pt.growth;

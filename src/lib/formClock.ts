@@ -96,7 +96,7 @@ export type FormState = FormChoreo & {
    * plongée, au bit près. Le raccord entre les deux plans n'a donc aucune transition à
    * jouer — il n'y a rien à raccorder.
    */
-  theatre: { on: number; phi: number; cx: number; cy: number; cz: number };
+  theatre: { on: number; dust: number; phi: number; cx: number; cy: number; cz: number };
   /**
    * The plates' wave phase — a SECOND clock, because the wind has to be able to stop while
    * the metal keeps breathing.
@@ -404,7 +404,7 @@ const state: FormState = {
   camX: CAM_REST.x,
   camFov: CAM_REST.fov,
   camRotY: 0,
-  theatre: { on: 0, phi: 0, cx: 0, cy: 0, cz: 0 },
+  theatre: { on: 0, dust: 0, phi: 0, cx: 0, cy: 0, cz: 0 },
   mood: {
     sx: MOOD_REST.stretch[0],
     sy: MOOD_REST.stretch[1],
@@ -784,15 +784,36 @@ export function advanceFormClock(
    * écrit par le DOM aurait dupliqué cette retombée, avec la certitude qu'un jour l'un
    * des deux l'oublie et laisse la salle allumée au-dessus de Contact.
    *
-   * 0,72 À 0,96 ET NON 0,88 À 1 : la salle monte pendant le DERNIER QUART du film, pas
-   * sur ses toutes dernières images, et elle est entière avant que la plongée ne le soit.
-   * Deux raisons. Elle arrivait trop tard — on traversait un noir avant qu'elle
-   * n'apparaisse, ce qui coupait la séquence en deux plans au lieu d'un enchaînement. Et
-   * finir avant la plongée laisse le corridor s'éteindre PAR-DESSUS une salle déjà là,
-   * qui est le sens de lecture juste : on débouche dedans, on ne la voit pas se
-   * construire.
+   * DEUX PRÉSENCES ET NON UNE, et c'est le cœur du raccord entre les deux mondes.
+   *
+   * Une seule fenêtre (0,72 → 0,96) montait la salle ENTIÈRE pendant que le corridor était
+   * encore à pleine luminosité — mesuré : son fondu au noir ne commençait qu'à `dive` 0,90
+   * alors que sa dissolution était finie depuis 0,75. Les deux plans se superposaient donc sur
+   * plus d'un quart du film, et comme les deux sont de la lumière ADDITIONNÉE, la poussière
+   * d'argent se levait lavée par la grille de phosphore posée devant elle. La rédaction
+   * précédente notait que la reculer produisait « un noir avant qu'elle n'apparaisse, ce qui
+   * coupait la séquence en deux plans » : c'était vrai, et la cause n'était pas le noir — le
+   * corridor mettait 10 % du film à mourir après n'avoir plus rien à dire, donc le noir était
+   * un TROU entre deux lenteurs.
+   *
+   * Séparer les deux emplacements que le shader distingue déjà (les pièces, la poussière) fait
+   * du noir un PASSAGE au lieu d'un trou :
+   *
+   *   0,80 → 0,90  la poussière monte  ┐ pendant que les grains du corridor s'éteignent en
+   *                                    ┘ dérivant (voir uBreak dans PixelTunnel)
+   *   0,90 → 0,93  poussière SEULE       le noir, peuplé — plus de corridor, pas encore d'objets
+   *   0,93 → 1,00  les pièces            elles se condensent hors de cette poussière
+   *
+   * Le relais se fait donc entre deux nuages de GRAINS, jamais entre une grille et une pièce :
+   * c'est ce qui rend littéral « les blocs deviennent la poussière ».
+   *
+   * POURQUOI ÇA NE DÉCALE PAS LA MARCHE DES STATIONS, alors que Work.tsx cale sa fenêtre sur
+   * `theatre.on` : le scroll de page est VERROUILLÉ pendant tout le film (voir tubeGate et la
+   * retenue dans Work.tsx), donc `window.scrollY` ne bouge pas entre `dive` 0,72 et 0,93.
+   * `hallFrom` mesure la même position quel que soit le seuil qui le déclenche.
    */
-  const th = smoothstep(0.72, 0.96, state.dive);
+  state.theatre.dust = smoothstep(0.8, 0.9, state.dive);
+  const th = smoothstep(0.93, 1, state.dive);
   state.theatre.on = th;
 
   /*

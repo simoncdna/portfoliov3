@@ -923,21 +923,32 @@ export function Work() {
        *
        *   1. jusqu'à `diveArrive` (0.5) — l'approche, la caméra pousse vers le verre. Démarrage
        *      lent qui accélère (`power2.in`), 32 % du temps.
-       *   2. jusqu'à l'amorce du fondu (0.5 + `fallAt` · 0.5, soit 0.90 par défaut) — la traversée
+       *   2. jusqu'à la MORT DE L'IMAGE (0.5 + `fallBy` · 0.5, soit 0.90 par défaut) — la traversée
        *      du corridor ET TOUT LE FREIN, `power4.out` sur 52 % du temps : c'est le seul segment
        *      que le spectateur voit en entier, donc le seul où un ralenti se lit.
-       *   3. le reste (0.90 → 1) — l'extinction, 16 % du temps et sans ease : freiner pendant un
-       *      fondu au noir ne se voit pas, l'y étaler ne ferait que rallonger l'attente.
+       *   3. le reste (0.90 → 1) — 16 % du temps et sans ease : le corridor est éteint, la caméra
+       *      est immobile, il n'y a plus rien dont on puisse lire la vitesse.
        *
-       * Les seuils sont RELUS dans le store (diveArrive, fallAt) plutôt que recopiés : ce sont les
-       * mêmes deux nombres que PixelTunnel utilise pour son arc de luminosité, et une copie ici
-       * dériverait au premier réglage touché d'un seul côté.
+       * SUR `fallBy` ET NON SUR `fallAt`, ET LA DIFFÉRENCE A COÛTÉ UNE PAUSE EN PLEIN PLAN. Les
+       * deux ont longtemps coïncidé, le fondu occupant toute la fin de la plongée ; ce segment se
+       * calait donc sur `fallAt` sans que ce soit faux. Depuis que l'extinction est avancée pour
+       * laisser la salle arriver APRÈS elle (voir posteTweak), `fallAt` est l'instant où l'image
+       * commence à mourir et `fallBy` celui où elle est morte — et c'est le second qu'il faut
+       * ici. Calé sur le premier, le frein tombait à 0.78 : or `power4.out` a une vitesse NULLE à
+       * son terme, donc la plongée s'arrêtait net au milieu de la décoloration du corridor, puis
+       * repartait d'un coup au temps suivant. Le raisonnement d'origine — « on freine jusqu'à ce
+       * que l'image meure, parce qu'un frein dans le noir ne se voit pas » — était bon ; il
+       * désignait juste le mauvais des deux nombres, à l'époque où il n'y en avait qu'un.
+       *
+       * Les seuils sont RELUS dans le store (diveArrive, fallBy) plutôt que recopiés : ce sont les
+       * mêmes nombres que PixelTunnel utilise pour son arc de luminosité et pour cacher son mesh,
+       * et une copie ici dériverait au premier réglage touché d'un seul côté.
        *
        * Les durées sont des PARTS, pas des secondes — `duration()` sur la timeline (voir le ticker
        * de la retenue) les met à l'échelle de `diveSeconds` d'un seul coup.
        */
       const pt0 = posteTweak.get();
-      const fadeDive = pt0.diveArrive + pt0.fallAt * (1 - pt0.diveArrive);
+      const fadeDive = pt0.diveArrive + pt0.fallBy * (1 - pt0.diveArrive);
       divePlay.current = gsap
         .timeline({ paused: true })
         .fromTo(workReveal, { dive: 0 }, { dive: pt0.diveArrive, duration: 0.32, ease: "power2.in" })
