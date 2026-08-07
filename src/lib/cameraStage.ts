@@ -94,13 +94,26 @@ export function seek(scrub: number) {
 }
 
 /**
- * LE STUDIO NE DOIT JAMAIS ENTRER DANS LE BUNDLE DE PROD — 22,3 Mo décompressés.
+ * LE PANNEAU DU STUDIO EST ÉTEINT — et rien n'est perdu en l'éteignant, c'est vérifié.
  *
- * D'où l'import DYNAMIQUE sous une condition constante à la compilation : le bundler évalue
- * `process.env.NODE_ENV` au build, la branche devient morte, et le chunk n'est jamais
- * demandé. À VÉRIFIER PAR LA MESURE et non sur la foi de ce commentaire — voir le plan,
- * tâche 5.
+ * Theatre ne lit son `localStorage` QUE si le studio est initialisé, donc couper le studio ferait
+ * normalement retomber la pose sur l'état du fichier (`cameraStage.state.json`, encore l'identité).
+ * Sauf qu'il n'y a RIEN dans ce localStorage : `theatre-0.4.persistent` vaut littéralement `null`, et
+ * aucune autre clé Theatre n'existe. La pose en usage est donc celle des DÉFAUTS déclarés juste
+ * au-dessus (REST.x/y/z/fov), qui vivent dans la source — éteindre le panneau ne change pas une
+ * frame, et l'export de l'état n'a plus d'objet.
+ *
+ * ÉTEINT PAR UNE CONSTANTE ET PAS PAR UNE SUPPRESSION : la scène reste pilotée par Theatre (le
+ * playhead, la séquence, l'interpolation), c'est seulement son INTERFACE qui disparaît — les trois
+ * boîtes en haut de l'écran, qui masquaient la composition qu'on est en train de juger. Passer
+ * STUDIO à true rend le panneau, sans rien recâbler.
+ *
+ * LE STUDIO NE DOIT DE TOUTE FAÇON JAMAIS ENTRER DANS LE BUNDLE DE PROD — 22,3 Mo décompressés.
+ * D'où l'import resté DYNAMIQUE sous une condition constante à la compilation : le bundler évalue
+ * `process.env.NODE_ENV` au build, la branche devient morte, et le chunk n'est jamais demandé.
  */
-if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
+const STUDIO = false;
+
+if (STUDIO && process.env.NODE_ENV === "development" && typeof window !== "undefined") {
   import("@theatre/studio").then((m) => m.default.initialize());
 }
