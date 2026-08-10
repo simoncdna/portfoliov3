@@ -32,5 +32,21 @@
  * épinglée et Lenis arrêté jusque-là (voir Work.tsx). C'est le seul endroit du site où le
  * scroll est retenu, et c'est un choix assumé — atténué par le fait que scroller accélère
  * la frappe au lieu de ne rien faire.
+ *
+ * `hallOut` (0..1) est L'EXTINCTION DE LA SALLE, premier temps de la sortie — un cinquième
+ * scrub, ajouté parce que la salle n'avait AUCUN moyen de partir autrement qu'en étant
+ * coupée.
+ *
+ * Elle s'éteignait jusqu'ici par ricochet : le rangement appelait `workPlate.clear()`, donc
+ * `flat` s'effondrait, donc `dressed` puis `state.dive` avec lui, donc `theatre.on`. Mesuré
+ * au navigateur, ça coûtait UN pas de scroll de 200 px pour passer de la salle entière
+ * (`on` = 1, caméra à z = −18,35, lacet 2,52 rad) au repos (`on` = 0, z = 10, lacet 0) —
+ * les quatre pièces et vingt-huit unités de caméra évacuées en une frame, ALORS QUE `away`
+ * valait encore 0. La sortie avait été écrite pour la plaque photo, et personne ne lui avait
+ * dit qu'il y avait désormais une salle à ramener.
+ *
+ * Séparé de `away` et non fondu dedans : ce sont deux plans, et l'ordre entre eux est la
+ * chorégraphie même — la salle s'éteint, le noir tient, PUIS le métal reparaît en sphère et
+ * s'en va. Un seul scrub ne pourrait pas dire « et pendant ce temps, rien ».
  */
-export const workReveal = { away: 0, form: 0, dive: 0 };
+export const workReveal = { away: 0, form: 0, dive: 0, hallOut: 0 };

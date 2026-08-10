@@ -96,7 +96,27 @@ export type FormState = FormChoreo & {
    * plongée, au bit près. Le raccord entre les deux plans n'a donc aucune transition à
    * jouer — il n'y a rien à raccorder.
    */
-  theatre: { on: number; dust: number; phi: number; cx: number; cy: number; cz: number };
+  theatre: {
+    on: number;
+    dust: number;
+    phi: number;
+    cx: number;
+    cy: number;
+    cz: number;
+    /**
+     * L'OUVERTURE D'UN PROJET — `open` la pièce concernée (index, ou −1 quand la salle
+     * est refermée depuis assez longtemps pour que plus rien n'en dépende), `reveal` son
+     * avancement de 0 à 1.
+     *
+     * DEUX CHAMPS ET NON UN, parce que la fermeture est une rampe : `theatreReveal.open`
+     * repasse à −1 à l'instant du clic, mais la pièce met une seconde à revenir et les
+     * trois autres à se reformer. `open` reste donc sur la DERNIÈRE pièce ouverte tant que
+     * `reveal` n'est pas retombé — sans quoi la chorégraphie de fermeture ne saurait plus
+     * de qui elle parle et sauterait à l'état de repos d'une frame à l'autre.
+     */
+    open: number;
+    reveal: number;
+  };
   /**
    * The plates' wave phase — a SECOND clock, because the wind has to be able to stop while
    * the metal keeps breathing.
@@ -391,6 +411,25 @@ const THEATRE_FOV = 47;
 /** L'angle courant de la caméra sur le cercle de la salle. Voir le bloc de la caméra. */
 let theatrePhi = 0;
 
+/**
+ * LA VITESSE D'OUVERTURE D'UN PROJET, en 1/s de la même exponentielle que le reste.
+ *
+ * 3,2 contre 2,0 pour la marche de la caméra (THEATRE_RATE) : l'ouverture doit être plus
+ * VIVE que le trajet entre deux stations, parce qu'elle répond à un clic et non à un
+ * scroll. Un geste discret attend une réponse discrète ; à 2,0 le décalage traînait
+ * derrière le doigt et se lisait comme une hésitation. Elle reste au-dessus de la seconde
+ * (~0,9 s pour couvrir 95 %), qui est le tempo de tout le site.
+ */
+const OPEN_RATE = 3.2;
+
+/**
+ * L'avancement de l'ouverture, et la pièce qu'elle concerne — le seul autre état intégré
+ * de la salle, avec l'angle. Voir le champ `theatre.reveal` pour pourquoi les deux
+ * survivent au retour de `theatreReveal.open` à −1.
+ */
+let theatreOpen = 0;
+let theatreOpenAt = -1;
+
 const state: FormState = {
   ...formChoreo(0, 0, 0, 0),
   time: 0,
@@ -404,7 +443,7 @@ const state: FormState = {
   camX: CAM_REST.x,
   camFov: CAM_REST.fov,
   camRotY: 0,
-  theatre: { on: 0, dust: 0, phi: 0, cx: 0, cy: 0, cz: 0 },
+  theatre: { on: 0, dust: 0, phi: 0, cx: 0, cy: 0, cz: 0, open: -1, reveal: 0 },
   mood: {
     sx: MOOD_REST.stretch[0],
     sy: MOOD_REST.stretch[1],
@@ -825,10 +864,19 @@ export function advanceFormClock(
    * Séparer les deux emplacements que le shader distingue déjà (les pièces, la poussière) fait
    * du noir un PASSAGE au lieu d'un trou :
    *
-   *   0,80 → 0,90  la poussière monte  ┐ pendant que les grains du corridor s'éteignent en
-   *                                    ┘ dérivant (voir uBreak dans PixelTunnel)
-   *   0,90 → 0,93  poussière SEULE       le noir, peuplé — plus de corridor, pas encore d'objets
-   *   0,93 → 1,00  les pièces            elles se condensent hors de cette poussière
+   *   0,80 → 0,90   la poussière monte  ┐ pendant que les grains du corridor s'éteignent en
+   *                                     ┘ dérivant (voir uBreak dans PixelTunnel)
+   *   0,90 → 0,915  poussière SEULE       le noir, peuplé — plus de corridor, pas d'objets
+   *   0,915 → 0,99  les pièces            elles se condensent hors de cette poussière
+   *
+   * LE NOIR NE DURE QUE 0,17 s, ET C'EST UNE MESURE, PAS UNE FRACTION. Le troisième temps du
+   * film couvre `dive` 0,90 → 1 en 16 % de `diveSeconds`, sans ease (voir Work.tsx) : à 7 s de
+   * plongée, ce segment vaut 1,12 s, donc un centième de `dive` y vaut 0,11 s. Raisonner en
+   * centièmes de plongée trompe ici — la fenêtre paraissait large et durait un tiers de seconde.
+   *
+   * LES PIÈCES FINISSENT À 0,99 ET NON À 1 : le film rend le scroll à `dive` = 1, et arriver sur
+   * une image encore en train de se résoudre fait lire la fin du plan comme un chargement. Elles
+   * sont entières une fraction de seconde avant qu'on reprenne la main.
    *
    * Le relais se fait donc entre deux nuages de GRAINS, jamais entre une grille et une pièce :
    * c'est ce qui rend littéral « les blocs deviennent la poussière ».
@@ -838,8 +886,22 @@ export function advanceFormClock(
    * retenue dans Work.tsx), donc `window.scrollY` ne bouge pas entre `dive` 0,72 et 0,93.
    * `hallFrom` mesure la même position quel que soit le seuil qui le déclenche.
    */
-  state.theatre.dust = smoothstep(0.8, 0.9, state.dive);
-  const th = smoothstep(0.93, 1, state.dive);
+  /*
+   * …ET UN SECOND FACTEUR POUR LA SORTIE, parce que `state.dive` ne peut pas la porter.
+   *
+   * Il retombe bien à la sortie de section — mais par `dressed`, donc à la vitesse à
+   * laquelle `md.flat` s'effondre quand le rangement rend la plaque, c'est-à-dire en trois
+   * dixièmes de seconde et sans que le scroll ait son mot à dire. Mesuré au navigateur : la
+   * salle entière évacuée en UN pas de 200 px, `away` valant encore 0. Une retombée ne peut
+   * pas servir de sortie si elle est l'effet secondaire du ménage de quelqu'un d'autre.
+   *
+   * `workReveal.hallOut` est donc scrubbé par le premier temps de la sortie (voir Work.tsx),
+   * et il est ce qui ÉTEINT ; `dressed` reste derrière comme filet — la salle ne peut pas
+   * survivre à un métal qui n'est plus une plaque, quel que soit l'état de ce scrub.
+   */
+  const hallLeft = 1 - Math.max(0, Math.min(1, workReveal.hallOut));
+  state.theatre.dust = smoothstep(0.8, 0.9, state.dive) * hallLeft;
+  const th = smoothstep(0.915, 0.99, state.dive) * hallLeft;
   state.theatre.on = th;
 
   /*
@@ -852,6 +914,32 @@ export function advanceFormClock(
   const wanted = STATIONS[Math.max(0, Math.min(STATIONS.length - 1, theatreReveal.station))].phi;
   theatrePhi += shortestDelta(theatrePhi, wanted) * (reduced ? 1 : 1 - Math.exp(-delta * THEATRE_RATE));
   state.theatre.phi = theatrePhi;
+
+  /*
+   * L'OUVERTURE D'UN PROJET. Une rampe de plus, intégrée ici pour la même raison que
+   * l'angle : ce qui arrive du DOM est un ENTIER qui saute (une pièce, ou −1), et le
+   * trajet entre deux valeurs discrètes doit bien être fabriqué quelque part.
+   *
+   * LA PIÈCE VISÉE EST MÉMORISÉE, PAS RELUE. `theatreReveal.open` repasse à −1 au clic de
+   * fermeture, mais la fermeture DURE : la pièce revient à sa place, les trois autres se
+   * reforment. Relire l'entier à chaque frame ferait perdre le sujet à l'instant précis où
+   * la chorégraphie de sortie en a besoin. On garde donc la dernière pièce ouverte tant que
+   * `reveal` n'est pas retombé — et on ne la relâche qu'ensuite, pour que la salle rendue
+   * au scroll ne traîne pas un index périmé.
+   *
+   * MULTIPLIÉ PAR `th` : la salle qui s'éteint (sortie de section, remontée) referme tout
+   * ce qui était ouvert, sans que personne ait à y penser. C'est la même discipline que la
+   * présence elle-même, qui se déduit de la plongée plutôt que d'avoir son propre pont.
+   */
+  if (theatreReveal.open >= 0) theatreOpenAt = theatreReveal.open;
+  const wantOpen = theatreReveal.open >= 0 ? 1 : 0;
+  theatreOpen += (wantOpen - theatreOpen) * (reduced ? 1 : 1 - Math.exp(-delta * OPEN_RATE));
+  if (wantOpen === 0 && theatreOpen < 1e-3) {
+    theatreOpen = 0;
+    theatreOpenAt = -1;
+  }
+  state.theatre.open = theatreOpenAt;
+  state.theatre.reveal = theatreOpen * th;
 
   const hall = theatreCamera(theatrePhi, state.theatre.cx, state.theatre.cy, state.theatre.cz, 0);
   state.camX = confine(state.camX, hall.x, th);

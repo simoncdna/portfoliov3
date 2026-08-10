@@ -2,11 +2,19 @@
 
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, ShaderMaterial, Vector4 } from "three";
+import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, ShaderMaterial, Vector3, Vector4 } from "three";
 import type { Points } from "three";
 import { formState } from "@/lib/formClock";
 import { THEATRE_LOOK } from "@/lib/theatreLook";
-import { RING_RADIUS, STATIONS, stationPosition } from "@/lib/theatre";
+import {
+  PIECE_RADIUS,
+  RING_RADIUS,
+  STATIONS,
+  stationPosition,
+  stationSlide,
+  theatreReveal,
+  theatreScreen,
+} from "@/lib/theatre";
 import { buildPiece } from "@/lib/theatreShapes";
 
 /**
@@ -56,6 +64,23 @@ attribute vec2 aSeed;
 
 uniform vec4 uXf[${SLOTS}];   // xyz = centre monde, w = échelle
 uniform vec4 uRot[${SLOTS}];  // x = inclinaison, y = lacet, z = présence
+/**
+ * LA LECTURE D'UN PROJET, par pièce — x = LE SOUFFLE, y = LA TENUE.
+ *
+ * Un troisième tableau de poses plutôt qu'un canal volé aux deux autres : uXf est plein
+ * (xyz + échelle) et uRot l'est depuis que son w porte le drapeau de poussière. Cinq vec4
+ * de plus se téléversent en microsecondes, là où réutiliser un canal aurait fait dépendre
+ * deux réglages l'un de l'autre pour économiser vingt nombres.
+ *
+ * LA TENUE est ce que le survol répond : la pièce qu'on regarde cesse de s'effriter, ses
+ * grains rentrent, elle redevient nette. C'est un facteur sur uRate, donc à 1 la
+ * décomposition n'a plus personne à tirer.
+ *
+ * LE SOUFFLE est ce que les trois autres font quand on en ouvre une : elles finissent leur
+ * décomposition et NE REVIENNENT PAS. Voir la boucle plus bas — il ne s'ajoute pas au
+ * cycle, il le remplace.
+ */
+uniform vec4 uFx[${SLOTS}];
 
 uniform float uTime;
 uniform float uSize;    // diamètre en unités monde
@@ -94,6 +119,7 @@ void main() {
   int pi = int(aPiece + 0.5);
   vec4 XF = uXf[pi];
   vec4 RT = uRot[pi];
+  vec4 FX = uFx[pi];
 
   float r0 = aSeed.x / TAU;
   float r1 = aSeed.y / TAU;
@@ -101,6 +127,12 @@ void main() {
   // La saillance est TRANSPORTÉE, pas devinée : une formule unique ne peut pas désigner
   // les pointes d'un vase et les coins d'un appareil. Voir theatreShapes.
   float w = smoothstep(1.0 - uZone, 1.0, aSal);
+  // …sauf quand ça souffle : là c'est TOUT le corps qui part, pas seulement les pointes.
+  // Sans ça, une pièce qu'on chasse laisserait son cœur derrière elle, en suspension.
+  w = mix(w, 1.0, FX.x);
+  // La tenue éteint la décomposition ; le souffle la rallume par-dessus, pour que les deux
+  // ne puissent jamais s'annuler (une pièce ne peut de toute façon pas être les deux).
+  float rate = max(uRate * (1.0 - FX.y), FX.x);
 
   // Qui part est tiré UNE FOIS, par un hachage des deux graines — ce qui laisse r0 et r1
   // libres pour la phase et l'ouverture. Corrélées au tirage, les particules qui partent
@@ -125,16 +157,31 @@ void main() {
   float alpha = 1.0;
   vec3 esc = vec3(0.0);
 
-  if (pick < w * uRate) {
+  if (pick < w * rate) {
     float ph = fract(uTime / uCycle + r0);
+    /*
+     * LE SOUFFLE REMPLACE LE CYCLE, IL NE S'Y AJOUTE PAS — et c'est ce qui fait que
+     * personne ne revient. Décaler la phase (fract(… + souffle)) ferait tourner le cycle
+     * plus loin, donc rentrer les grains plus tôt : la pièce chassée serait revenue avant
+     * la fin du geste. Ici la phase devient une RAMPE À SENS UNIQUE qui court de 0 à uOut,
+     * échelonnée par grain (le −r0) pour que la pièce se défasse en vague et non d'un bloc.
+     *
+     * ×1.35 pour que même le grain le plus tardif (r0 ≈ 1, donc retardé de 0.35) atteigne
+     * bien le bout de sa course quand le souffle vaut 1 : 1.35 − 0.35 = 1 exactement.
+     */
+    float phGo = clamp(FX.x * 1.35 - r0 * 0.35, 0.0, 1.0) * uOut;
+    ph = mix(ph, phGo, FX.x);
+    // Chassées, elles partent aussi PLUS LOIN — sinon la dissipation se lit comme une
+    // simple extinction sur place, et le mot « souffle » ne veut plus rien dire.
+    float gust = 1.0 + FX.x * 1.6;
     if (ph < uOut) {
       float e = ph / uOut;
       float k = ease(e);
       // Haut vers le haut, bas vers le bas — et c'est le y APRÈS orientation qui décide,
       // pas celui du modèle : sur une pièce inclinée les deux ne coïncident plus.
-      esc.y = sign(base.y) * uReach * k;
-      esc.x = ((r0 - 0.5) * 1.4 + sin(uTime * 0.7 + r1 * TAU) * 0.35) * uFan * k;
-      esc.z = ((r1 - 0.5) * 1.4 + cos(uTime * 0.6 + r0 * TAU) * 0.35) * uFan * k;
+      esc.y = sign(base.y) * uReach * k * gust;
+      esc.x = ((r0 - 0.5) * 1.4 + sin(uTime * 0.7 + r1 * TAU) * 0.35) * uFan * k * gust;
+      esc.z = ((r1 - 0.5) * 1.4 + cos(uTime * 0.6 + r0 * TAU) * 0.35) * uFan * k * gust;
       // Elle s'éteint plus vite qu'elle ne s'éloigne : la matière doit se perdre, pas se
       // poser quelque part.
       alpha = pow(1.0 - e, 1.5);
@@ -221,8 +268,35 @@ function seeded(seed: number, n: number) {
   return out;
 }
 
+/**
+ * LA VITESSE À LAQUELLE LA MATIÈRE SE TIENT quand on survole une pièce, en 1/s.
+ *
+ * 7 : deux dixièmes de seconde pour l'essentiel du chemin. C'est court exprès — le survol
+ * est le seul retour que le pointeur reçoive avant le clic, et une réponse qui met une
+ * seconde ne se relie plus au geste qui l'a demandée. La décomposition, elle, reprend à la
+ * même vitesse : ce n'est pas une transition, c'est un contact.
+ *
+ * ICI ET NON DANS L'HORLOGE, contrairement à l'ouverture : cette rampe est PAR PIÈCE et
+ * ne concerne que le pointeur. L'horloge n'a rien à savoir de la souris — elle intègre ce
+ * dont la chorégraphie dépend (l'angle, l'ouverture), pas ce dont le curseur dépend.
+ */
+const HOLD_RATE = 7;
+
 export function TheatrePieces() {
   const points = useRef<Points>(null);
+  /** L'avancement de la tenue, par pièce. Voir HOLD_RATE. */
+  const hold = useRef(new Float32Array(STATIONS.length));
+  /**
+   * L'angle propre que la pièce ouverte a accumulé — « elle tourne pendant qu'on la lit ».
+   *
+   * INTÉGRÉ ET NON DÉRIVÉ DE uTime : dérivé, l'angle serait fonction de la présence
+   * (uTime × vitesse × ouverture) et retomberait donc à zéro À LA FERMETURE, faisant
+   * revenir la pièce à sa pose d'origine en tournant à l'envers. Accumulé, elle s'arrête
+   * simplement là où elle en était.
+   */
+  const openSpin = useRef(0);
+  /** Un vecteur de travail pour la projection écran, alloué une fois. */
+  const probe = useRef(new Vector3());
 
   const geometry = useMemo(() => {
     const clouds = STATIONS.map((s) => buildPiece(s.kind, THEATRE_LOOK.density));
@@ -281,14 +355,17 @@ export function TheatrePieces() {
   const material = useMemo(() => {
     const xf: Vector4[] = [];
     const rot: Vector4[] = [];
+    const fx: Vector4[] = [];
     for (let i = 0; i < SLOTS; i++) {
       xf.push(new Vector4(0, 0, 0, 1));
       rot.push(new Vector4(0, 0, 0, 0));
+      fx.push(new Vector4(0, 0, 0, 0));
     }
     return new ShaderMaterial({
       uniforms: {
         uXf: { value: xf },
         uRot: { value: rot },
+        uFx: { value: fx },
         uTime: { value: 0 },
         uSize: { value: 0 },
         uScale: { value: 400 },
@@ -383,13 +460,67 @@ export function TheatrePieces() {
     const spread = g.spread;
     const xf = u.uXf.value as Vector4[];
     const rot = u.uRot.value as Vector4[];
+    const fx = u.uFx.value as Vector4[];
+
+    /*
+     * LA LECTURE D'UN PROJET — le décalage, la tenue, le souffle.
+     *
+     * `open` est la pièce concernée et `rev` l'avancement, tous deux fabriqués par
+     * l'horloge (voir formClock) : ce composant ne décide de rien, il applique. Le
+     * décalage se calcule sur l'angle COURANT de la caméra et non sur celui de la station,
+     * pour que la pièce glisse bien vers la gauche du CADRE — pendant que la caméra
+     * termine son arc, les deux angles diffèrent, et prendre celui de la station ferait
+     * partir la pièce de travers.
+     */
+    // La focale, lue avant la boucle : la projection écran des pièces en dépend autant que
+    // la taille des grains plus bas.
+    const fov = (camera as typeof camera & { fov?: number }).fov ?? 47;
+    const open = c.open;
+    const rev = c.reveal;
+    const slide = rev > 0.0005 ? stationSlide(c.phi, rev) : null;
+    openSpin.current += delta * g.openSpin * rev;
+    const holds = hold.current;
+    const holdK = 1 - Math.exp(-delta * HOLD_RATE);
+
     for (let i = 0; i < STATIONS.length; i++) {
       const s = STATIONS[i];
       const p = stationPosition(s, c.cx, c.cy, c.cz);
-      xf[i].set(c.cx + (p.x - c.cx) * spread, p.y, c.cz + (p.z - c.cz) * spread, s.scale);
+      const lit = i === open;
+      let x = c.cx + (p.x - c.cx) * spread;
+      let z = c.cz + (p.z - c.cz) * spread;
+      if (lit && slide) {
+        x += slide.x;
+        z += slide.z;
+      }
+      xf[i].set(x, p.y, z, s.scale);
       // Chaque pièce tourne à sa propre vitesse, tirée de son index : dérivée de sa
-      // POSITION, elle se rebattrait à chaque déplacement du centre de la salle.
-      rot[i].set(s.tilt, u.uTime.value * g.spin * (0.5 + ((i * 0.37) % 1)), on, 0);
+      // POSITION, elle se rebattrait à chaque déplacement du centre de la salle. La pièce
+      // ouverte en prend une seconde, la sienne, qui ne repart pas en arrière (openSpin).
+      const spin = u.uTime.value * g.spin * (0.5 + ((i * 0.37) % 1)) + (lit ? openSpin.current : 0);
+      rot[i].set(s.tilt, spin, on, 0);
+
+      holds[i] += ((theatreReveal.hover === i ? 1 : 0) - holds[i]) * holdK;
+      // La pièce ouverte se tient d'office : on ne lit pas une chose qui s'effrite.
+      // Les trois autres reçoivent le souffle, et rien d'autre.
+      fx[i].set(open >= 0 && !lit ? rev : 0, Math.max(holds[i], lit ? rev : 0), 0, 0);
+
+      /*
+       * …ET LA POSITION À L'ÉCRAN, pour le DOM (voir theatreScreen). Publiée ici parce que
+       * c'est ici qu'on a la caméra et la pose réelle : recalculée côté section, elle
+       * serait une SECONDE vérité sur l'endroit où est la pièce, et les deux finiraient par
+       * diverger d'une frame — c'est-à-dire d'une cible de clic posée à côté de son objet.
+       *
+       * La distance se prend AVANT `project`, qui écrase le vecteur.
+       */
+      const dist = probe.current.set(x, p.y, z).distanceTo(camera.position);
+      const v = probe.current.project(camera);
+      theatreScreen.x[i] = (v.x * size.width) / 2;
+      theatreScreen.y[i] = (-v.y * size.height) / 2;
+      theatreScreen.r[i] = (PIECE_RADIUS * s.scale * (size.height / 2)) / (Math.tan((fov * Math.PI) / 360) * dist);
+      // …et la place qu'elle a libérée, qui est celle qu'elle occuperait sans décalage.
+      const home = lit && slide ? probe.current.set(x - slide.x, p.y, z - slide.z).project(camera) : v;
+      theatreScreen.freeX[i] = (home.x * size.width) / 2;
+      theatreScreen.freeY[i] = (-home.y * size.height) / 2;
     }
     xf[DUST_SLOT].set(c.cx, c.cy, c.cz, 1);
     // …et w = 1, LE DRAPEAU DE POUSSIÈRE, qui part au fragment via vDust (voir sa déclaration dans
@@ -401,7 +532,6 @@ export function TheatrePieces() {
     u.uSize.value = g.grain * (2 / g.density);
     // Le facteur qui convertit « unités monde » en pixels — c'est lui qui rend la taille
     // des particules indépendante de la taille de la fenêtre.
-    const fov = (camera as typeof camera & { fov?: number }).fov ?? 47;
     u.uScale.value = ((size.height * Math.min(2, window.devicePixelRatio || 1)) / 2) / Math.tan((fov * Math.PI) / 360);
 
     // La rampe de profondeur est centrée sur la pièce visée, pas sur la scène entière :

@@ -276,8 +276,8 @@ const DIVE_EPS = 1e-4;
  *   0.68 → 0.88  LE DÉCROCHAGE : les stries deviennent des points et quittent leurs cases
  *   0.78 → 0.90  l'extinction du corridor (`fallAt` → `fallBy` en p, voir posteTweak)
  *   0.80 → 0.90  la poussière de la salle monte (formClock)
- *   0.90 → 0.93  le noir : plus de corridor, pas encore de pièces, de la poussière seule
- *   0.93 → 1.00  les pièces se condensent (formClock)
+ *   0.90 → 0.915 le noir : plus de corridor, pas encore de pièces, de la poussière seule
+ *   0.915 → 0.99 les pièces se condensent (formClock)
  *
  * CES NOMBRES SONT DES POINTS DE DÉPART, à juger à l'écran et pas au calcul — en particulier
  * BREAK_GRAIN et la durée du recouvrement : le grain du tunnel et celui de la salle ne

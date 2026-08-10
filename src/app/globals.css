@@ -309,12 +309,25 @@ a {
 .plate-band {
   position: relative;
   /* 760vh ET NON 480 — la salle a besoin de place, et elle ne l'avait pas.
-     Mesuré : la plongée rend la main vers 42 % du travel, ce qui laissait 0,36 du travel
-     pour quatre stations, soit 290 px chacune — un seul flick de trackpad les traversait
-     toutes et sortait de la section. À 660vh de travel, les quatre stations à 0,58 hauteur
-     de fenêtre (voir HALL_STATION_VH) tiennent entre la reprise et le rangement.
-     L'entrée et la sortie s'allongent dans la même proportion, puisqu'elles sont exprimées
-     en fractions du travel : c'est le prix de la place, et il est assumé. */
+
+     LA JUSTIFICATION D'ORIGINE DISAIT « la plongée rend la main vers 42 % du travel ».
+     C'était vrai un moment et ça ne l'était déjà plus : depuis que le roll-out est ancré sur
+     « top 92% », `form` vaut 1 avant que la bande ne s'épingle, donc la platitude est atteinte
+     vers 2 % du travel. Relevé au navigateur, le point de reprise variait de 0,028 à 0,591
+     selon la VITESSE du geste — c'était une mesure temps-réel déguisée en repère de scroll,
+     et les 2700 px de scroll mort avant Contact en étaient la conséquence directe.
+
+     LE POINT DE REPRISE EST DÉSORMAIS DÉRIVÉ, ET LA PAGE Y EST AMENÉE (voir hallWindow et
+     l'ancrage dans Work.tsx) : la salle prend exactement ses quatre stations et demie, la
+     sortie sa part EXIT, et la reprise est ce qui reste. Il n'y a plus de « reste de bande »
+     possible, donc plus rien qui dépende de cette hauteur pour que la salle tienne.
+
+     CE QUE CETTE HAUTEUR CONTRAINT ENCORE : que le point de reprise reste APRÈS l'entrée,
+     c'est-à-dire travel ≥ (works.length + HALL_TAIL) · 0,58vh / (1 − ENTER − EXIT) ≈ 408vh,
+     soit une bande d'au moins ~508vh. 760 laisse de la marge, et l'excédent est simplement
+     absorbé par l'ancrage — c'est du scroll que le lecteur ne parcourt pas, pas du scroll
+     mort. La raccourcir redimensionnerait ENTER et EXIT (qui sont des fractions du travel),
+     donc les temps de la sortie, mesurés : à ne pas faire sans les remesurer. */
   height: 760vh;
 }
 .plate-screen {
@@ -583,6 +596,120 @@ a {
   outline: 1px solid var(--silver-bright);
   outline-offset: 4px;
 }
+/* LA CIBLE POSÉE SUR UNE PIÈCE. Invisible par construction : ce qu'on survole est le
+   nuage, dessiné par le canvas, et il répond LUI-MÊME au survol en cessant de s'effriter
+   (voir uFx dans TheatrePieces). Un fond ou un cadre ici doublerait cette réponse par une
+   seconde, en DOM, qui ne serait plus à la même place dès que la caméra bouge.
+
+   RONDE, parce que la cible est un objet vu de loin et non un rectangle de texte : le
+   carré circonscrit à une pièce déborde de 27 % sur ses coins, où il n'y a que du vide et
+   parfois la pièce d'à côté. Le rayon vient du rendu (theatreScreen), plancher à 24 px
+   pour que la pièce la plus lointaine reste attrapable au doigt.
+
+   Position et taille sont écrites par le ticker de la section, jamais ici : seul le rendu
+   sait où la caméra en est de son arc. */
+.hall-aim {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border: 0;
+  padding: 0;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 4;
+}
+.hall-aim:focus-visible {
+  outline: 1px solid var(--silver-bright);
+  outline-offset: 4px;
+}
+
+/* LA FICHE DU PROJET OUVERT. Elle occupe la place que la pièce libère en glissant, donc
+   `left`/`top` sont écrits par le ticker et jamais ici — ce qui reste au CSS est la
+   composition : une colonne alignée à gauche sur ce point, centrée verticalement dessus.
+
+   Largeur en `ch` et non en `vw` : ce bloc est du TEXTE avant d'être une boîte, et sa
+   mesure doit rester une longueur de ligne lisible quelle que soit la fenêtre. Le `min`
+   avec 38vw est le garde-fou de la fenêtre étroite, où 34ch déborderait sur la pièce. */
+.hall-fiche {
+  position: absolute;
+  transform: translateY(-50%);
+  z-index: 4;
+  width: min(34ch, 38vw);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1.4vh, 16px);
+  opacity: 0;
+  pointer-events: none;
+  /* La salle est un fond de poussière : le texte posé dessus a besoin d'être décollé du
+     grain, pas d'un panneau. Une ombre portée noire et large fait exactement ça — elle
+     éteint les grains derrière les glyphes sans dessiner de bord. */
+  text-shadow:
+    0 0 22px #050505,
+    0 0 7px #050505;
+}
+.hall-fiche-meta {
+  margin: 0;
+  display: flex;
+  gap: 16px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.3em;
+  color: var(--silver-muted);
+}
+.hall-fiche-title {
+  margin: 0;
+  font-size: clamp(1.75rem, 3.4vw, 3rem);
+  line-height: 0.92;
+  letter-spacing: -0.02em;
+  color: var(--chrome);
+}
+.hall-fiche-sum {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--silver-bright);
+}
+.hall-fiche-acts {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 4px;
+}
+.hall-fiche-link,
+.hall-fiche-close {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  background: none;
+  border: 0;
+  padding: 0 0 4px;
+  cursor: pointer;
+}
+.hall-fiche-link {
+  color: var(--chrome);
+  text-decoration: none;
+  border-bottom: 1px solid var(--steel-2);
+  transition: border-color 240ms linear;
+}
+.hall-fiche-close {
+  color: var(--silver-muted);
+  transition: color 240ms linear;
+}
+@media (hover: hover) {
+  .hall-fiche-link:hover {
+    border-color: var(--chrome);
+  }
+  .hall-fiche-close:hover {
+    color: var(--chrome);
+  }
+}
+.hall-fiche-link:focus-visible,
+.hall-fiche-close:focus-visible {
+  outline: 1px solid var(--silver-bright);
+  outline-offset: 4px;
+}
+
 /* The photograph's hit box — the print itself is WebGL, so its link is this invisible
    rectangle the renderer keeps sized and placed over it (the --plate-px vars). The
    affordance is the read gesture the shader answers (colour, stillness, the step

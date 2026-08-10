@@ -110,6 +110,45 @@ export function stationPosition(s: Station, cx: number, cy: number, cz: number) 
 }
 
 /**
+ * DE COMBIEN LA PIÈCE OUVERTE S'ÉCARTE, pour laisser sa place au texte — en unités monde.
+ *
+ * 1,75 contre un rayon apparent de ~0,75 : la pièce se retire d'un peu plus de deux fois
+ * sa propre largeur, donc elle libère une place franche sans sortir du cadre. En dessous
+ * de 1,5 le texte lui rentre dedans ; au-delà de 2 elle touche le bord à la station la
+ * plus proche de la caméra.
+ */
+export const SLIDE = 1.75;
+
+/**
+ * Le rayon apparent d'une pièce, en unités monde, avant son échelle propre.
+ *
+ * Il ne sert PAS au rendu — le nuage a la taille que lui donne sa forme — mais à tout ce
+ * qui doit viser la pièce sans la dessiner : la cible de survol posée sur elle (voir
+ * theatreScreen) et le recul du texte. Mesuré sur la plus large des quatre (le burger,
+ * 0,56 de rayon) et la plus haute (le vase, 0,62 de demi-hauteur), arrondi au-dessus.
+ */
+export const PIECE_RADIUS = 0.75;
+
+/**
+ * LE DÉCALAGE DE LA PIÈCE OUVERTE, en offset monde à ajouter à sa station.
+ *
+ * PUREMENT LATÉRAL, ET C'EST L'INVARIANT (testé) : l'offset est porté par l'axe DROITE de
+ * la caméra, donc sa composante sur l'axe de visée est nulle et la pièce ne s'éloigne pas
+ * d'un millimètre en glissant. Elle se décale dans le cadre, elle ne recule pas — sans
+ * quoi elle rapetisserait pendant qu'on la présente, ce qui est l'inverse de l'intention.
+ *
+ * La caméra de la salle a un lacet égal à φ (voir theatreCamera), donc son axe droite est
+ * (cos φ, 0, −sin φ). Vers la GAUCHE, donc l'opposé.
+ *
+ * `k` est l'avancement de l'ouverture (0 = en place, 1 = décalée). Il vient de l'horloge,
+ * qui est le seul endroit où quelque chose s'intègre dans cette scène.
+ */
+export function stationSlide(phi: number, k: number) {
+  const d = -SLIDE * k;
+  return { x: Math.cos(phi) * d, z: -Math.sin(phi) * d };
+}
+
+/**
  * L'écart angulaire le plus court entre deux angles, dans (−π, π].
  *
  * Sans lui, passer de la dernière pièce à la première ferait faire trois quarts de tour
@@ -206,5 +245,37 @@ export function theatreCamera(phi: number, cx: number, cy: number, cz: number, h
  * La PRÉSENCE, elle, se déduit de `state.dive` dans l'horloge : ce nombre monte déjà
  * avec le film et retombe seul à la sortie de section. Lui donner un second pont aurait
  * dupliqué cette retombée, avec la certitude qu'un jour l'un des deux l'oublie.
+ *
+ * `hover` et `open` disent QUELLE pièce le pointeur désigne et laquelle est ouverte, en
+ * index, ou −1. Des entiers nus et pas des rampes, pour la même raison que `station` :
+ * ce que le DOM sait, c'est où est le pointeur et sur quoi on a cliqué. Les rampes qui en
+ * découlent — la matière qui se tient, le décalage, la dissipation des trois autres —
+ * sont fabriquées par l'horloge et par TheatrePieces, chacune là où elle est lue.
  */
-export const theatreReveal = { station: 0 };
+export const theatreReveal = { station: 0, hover: -1, open: -1 };
+
+/**
+ * LE PONT INVERSE — HORLOGE → DOM : où chaque pièce se trouve À L'ÉCRAN.
+ *
+ * Même motif que --plate-px-* (publié par ChromeTableau et lu par .plate-hit), avec une
+ * différence qui justifie un singleton plutôt que des variables CSS : ces nombres ne sont
+ * pas seulement POSÉS sur du DOM, ils sont AUSSI comparés (quelle pièce est sous le
+ * pointeur, à quelle distance). Une variable CSS se relit en `getComputedStyle`, ce qui
+ * force un recalcul de style par lecture ; un objet mutable se lit pour rien.
+ *
+ * En PIXELS CSS DEPUIS LE CENTRE DU VIEWPORT, parce que c'est le repère de la scène : la
+ * forme est dessinée par un canvas fixe centré, pas par le flux de la page.
+ *
+ * `freeX/freeY` est la place que la pièce OCCUPAIT avant de glisser — c'est là que le
+ * texte vient s'installer. Publiée à part plutôt que recalculée côté DOM : le CPU du rendu
+ * a déjà la caméra et la projection sous la main, et deux projections indépendantes du même
+ * point finissent toujours par ne plus être d'accord.
+ */
+export const theatreScreen = {
+  x: [0, 0, 0, 0],
+  y: [0, 0, 0, 0],
+  /** rayon apparent de la pièce, en px CSS */
+  r: [0, 0, 0, 0],
+  freeX: [0, 0, 0, 0],
+  freeY: [0, 0, 0, 0],
+};

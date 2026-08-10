@@ -34,6 +34,31 @@ export function scrollPageTo(y: number, smooth = true) {
   window.scrollTo({ top: y, behavior: smooth ? "smooth" : "auto" });
 }
 
+/**
+ * Reposer la page à un y absolu SANS relâcher le verrou — l'ancrage de la plongée.
+ *
+ * Séparé de scrollPageTo plutôt que paramétré, parce que ce n'est pas le même geste. Celui
+ * du dessus répond à un clic et doit se plier au verrou (un menu ouvert ne doit pas pouvoir
+ * faire glisser la page sous lui) ; celui-ci est le verrouilleur lui-même qui décide où la
+ * page sera quand il la rendra. Un booléen `force` sur la même fonction aurait laissé
+ * n'importe quel appelant l'écrire.
+ *
+ * `force: true` est nécessaire et documenté côté Lenis : `scrollTo` sort immédiatement si
+ * `isStopped` (node_modules/lenis — « if ((this.isStopped || this.isLocked) && !force)
+ * return »), or le verrou EST un lenis.stop(). Sans lui l'appel ne fait rien, en silence.
+ *
+ * `immediate`, jamais animé : c'est un raccord invisible (l'écran est le poste plein cadre,
+ * voir l'ancrage dans Work.tsx), pas un déplacement à regarder. Une animation ici ne ferait
+ * que donner au reste de la page une chance d'être vue en train de glisser.
+ */
+export function anchorPageAt(y: number) {
+  if (lenis) {
+    lenis.scrollTo(y, { immediate: true, force: true });
+    return;
+  }
+  window.scrollTo({ top: y, behavior: "auto" });
+}
+
 /* ---------------------------------------------------------------------------
  * The modal lock
  * ------------------------------------------------------------------------- */

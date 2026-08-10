@@ -5,9 +5,11 @@ import {
   PIECE_OF_WORK,
   RING_RADIUS,
   STATIONS,
+  SLIDE,
   shortestDelta,
   stationBirth,
   stationPosition,
+  stationSlide,
   theatreCamera,
 } from "../src/lib/theatre.ts";
 import { buildPiece } from "../src/lib/theatreShapes.ts";
@@ -140,6 +142,59 @@ test("la densité fait varier le nombre de points, pas l'encombrement", () => {
     const lo = buildPiece(kind, 16);
     const hi = buildPiece(kind, 32);
     assert.ok(hi.count > lo.count * 2, `${kind} : ${lo.count} → ${hi.count}, la densité ne porte pas`);
+  }
+});
+
+/**
+ * L'INVARIANT DU DÉCALAGE. La pièce ouverte glisse pour laisser sa place au texte — dans le
+ * CADRE, et nulle part ailleurs. Si l'offset avait la moindre composante sur l'axe de visée,
+ * elle s'éloignerait en glissant, donc rapetisserait pendant qu'on la présente : l'inverse
+ * exact de l'intention. C'est le genre d'erreur qui ne se voit pas dans le code et à peine à
+ * l'écran, mais qui rend la lecture d'un projet plus petite que son survol.
+ */
+test("le décalage de la pièce ouverte est purement latéral", () => {
+  for (const s of STATIONS) {
+    // L'axe de visée de la caméra de salle : elle est dehors et regarde le centre.
+    const fx = -Math.sin(s.phi);
+    const fz = -Math.cos(s.phi);
+    for (const k of [0.25, 0.5, 1]) {
+      const d = stationSlide(s.phi, k);
+      const along = d.x * fx + d.z * fz;
+      assert.ok(Math.abs(along) < 1e-12, `φ=${s.phi} k=${k} : ${along} de dérive en profondeur`);
+    }
+  }
+});
+
+test("le décalage vaut SLIDE vers la GAUCHE du cadre, à l'ouverture pleine", () => {
+  for (const s of STATIONS) {
+    // L'axe droite de la caméra, déduit de son lacet (voir theatreCamera).
+    const rx = Math.cos(s.phi);
+    const rz = -Math.sin(s.phi);
+    const d = stationSlide(s.phi, 1);
+    const lateral = d.x * rx + d.z * rz;
+    assert.ok(
+      Math.abs(lateral + SLIDE) < 1e-12,
+      `φ=${s.phi} : ${lateral} au lieu de ${-SLIDE} (négatif = vers la gauche)`
+    );
+  }
+});
+
+/**
+ * Le corollaire, et il vaut mieux qu'une tolérance : le décalage étant perpendiculaire au
+ * vecteur pièce→caméra, la distance euclidienne ne se conserve PAS — elle suit Pythagore,
+ * exactement. Le vérifier comme une identité plutôt que comme un « ça bouge peu » attrape
+ * la seule chose qui pourrait mal tourner ici, à savoir un offset qui aurait acquis une
+ * composante dans l'axe, sans dépendre d'un seuil choisi au jugé.
+ */
+test("la pièce décalée s'éloigne exactement de ce que Pythagore impose", () => {
+  for (const s of STATIONS) {
+    const piece = stationPosition(s, 0, 0, 0);
+    const cam = theatreCamera(s.phi, 0, 0, 0, 0);
+    const d = stationSlide(s.phi, 1);
+    const before = Math.hypot(piece.x - cam.x, piece.y - cam.y, piece.z - cam.z);
+    const after = Math.hypot(piece.x + d.x - cam.x, piece.y - cam.y, piece.z + d.z - cam.z);
+    const expected = Math.hypot(before, SLIDE);
+    assert.ok(Math.abs(after - expected) < 1e-12, `φ=${s.phi} : ${after} au lieu de ${expected}`);
   }
 });
 

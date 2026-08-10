@@ -55,6 +55,15 @@ export type TheatreLook = {
   float: number;
   /** Vitesse de rotation propre, radians/seconde. */
   spin: number;
+  /**
+   * La rotation SUPPLÉMENTAIRE de la pièce ouverte, radians/seconde — « elle se présente ».
+   *
+   * Nettement au-dessus de `spin` (0,45 contre 0,06) : la rotation d'ambiance est une
+   * dérive qu'on ne remarque pas, celle-ci doit se voir sans qu'on la fixe. Un tour en
+   * quatorze secondes, soit un quart de tour le temps qu'on lise le résumé — assez pour
+   * que l'objet se soit montré sous un autre angle, trop peu pour tourner sous le nez.
+   */
+  openSpin: number;
 
   /* ---- COULEURS ---- */
 
@@ -102,6 +111,7 @@ export const THEATRE_LOOK: TheatreLook = {
   fan: 0.35,
   float: 0.02,
   spin: 0.06,
+  openSpin: 0.45,
   ramp: ["#323239", "#84848e", "#f0f0f0", "#ffffff", "#f2f2f2"],
   dustColor: "#ffffff",
 };
