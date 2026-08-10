@@ -202,13 +202,13 @@ void main() {
   /*
    * LA NAISSANCE — le grain arrive du dehors, il ne s'allume pas sur place.
    *
-   * RT.z NE SERT PLUS À ÉTEINDRE, IL SERT D'HORLOGE. Il portait \`theatre.on\`, partagé par les
+   * RT.z NE SERT PLUS À ÉTEINDRE, IL SERT D'HORLOGE. Il portait « theatre.on », partagé par les
    * quatre pièces, et il multipliait l'alpha : chaque grain était déjà à sa place finale et
    * seule son opacité montait — le fantôme de l'objet fini qui s'allume. Il porte maintenant la
    * naissance de CETTE pièce (voir stationBirth), et c'est l'ARRIVÉE du grain qui fait l'alpha.
    * L'extinction reste exacte : à RT.z = 0, bk vaut 0 pour tous les grains.
    *
-   * L'ÉCHELONNAGE PAR GRAIN vient d'un hachage NEUF, pas de \`pick\` réutilisé : corrélés, les
+   * L'ÉCHELONNAGE PAR GRAIN vient d'un hachage NEUF, pas de « pick » réutilisé : corrélés, les
    * grains qui s'effritent seraient aussi les derniers arrivés, et les deux gestes se
    * confondraient.
    */
@@ -242,7 +242,7 @@ void main() {
   vAlpha = alpha * mix(bk, RT.z, RT.w);
   vDust = RT.w;
 
-  // \`born\` s'ajoute APRÈS les rotations, au même endroit et pour la même raison que \`esc\` : le
+  // « born » s'ajoute APRÈS les rotations, au même endroit et pour la même raison que « esc » : le
   // halo d'où la matière arrive n'appartient pas plus à l'objet que le panache par où elle part.
   vec3 world = XF.xyz + (base + esc + born) * XF.w;
   vec4 mv = modelViewMatrix * vec4(world, 1.0);
