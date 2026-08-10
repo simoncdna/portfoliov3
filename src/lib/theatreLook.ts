@@ -65,6 +65,50 @@ export type TheatreLook = {
    */
   openSpin: number;
 
+  /* ---- NAISSANCE ---- */
+
+  /**
+   * LE RAYON DU HALO D'OÙ LES GRAINS ARRIVENT, en unités de pièce — comme `reach`, donc
+   * indépendant de l'échelle de la station.
+   *
+   * Le nuage est en `AdditiveBlending` et se règle « sur la somme, pas sur l'unité » : un halo
+   * étalé sur un grand volume est plus SOMBRE par pixel qu'une pièce dense, donc trop de portée
+   * fait paraître la convergence partie de trop bas. C'est le premier levier si la naissance
+   * semble sortir du noir au lieu de sortir de la poussière.
+   *
+   * À 0, les grains naissent chez eux : il ne reste que la montée d'alpha échelonnée. C'est ce
+   * que `reduced` force.
+   */
+  birthReach: number;
+  /**
+   * LA PART DE LA RAMPE PASSÉE À ÉCHELONNER LES GRAINS, dans [0,1). À 0 ils arrivent tous
+   * ensemble — la pièce se contracte d'un bloc ; plus haut, elle se prend en vague.
+   *
+   * IL SE DISPUTE LA MÊME FENÊTRE QUE `birthCascade`. Elle vaut ≈ 0,84 s (voir la spec : le
+   * troisième temps du film couvre `dive` 0,90 → 1 en 16 % de `diveSeconds`, sans ease, donc un
+   * centième de `dive` y vaut 0,11 s à 7 s de plongée). `birthWave + birthCascade` proche de 1
+   * ne laisse plus de place à la course elle-même.
+   */
+  birthWave: number;
+  /**
+   * LE RETARD DU FOND SUR LE DEVANT, en part de la rampe — voir `stationBirth`, qui en fait une
+   * fonction de l'écart angulaire plutôt qu'un rang. À 0, les quatre pièces naissent ensemble et
+   * `stationBirth` rend exactement la présence partagée.
+   */
+  birthCascade: number;
+  /**
+   * DE COMBIEN LA POUSSIÈRE CREUSE au plus fort de la convergence, en fraction de `dustGain`.
+   *
+   * Sur une cloche `4·on·(1−on)` : le facteur vaut EXACTEMENT 1 à `on` = 0 et `on` = 1, donc la
+   * poussière seule du noir peuplé et la poussière de la salle posée sont inchangées — seul le
+   * passage creuse. L'air a l'air d'avoir donné la matière.
+   *
+   * Ce n'est pas une conservation : 30 000 grains de poussière contre ~140 000 pour les quatre
+   * pièces, les comptes ne s'équilibrent pas et ne le peuvent pas. C'est un effet de CAUSE — sans
+   * lui la poussière reste indifférente à ce qui naît dedans.
+   */
+  dustGive: number;
+
   /* ---- COULEURS ---- */
 
   /**
@@ -112,6 +156,10 @@ export const THEATRE_LOOK: TheatreLook = {
   float: 0.02,
   spin: 0.06,
   openSpin: 0.45,
+  birthReach: 2.5,
+  birthWave: 0.55,
+  birthCascade: 0.35,
+  dustGive: 0.3,
   ramp: ["#323239", "#84848e", "#f0f0f0", "#ffffff", "#f2f2f2"],
   dustColor: "#ffffff",
 };
