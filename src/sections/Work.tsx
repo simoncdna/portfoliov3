@@ -1316,7 +1316,32 @@ export function Work() {
       divePlay.current = gsap
         .timeline({ paused: true })
         .fromTo(workReveal, { dive: 0 }, { dive: pt0.diveArrive, duration: 0.32, ease: "power2.in" })
-        .to(workReveal, { dive: fadeDive, duration: 0.52, ease: "power4.out" })
+        /*
+         * `power2.out` ET NON `power4.out` — LE TEMPS MORT ÉTAIT LÀ, ET IL DURAIT 1,7 s.
+         *
+         * Le raisonnement du frein, juste au-dessus, disait « on freine jusqu'à ce que l'image
+         * meure, parce qu'un frein dans le noir ne se voit pas ». C'est vrai qu'il ne se VOIT
+         * pas. Il se SENT, comme une attente : rapporté à l'écran, « on traverse le corridor,
+         * on arrive sur un vide avec la poussière, et ce temps-là est trop long ».
+         *
+         * MESURÉ sur les nombres du film (parts 0.32/0.52/0.16 de diveSeconds = 7, donc
+         * 2,24 / 3,64 / 1,12 s) et sur la définition de l'ease :
+         *
+         *   dive 0,88   le corridor est à ~20 %, en blocs épars — perceptuellement mort
+         *   dive 0,90   il est éteint, son mesh est caché (PixelTunnel), le 3e temps commence
+         *
+         *   en power4.out ce trajet coûte 1,72 s ; en power2.out, 0,81 s
+         *
+         * La poussière seule passe donc de ~2,1 s à ~1,2 s. Et la décélération reste : toute
+         * ease `out` a une vitesse nulle à son terme, donc le frein que le commentaire ci-dessus
+         * défend est intact — c'est sa QUEUE ASYMPTOTIQUE qui partait, pas le freinage.
+         *
+         * CE N'EST PAS LA FENÊTRE DES PIÈCES QUI ÉTAIT EN CAUSE, et ça valait la peine de le
+         * mesurer avant de la toucher : le 3e temps démarre à 5,88 s quoi qu'on fasse, donc
+         * avancer le début de `theatre.on` de 0,915 à 0,88 n'avançait l'apparition que de 0,05 s.
+         * La fenêtre est en `dive` ; c'était `dive` qui traînait.
+         */
+        .to(workReveal, { dive: fadeDive, duration: 0.52, ease: "power2.out" })
         .to(workReveal, { dive: 1, duration: 0.16, ease: "none" });
       divePlay.current.duration(pt0.diveSeconds);
 
