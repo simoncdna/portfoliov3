@@ -222,9 +222,38 @@ direct, c'est le store qu'on remet autour de ce littéral »*.
 | `birthCascade` | décalage du dos par rapport au devant, en part de la rampe | 0,35 |
 | `dustGive` | creux de `dustGain` au plus fort de la convergence | 0,30 |
 
-Ces quatre-là sont des **points de départ à régler à l'écran**, pas des valeurs trouvées. Le
-budget de 0,84 s est la contrainte : `birthWave + birthCascade` proche de 1 ne laisse plus de
-place à la course elle-même.
+Ces quatre-là étaient des **points de départ**. La passe de réglage a eu lieu (2026-08-10) et
+**elle les a tous gardés**. Ce qu'elle a mesuré vaut plus que les nombres :
+
+Luminance moyenne de la pièce de devant, dans une boîte de 480 px, en % de sa valeur posée :
+
+| `on` | 0,10 | 0,20 | 0,30 | 0,40 | 0,50 | 0,65 | 1,00 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| | 2 % | 10 % | 35 % | 63 % | 89 % | 102 % | 100 % |
+
+**LE PREMIER CINQUIÈME EST NOIR, ET `birthReach` N'Y PEUT RIEN.** C'est la conclusion à retenir,
+parce qu'elle est contre-intuitive et que le commentaire de `birthReach` invite justement à le
+baisser. Essayé, mesuré : à 1,6 au lieu de 2,5, le point à `on` = 0,1 est **identique** (0,16), et
+l'écart global de ~5 % est du bruit — à `on` = 1, `born` vaut 0 quel que soit `birthReach`, donc
+un écart y est nécessairement la rotation des pièces entre deux relevés. `birthReach` gouverne la
+TAILLE du halo, pas la rampe de luminosité.
+
+**`birthWave` non plus.** Dérivé plutôt qu'essayé : `bk = ease((RT.z − bd)/(1 − wave))`, donc même
+à `wave` = 0 on a `bk = ease(0,1) = 0,028` — 3 %. Tant que l'alpha suit l'arrivée, un grain qui
+n'est pas arrivé ne peut pas être lumineux.
+
+Le départ noir est donc une **conséquence du choix (a)** (« l'arrivée remplace le fondu »), pas un
+défaut de réglage. Il a été gardé délibérément : la partie visible court sur `on` 0,2 → 0,65, soit
+≈ 0,4 s, une durée franche pour un geste, et « la pièce n'est pas encore là » a le droit de
+ressembler à « la pièce n'est pas encore là ».
+
+**Le seul levier, s'il faut un jour ouvrir ce départ**, est la loi d'alpha elle-même :
+`pow(bk, 0.7)` porte le point à `on` = 0,1 de 2 % à ~9 % et rend la matière visible EN VOL. C'est
+une version douce de l'option écartée à la conception (« grains lumineux en vol »), donc un choix
+de direction artistique, pas un réglage.
+
+Le budget de 0,84 s reste la contrainte des deux autres : `birthWave + birthCascade` proche de 1
+ne laisse plus de place à la course elle-même.
 
 ## Les fichiers
 
