@@ -95,10 +95,16 @@ test("la naissance ne repart jamais en arrière quand la présence monte", () =>
 });
 
 /**
- * LA CASCADE EXISTE VRAIMENT. La pièce dans l'axe de la caméra doit être STRICTEMENT plus
- * avancée que la plus lointaine, à toute présence intermédiaire — y compris là où l'une des
- * deux sature (la première atteint 1 quand on ≥ 1 − cascade, la seconde ne peut saturer
- * qu'à on = 1, donc l'inégalité tient sur toute la fenêtre).
+ * LA CASCADE EXISTE VRAIMENT — et l'invariant est CONDITIONNEL, pas absolu.
+ *
+ * Le devant est strictement plus avancé que le fond TANT QUE le fond n'est pas né ; une fois le
+ * fond arrivé, les deux valent 1 et il n'y a plus d'écart à mesurer.
+ *
+ * Une première rédaction affirmait « le fond ne peut saturer qu'à on = 1 ». C'est vrai d'un
+ * antipode exact et faux des stations réelles : la plus lointaine vue de φ = 0 est à 148°, donc
+ * d = 0,822, et elle sature dès on = 1 − cascade·(1 − d) ≈ 0,938. Le test échouait à on = 0,95,
+ * où les deux valent 1 — et il aurait fait accuser la formule, qui est correcte : une pièce née
+ * reste née. La forme ci-dessous ne dépend d'aucun seuil et balaie toute la rampe.
  */
 test("la pièce dans l'axe naît avant celle du fond", () => {
   const phi = STATIONS[0].phi;
@@ -107,10 +113,18 @@ test("la pièce dans l'axe naît avant celle du fond", () => {
     Math.abs(shortestDelta(phi, s.phi)) > Math.abs(shortestDelta(phi, a.phi)) ? s : a
   );
   assert.notEqual(far.phi, phi, "il faut deux stations distinctes pour comparer");
-  for (const on of [0.05, 0.2, 0.5, 0.8, 0.95]) {
+  for (let i = 0; i <= 40; i++) {
+    const on = i / 40;
     const front = stationBirth(phi, phi, on, 0.35);
     const back = stationBirth(phi, far.phi, on, 0.35);
-    assert.ok(front > back, `on=${on} : devant ${front} n'est pas devant le fond ${back}`);
+    if (on === 0) {
+      assert.equal(front, 0, "rien n'est né à présence nulle");
+      assert.equal(back, 0, "rien n'est né à présence nulle");
+    } else if (back < 1) {
+      assert.ok(front > back, `on=${on} : devant ${front} n'est pas devant le fond ${back}`);
+    } else {
+      assert.equal(front, 1, `on=${on} : le fond est né (${back}) mais pas le devant (${front})`);
+    }
   }
 });
 

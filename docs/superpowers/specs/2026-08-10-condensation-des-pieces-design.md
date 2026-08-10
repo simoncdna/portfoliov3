@@ -235,8 +235,16 @@ Testés (`node --test`) :
    `on ∈ {0, 0.25, 0.5, 0.75, 1}`.
 2. `on = 0` → 0 et `on = 1` → 1 pour toute station et tout `cascade ∈ [0, 1)`.
 3. Monotone croissante en `on`.
-4. À `cascade > 0` et `on` strictement entre 0 et 1, la station dans l'axe de la caméra a une
-   naissance **strictement supérieure** à celle qui est au dos.
+4. À `cascade > 0`, la station dans l'axe de la caméra est **strictement plus avancée** que la
+   plus lointaine **tant que celle-ci n'est pas née** ; et dès que le fond vaut 1, le devant
+   vaut 1 aussi.
+
+   L'invariant est **conditionnel, et c'est la seule forme juste**. Une première rédaction
+   affirmait « le fond ne peut saturer qu'à `on` = 1 » : vrai pour un antipode exact, faux
+   pour les stations réelles. La plus lointaine vue de φ = 0 est à 148°, donc `d` = 0,822 et
+   elle sature dès `on = 1 − cascade·(1 − d) ≈ 0,938`. Un test écrit sur la version absolue
+   échouait à `on` = 0,95, où les deux valent 1 — et il aurait fait accuser la formule, qui
+   est correcte : une pièce née reste née.
 5. Le résultat reste dans `[0, 1]` pour un `phi` hors de `[0, 2π]` (l'angle de l'horloge
    s'accumule et n'est pas ramené dans un tour — `theatrePhi` peut valoir −22 rad, c'est
    mesuré).
