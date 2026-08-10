@@ -624,7 +624,36 @@ export type PosteTweak = {
   /**
    * OÙ LE FONDU AU NOIR S'ACHÈVE, dans la même unité que `fallAt` (l'avancée de la plongée
    * APRÈS `diveArrive`, remise sur 0..1). Le corridor est donc entièrement éteint à
-   * `diveArrive + fallBy · (1 − diveArrive)`, soit 0,90 par défaut.
+   * `diveArrive + fallBy · (1 − diveArrive)`, soit 0,825 au défaut actuel.
+   *
+   * DESCENDU DE 0,80 À 0,65 POUR L'ATTENTE DANS LA POUSSIÈRE, et c'est le levier qui a marché
+   * après un qui n'avait pas marché. Rapporté à l'écran : « entre le moment où je vois la
+   * poussière apparaître et l'apparition des projets, une seconde s'écoule ». Vrai — 1,70 s
+   * mesurées, depuis `dive` 0,85 (la poussière devient visible, elle monte sur
+   * smoothstep(0.8, 0.9, dive)) jusqu'à `dive` 0,937 (les pièces atteignent 20 % de luminance).
+   *
+   * Adoucir l'ease du deuxième temps (power4 → power2, voir Work.tsx) en avait retiré 0,87 s et
+   * ne s'était PAS senti : le terme dominant n'était pas là. Ce nombre-ci l'est, parce qu'il
+   * rapatrie tout le segment dans le TROISIÈME temps, qui est linéaire et ne traîne pas — là où
+   * la queue du deuxième rampait sur les derniers centièmes de `dive`.
+   *
+   *   fallBy   corridor mort à   l'attente
+   *   0,80     dive 0,900        1,70 s
+   *   0,70     dive 0,850        1,05 s
+   *   0,65     dive 0,825        0,56 s   ← retenu
+   *   0,60     dive 0,800        0,34 s
+   *
+   * CE QU'IL FAUT SURVEILLER EN ÉCHANGE, et qui est le vrai coût : le troisième temps couvre
+   * maintenant 0,175 de `dive` au lieu de 0,10, dans les MÊMES 1,12 s (sa part du film est
+   * 0.16, voir Work.tsx). Donc tout ce qui vit dans cette fenêtre s'y joue plus vite — la
+   * convergence des pièces passe de ~0,84 s à ~0,48 s, et il ne reste presque plus de marge
+   * posée avant que le scroll soit rendu. Si le geste paraît précipité, c'est ici qu'il faut
+   * regarder, et le levier est la PART du troisième temps, pas ce nombre.
+   *
+   * Et l'extinction elle-même se comprime : son fondu part toujours de `fallAt` = 0,56, donc il
+   * court sur p 0,56 → 0,65 au lieu de 0,56 → 0,80. En horloge, 1,35 s au lieu de 1,99 s — plus
+   * vif, pas brutal. C'est la sortie du tube (« les dernières tranches s'écartent et dégagent »)
+   * qui en paie le prix, et c'est elle qu'il faut juger avant de cuire ce nombre.
    *
    * IL EXISTE PARCE QUE TROIS ENDROITS ONT BESOIN DE CE MÊME INSTANT, et qu'ils l'obtenaient
    * chacun autrement :
@@ -875,7 +904,7 @@ const DEFAULTS: Omit<PosteTweak, "textNonce" | "replayNonce"> = {
   dissolveAt: 0.5,
   tunnelLoop: false,
   fallAt: 0.56,
-  fallBy: 0.8,
+  fallBy: 0.65,
   restLevel: 0,
   cellCut: 0,
   corrX: 0,
