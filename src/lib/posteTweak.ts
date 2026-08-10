@@ -620,22 +620,6 @@ export type PosteTweak = {
    * rien avoir à montrer, et il n'existait aucune fenêtre où il soit éteint avant que la salle
    * n'arrive. Le fondu ne se termine plus à p = 1 mais à FALL_BY : voir PixelTunnel.
    *
-   * PUIS DE 0.56 À 0.51, POUR RENDRE AU TUBE SA MORT. Baisser `fallBy` (0,80 → 0,65) a raccourci
-   * l'attente dans la poussière comme il fallait, mais a comprimé l'extinction du même geste :
-   * mesuré au framebuffer, la luminance du corridor tombait de 3,85 à zéro sur `dive` 0,78 →
-   * 0,825, soit 1,35 s au lieu de 1,99 s — 32 % plus brusque, et ça s'est vu tout de suite
-   * (« on a dégradé l'animation de fin de tunnel »).
-   *
-   * L'autre borne du fondu est donc le levier, et sa seule contrainte est de rester APRÈS la fin
-   * de la dissolution. 0,51 la respecte encore (`dissolveAt` = 0,50) : le fondu court sur `dive`
-   * 0,755 → 0,825, soit 1,69 s, et l'attente dans la poussière ne bouge pas d'une frame.
-   *
-   * CE QU'ON A CÉDÉ EN ÉCHANGE, et c'est exactement ce que le 0,56 s'offrait : le corridor
-   * n'a plus de temps à PLEINE LUMIÈRE dans son état dissous. Il commence à faiblir dès qu'il a
-   * fini de se défaire en points. Si ce beat manque, c'est `dissolveAt` qu'il faut avancer pour
-   * lui refaire de la place, pas ce nombre qu'il faut remonter — le remonter rend l'extinction
-   * brusque, et c'est ce qu'on vient de corriger.
-   *
    * FAUSSE PISTE MESURÉE, gardée en note : compléter la traversée en normalisant `uTravel` sur la
    * fenêtre VISIBLE au lieu de la plongée entière (voir le calcul de `u` dans PixelTunnel). Ça
    * fait bien arriver la dernière tranche pile à l'extinction — et ça VIDE le puits avant qu'il
@@ -650,34 +634,42 @@ export type PosteTweak = {
    * APRÈS `diveArrive`, remise sur 0..1). Le corridor est donc entièrement éteint à
    * `diveArrive + fallBy · (1 − diveArrive)`, soit 0,825 au défaut actuel.
    *
-   * DESCENDU DE 0,80 À 0,65 POUR L'ATTENTE DANS LA POUSSIÈRE, et c'est le levier qui a marché
-   * après un qui n'avait pas marché. Rapporté à l'écran : « entre le moment où je vois la
-   * poussière apparaître et l'apparition des projets, une seconde s'écoule ». Vrai — 1,70 s
-   * mesurées, depuis `dive` 0,85 (la poussière devient visible, elle monte sur
-   * smoothstep(0.8, 0.9, dive)) jusqu'à `dive` 0,937 (les pièces atteignent 20 % de luminance).
+   * DESCENDU DE 0,80 À 0,70 POUR L'ATTENTE DANS LA POUSSIÈRE, et 0,70 est le GENOU d'une
+   * courbe, pas un compromis choisi au jugé. Rapporté à l'écran : « entre le moment où je vois
+   * la poussière apparaître et l'apparition des projets, une seconde s'écoule ». Vrai — 1,70 s,
+   * depuis `dive` 0,85 (la poussière devient visible, elle monte sur smoothstep(0.8, 0.9, dive))
+   * jusqu'à `dive` 0,937 (les pièces atteignent 20 % de luminance).
    *
-   * Adoucir l'ease du deuxième temps (power4 → power2, voir Work.tsx) en avait retiré 0,87 s et
-   * ne s'était PAS senti : le terme dominant n'était pas là. Ce nombre-ci l'est, parce qu'il
-   * rapatrie tout le segment dans le TROISIÈME temps, qui est linéaire et ne traîne pas — là où
-   * la queue du deuxième rampait sur les derniers centièmes de `dive`.
+   * CE NOMBRE GOUVERNE LES DEUX BOUTS À LA FOIS, EN SENS INVERSE, et c'est ce qui le rend
+   * délicat : il termine le fondu du corridor ET il place la frontière du troisième temps du
+   * film. Le baisser raccourcit l'attente et raccourcit l'extinction du même geste.
    *
-   *   fallBy   corridor mort à   l'attente
-   *   0,80     dive 0,900        1,70 s
-   *   0,70     dive 0,850        1,05 s
-   *   0,65     dive 0,825        0,56 s   ← retenu
-   *   0,60     dive 0,800        0,34 s
+   *   fallBy   corridor mort à   fondu     attente
+   *   0,80     dive 0,900        1,99 s    1,70 s
+   *   0,75     dive 0,875        1,83 s    1,50 s
+   *   0,72     dive 0,860        1,72 s    1,22 s
+   *   0,70     dive 0,850        1,63 s    0,65 s   ← retenu
+   *   0,65     dive 0,825        1,35 s    0,56 s
+   *
+   * LA FALAISE ENTRE 0,72 ET 0,70 EST TOUT L'INTÉRÊT DU NOMBRE. La poussière devient visible à
+   * `dive` 0,85 : tant que le corridor meurt APRÈS, cet instant tombe dans la queue rampante du
+   * deuxième temps (power2.out, vitesse tendant vers zéro) ; dès qu'il meurt AVANT, il tombe dans
+   * le troisième, qui est linéaire. 0,70 pose la frontière pile dessus — l'attente perd 0,57 s
+   * quand le fondu n'en perd que 0,09.
+   *
+   * 0,65 A ÉTÉ ESSAYÉ ET ÉCARTÉ : il payait 0,28 s d'extinction pour 0,09 s d'attente en plus,
+   * et ça s'est vu (« on a dégradé l'animation de fin de tunnel »). Élargir le fondu par l'autre
+   * borne (`fallAt` 0,56 → 0,51) a été essayé aussi et écarté : le fondu devenait trop lent.
+   * La transition du tube reste donc telle qu'elle a été conçue, et ce nombre-ci est le seul
+   * bouton.
    *
    * CE QU'IL FAUT SURVEILLER EN ÉCHANGE, et qui est le vrai coût : le troisième temps couvre
-   * maintenant 0,175 de `dive` au lieu de 0,10, dans les MÊMES 1,12 s (sa part du film est
+   * maintenant 0,150 de `dive` au lieu de 0,10, dans les MÊMES 1,12 s (sa part du film est
    * 0.16, voir Work.tsx). Donc tout ce qui vit dans cette fenêtre s'y joue plus vite — la
-   * convergence des pièces passe de ~0,84 s à ~0,48 s, et il ne reste presque plus de marge
-   * posée avant que le scroll soit rendu. Si le geste paraît précipité, c'est ici qu'il faut
-   * regarder, et le levier est la PART du troisième temps, pas ce nombre.
-   *
-   * Et l'extinction elle-même se comprime : son fondu part toujours de `fallAt` = 0,56, donc il
-   * court sur p 0,56 → 0,65 au lieu de 0,56 → 0,80. En horloge, 1,35 s au lieu de 1,99 s — plus
-   * vif, pas brutal. C'est la sortie du tube (« les dernières tranches s'écartent et dégagent »)
-   * qui en paie le prix, et c'est elle qu'il faut juger avant de cuire ce nombre.
+   * convergence VISIBLE des pièces passe de ~0,59 s à ~0,40 s, et il ne reste que 0,07 s de pose
+   * avant que le scroll soit rendu, là où la règle du fichier en demande « une fraction de
+   * seconde ». Si le geste paraît précipité, c'est ici qu'il faut regarder, et le levier est la
+   * PART du troisième temps, pas ce nombre.
    *
    * IL EXISTE PARCE QUE TROIS ENDROITS ONT BESOIN DE CE MÊME INSTANT, et qu'ils l'obtenaient
    * chacun autrement :
@@ -927,8 +919,8 @@ const DEFAULTS: Omit<PosteTweak, "textNonce" | "replayNonce"> = {
   tubeWallIn: 0.1,
   dissolveAt: 0.5,
   tunnelLoop: false,
-  fallAt: 0.51,
-  fallBy: 0.65,
+  fallAt: 0.56,
+  fallBy: 0.70,
   restLevel: 0,
   cellCut: 0,
   corrX: 0,
