@@ -136,7 +136,7 @@ export function shortestDelta(from: number, to: number) {
  * actuels (0, 62, 148, 218) et la caméra à φ = 0 à l'arrivée, il vaut 0, 1, puis 3 (142°) et 2
  * (148°) quasi ex æquo. Il reste juste si les angles changent.
  *
- * ET LA SORTIE EST GRATUITE. Quand `on` retombe (voir `hallLeft` dans formClock), la même
+ * ET LA SORTIE EST GRATUITE. Quand `on` retombe (la sortie de salle, dans formClock), la même
  * formule défait les pièces dans le même ordre, en commençant par le fond : les grains repartent
  * dans leur halo et la salle se rend à la poussière, sans une ligne de code de sortie.
  *
@@ -146,13 +146,28 @@ export function shortestDelta(from: number, to: number) {
  * là où on regarde vraiment.
  *
  * À `cascade` = 0 le résultat vaut EXACTEMENT `on` pour toute station — la cascade est
- * strictement opt-in, et un test le fixe. Borné à 0,999 parce que la formule divise par
- * (1 − cascade) : à 1, toutes les pièces naîtraient au même instant infiniment court.
+ * strictement opt-in, et un test le fixe par une égalité stricte. Ce n'est pas de la chance
+ * mais une identité IEEE-754 : `d · 0` vaut +0, `on − 0` vaut `on` au bit près, `x / 1` est
+ * exact, et le clamp ne touche rien dans [0,1].
+ *
+ * BORNÉ À 0,999, ET PAS POUR LA RAISON QU'ON CROIT. Une première rédaction de ce commentaire
+ * disait « à 1, toutes les pièces naîtraient au même instant » : c'est L'INVERSE. À `cascade`
+ * → 1, chaque pièce bascule d'un coup à SON propre seuil (`on` = son `d`), soit quatre
+ * marches séparées — mesuré : 0 / 0,344 / 0,789 / 0,822. La simultanéité, c'est `cascade` = 0.
+ * Ce que la borne évite réellement, c'est un NaN : à `cascade` exactement 1 le quotient vaut
+ * ±Infinity, que le clamp absorbe — SAUF quand `on` tombe pile sur `d`, où il vaut NaN. Et un
+ * NaN traverse `Math.max(0, Math.min(1, …))` sans être borné : il partirait dans `uRot[i].z`
+ * sans laisser de trace en console.
+ *
+ * ET CETTE COÏNCIDENCE N'EST PAS THÉORIQUE : la station 0 a `d` = 0 exactement, donc `on` = 0 —
+ * l'état de repos au départ de chaque plongée — en est une. Non bornée, la pièce de devant
+ * serait NaN AU REPOS, à tous les chargements. C'est d'ailleurs la première assertion que le
+ * test de la borne fait tomber.
  */
 export function stationBirth(phi: number, stationPhi: number, on: number, cascade: number) {
-  const k = Math.max(0, Math.min(0.999, cascade));
+  const lag = Math.max(0, Math.min(0.999, cascade));
   const d = Math.abs(shortestDelta(phi, stationPhi)) / Math.PI;
-  return Math.max(0, Math.min(1, (on - d * k) / (1 - k)));
+  return Math.max(0, Math.min(1, (on - d * lag) / (1 - lag)));
 }
 
 export type CamPose = { x: number; y: number; z: number; rotY: number };

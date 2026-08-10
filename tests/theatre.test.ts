@@ -142,6 +142,7 @@ test("la densité fait varier le nombre de points, pas l'encombrement", () => {
     assert.ok(hi.count > lo.count * 2, `${kind} : ${lo.count} → ${hi.count}, la densité ne porte pas`);
   }
 });
+
 /**
  * LA NEUTRALITÉ, ET C'EST LE TEST QUI COMPTE LE PLUS. À cascade nulle, la naissance vaut
  * exactement la présence partagée — donc la cascade est strictement opt-in, et l'image
@@ -158,9 +159,15 @@ test("à cascade nulle, la naissance vaut exactement la présence", () => {
   }
 });
 
+/**
+ * ET LA BORNE DE `cascade` EST EXERCÉE ICI. Avec les seules valeurs raisonnables (0 → 0,9) le
+ * `Math.max(0, Math.min(0.999, …))` de stationBirth était mort : on pouvait le SUPPRIMER sans
+ * qu'un test bronche. 1 est le cas qu'il existe pour attraper (le quotient y divise par zéro),
+ * 2 et −1 sont ce qu'un panneau de réglage mal borné enverrait.
+ */
 test("les deux bouts sont exacts, quelle que soit la cascade", () => {
   for (const s of STATIONS) {
-    for (const cascade of [0, 0.2, 0.35, 0.6, 0.9]) {
+    for (const cascade of [0, 0.2, 0.35, 0.6, 0.9, 0.999, 1, 2, -1]) {
       assert.equal(stationBirth(0, s.phi, 0, cascade), 0, `φ=${s.phi} cascade=${cascade}`);
       assert.equal(stationBirth(0, s.phi, 1, cascade), 1, `φ=${s.phi} cascade=${cascade}`);
     }
@@ -222,6 +229,35 @@ test("un angle accumulé hors d'un tour ne sort pas la naissance de [0,1]", () =
     for (const s of STATIONS) {
       const b = stationBirth(phi, s.phi, 0.5, 0.35);
       assert.ok(b >= 0 && b <= 1, `φ=${phi} station=${s.phi} : ${b}`);
+    }
+  }
+});
+
+/**
+ * L'ORDRE EST CE QUE LE COMMENTAIRE PROMET, ET RIEN NE LE TENAIT. Le doc de stationBirth
+ * annonce l'ordre « 0, 1, puis 3 (142°) et 2 (148°) » et se targue de « rester juste si les
+ * angles changent » — or le test de la cascade ne compare que la station de tête à la plus
+ * lointaine : les deux du milieu n'étaient comparées à rien, et une retouche d'angle aurait pu
+ * casser la promesse sans qu'un test bronche.
+ *
+ * Ce qui est vérifié ici est la propriété GÉNÉRALE dont cet ordre découle : la naissance
+ * décroît (au sens large) avec l'écart angulaire. Vérifiée depuis chaque station, donc pas
+ * seulement depuis celle de l'arrivée — à la sortie de salle la caméra peut être n'importe où.
+ */
+test("plus une pièce est loin du regard, plus elle naît tard", () => {
+  for (const from of STATIONS) {
+    const byDistance = [...STATIONS].sort(
+      (a, b) => Math.abs(shortestDelta(from.phi, a.phi)) - Math.abs(shortestDelta(from.phi, b.phi))
+    );
+    for (const on of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+      for (let i = 1; i < byDistance.length; i++) {
+        const near = stationBirth(from.phi, byDistance[i - 1].phi, on, 0.35);
+        const far = stationBirth(from.phi, byDistance[i].phi, on, 0.35);
+        assert.ok(
+          near >= far,
+          `depuis φ=${from.phi}, on=${on} : ${byDistance[i].phi} (${far}) devance ${byDistance[i - 1].phi} (${near})`
+        );
+      }
     }
   }
 });
