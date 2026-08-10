@@ -10,6 +10,7 @@ import {
   PIECE_RADIUS,
   RING_RADIUS,
   STATIONS,
+  stationBirth,
   stationPosition,
   stationSlide,
   theatreReveal,
@@ -98,6 +99,8 @@ uniform float uCycle;
 uniform float uFan;
 uniform float uOut;
 uniform float uFloat;
+uniform float uBirthReach;
+uniform float uBirthWave;
 
 varying float vDepth;
 varying float vAlpha;
@@ -196,10 +199,52 @@ void main() {
     }
   }
 
-  vAlpha = alpha * RT.z;
+  /*
+   * LA NAISSANCE — le grain arrive du dehors, il ne s'allume pas sur place.
+   *
+   * RT.z NE SERT PLUS À ÉTEINDRE, IL SERT D'HORLOGE. Il portait \`theatre.on\`, partagé par les
+   * quatre pièces, et il multipliait l'alpha : chaque grain était déjà à sa place finale et
+   * seule son opacité montait — le fantôme de l'objet fini qui s'allume. Il porte maintenant la
+   * naissance de CETTE pièce (voir stationBirth), et c'est l'ARRIVÉE du grain qui fait l'alpha.
+   * L'extinction reste exacte : à RT.z = 0, bk vaut 0 pour tous les grains.
+   *
+   * L'ÉCHELONNAGE PAR GRAIN vient d'un hachage NEUF, pas de \`pick\` réutilisé : corrélés, les
+   * grains qui s'effritent seraient aussi les derniers arrivés, et les deux gestes se
+   * confondraient.
+   */
+  float bd = fract(sin(r1 * 269.5 + r0 * 183.3) * 43758.5453) * uBirthWave;
+  float bk = ease(clamp((RT.z - bd) / max(1e-3, 1.0 - uBirthWave), 0.0, 1.0));
+  // LA POUSSIÈRE EST NÉE D'AVANCE — par le drapeau qui existe déjà (RT.w, voir vDust). C'est
+  // elle qui peuple le noir avant que les pièces n'arrivent : la faire naître aussi aurait vidé
+  // ce passage de la seule chose qu'il montre.
+  bk = mix(bk, 1.0, RT.w);
+
+  /*
+   * LA DIRECTION DU HALO : une sphère UNIFORME, tirée sur les deux graines.
+   *
+   * NE PAS « SIMPLIFIER » EN NORMALISANT TROIS BRUITS. Un vec3 de bruits normalisé concentre les
+   * tirages sur les diagonales du cube, et la pièce se condenserait depuis ses huit coins. Le
+   * z uniforme + l'angle uniforme est la seule méthode qui couvre la sphère à plat.
+   *
+   * La direction partage r0/r1 avec le panache de l'effritement, donc départ et arrivée sont de
+   * la même famille — assumé : les deux ne coexistent pas, et une pièce dont la matière rentre
+   * par où elle sortira se tient mieux qu'une qui mélange deux champs indépendants.
+   */
+  float bz = r0 * 2.0 - 1.0;
+  float brd = sqrt(max(0.0, 1.0 - bz * bz));
+  float ban = r1 * TAU;
+  vec3 born = vec3(brd * cos(ban), bz, brd * sin(ban))
+            * (uBirthReach * (1.0 - bk) * (1.0 - RT.w));
+
+  // L'ARRIVÉE REMPLACE LE FONDU, ELLE NE S'Y AJOUTE PAS. Multiplier bk PAR RT.z aurait laissé le
+  // fondu plat par-dessus la convergence : les deux rampes se seraient composées et on aurait
+  // revu, en plus faible, le défaut qu'on corrige. La poussière, elle, garde sa présence à elle.
+  vAlpha = alpha * mix(bk, RT.z, RT.w);
   vDust = RT.w;
 
-  vec3 world = XF.xyz + (base + esc) * XF.w;
+  // \`born\` s'ajoute APRÈS les rotations, au même endroit et pour la même raison que \`esc\` : le
+  // halo d'où la matière arrive n'appartient pas plus à l'objet que le panache par où elle part.
+  vec3 world = XF.xyz + (base + esc + born) * XF.w;
   vec4 mv = modelViewMatrix * vec4(world, 1.0);
   gl_Position = projectionMatrix * mv;
 
@@ -389,6 +434,8 @@ export function TheatrePieces({ reduced }: Props) {
         uFan: { value: 0 },
         uOut: { value: 0 },
         uFloat: { value: 0 },
+        uBirthReach: { value: 0 },
+        uBirthWave: { value: 0 },
         uGain: { value: 0 },
         /*
          * LA RAMPE ET LA POUSSIÈRE SONT DES `Color`, PAS DES TABLEAUX, et c'est ce qui rend
@@ -452,6 +499,10 @@ export function TheatrePieces({ reduced }: Props) {
     u.uFan.value = g.fan;
     u.uOut.value = g.out;
     u.uFloat.value = g.float;
+    // À ZÉRO SOUS `reduced` : une convergence est du mouvement, et cette préférence demande
+    // qu'il n'y en ait pas. Il reste la montée d'alpha, c'est-à-dire l'image d'avant.
+    u.uBirthReach.value = reduced ? 0 : g.birthReach;
+    u.uBirthWave.value = reduced ? 0 : g.birthWave;
     u.uGain.value = g.gain;
     (u.uC0.value as Color).set(g.ramp[0]);
     (u.uC1.value as Color).set(g.ramp[1]);
@@ -501,7 +552,9 @@ export function TheatrePieces({ reduced }: Props) {
       // POSITION, elle se rebattrait à chaque déplacement du centre de la salle. La pièce
       // ouverte en prend une seconde, la sienne, qui ne repart pas en arrière (openSpin).
       const spin = u.uTime.value * g.spin * (0.5 + ((i * 0.37) % 1)) + (lit ? openSpin.current : 0);
-      rot[i].set(s.tilt, spin, on, 0);
+      // LA NAISSANCE DE CETTE PIÈCE, plus la présence partagée : celle qu'on regarde arrive
+      // d'abord, celles du dos suivent — et à la sortie elles se défont dans le même ordre.
+      rot[i].set(s.tilt, spin, stationBirth(c.phi, s.phi, on, reduced ? 0 : g.birthCascade), 0);
 
       holds[i] += ((theatreReveal.hover === i ? 1 : 0) - holds[i]) * holdK;
       // La pièce ouverte se tient d'office : on ne lit pas une chose qui s'effrite.
