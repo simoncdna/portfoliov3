@@ -619,6 +619,30 @@ export type PosteTweak = {
    * s'amorçait qu'à dive 0.90 — le corridor restait donc allumé pendant 15 % du film sans plus
    * rien avoir à montrer, et il n'existait aucune fenêtre où il soit éteint avant que la salle
    * n'arrive. Le fondu ne se termine plus à p = 1 mais à FALL_BY : voir PixelTunnel.
+   *
+   * PUIS DE 0.56 À 0.51, POUR RENDRE AU TUBE SA MORT. Baisser `fallBy` (0,80 → 0,65) a raccourci
+   * l'attente dans la poussière comme il fallait, mais a comprimé l'extinction du même geste :
+   * mesuré au framebuffer, la luminance du corridor tombait de 3,85 à zéro sur `dive` 0,78 →
+   * 0,825, soit 1,35 s au lieu de 1,99 s — 32 % plus brusque, et ça s'est vu tout de suite
+   * (« on a dégradé l'animation de fin de tunnel »).
+   *
+   * L'autre borne du fondu est donc le levier, et sa seule contrainte est de rester APRÈS la fin
+   * de la dissolution. 0,51 la respecte encore (`dissolveAt` = 0,50) : le fondu court sur `dive`
+   * 0,755 → 0,825, soit 1,69 s, et l'attente dans la poussière ne bouge pas d'une frame.
+   *
+   * CE QU'ON A CÉDÉ EN ÉCHANGE, et c'est exactement ce que le 0,56 s'offrait : le corridor
+   * n'a plus de temps à PLEINE LUMIÈRE dans son état dissous. Il commence à faiblir dès qu'il a
+   * fini de se défaire en points. Si ce beat manque, c'est `dissolveAt` qu'il faut avancer pour
+   * lui refaire de la place, pas ce nombre qu'il faut remonter — le remonter rend l'extinction
+   * brusque, et c'est ce qu'on vient de corriger.
+   *
+   * FAUSSE PISTE MESURÉE, gardée en note : compléter la traversée en normalisant `uTravel` sur la
+   * fenêtre VISIBLE au lieu de la plongée entière (voir le calcul de `u` dans PixelTunnel). Ça
+   * fait bien arriver la dernière tranche pile à l'extinction — et ça VIDE le puits avant qu'il
+   * ne s'éteigne : à `uTravel` 35,8 sur 40, il ne reste que quatre tranches devant la caméra et
+   * l'image est noire, constaté à l'écran. La normalisation sur `dive` = 1 garantit qu'on ne
+   * manque jamais de tranches avant la fin du fondu ; c'est sa raison d'être, et son commentaire
+   * ne la disait pas.
    */
   fallAt: number;
   /**
@@ -903,7 +927,7 @@ const DEFAULTS: Omit<PosteTweak, "textNonce" | "replayNonce"> = {
   tubeWallIn: 0.1,
   dissolveAt: 0.5,
   tunnelLoop: false,
-  fallAt: 0.56,
+  fallAt: 0.51,
   fallBy: 0.65,
   restLevel: 0,
   cellCut: 0,
