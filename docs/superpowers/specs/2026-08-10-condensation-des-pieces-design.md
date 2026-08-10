@@ -67,24 +67,47 @@ de deux graines tirées une fois »*. La naissance est donc une fonction pure de
 graines, sans état.
 
 ```glsl
-// L'ÉCHELONNAGE PAR GRAIN. Hachage NEUF, pas `pick` réutilisé : corrélés, les grains qui
-// s'effritent seraient aussi les derniers arrivés, et les deux gestes se confondraient.
+// L'ÉCHELONNAGE PAR GRAIN. Hachage NEUF, pas `pick` réutilisé : sur bd = pick, les grains qui
+// s'effritent (pick petit) seraient exactement les PREMIERS arrivés (bd petit).
 float bd = fract(sin(r1 * 269.5 + r0 * 183.3) * 43758.5453) * uBirthWave;
 float bk = ease(clamp((RT.z - bd) / max(1e-3, 1.0 - uBirthWave), 0.0, 1.0));
 
-// LA POUSSIÈRE EST NÉE D'AVANCE — par le drapeau qui existe déjà (RT.w, voir vDust).
+// LA POUSSIÈRE EST NÉE D'AVANCE — par le drapeau qui existe déjà (RT.w, voir vDust). C'est aussi
+// ce qui l'empêche de voyager : bk vaut alors 1, donc le (1 − bk) du halo est nul. UN seul garde.
 bk = mix(bk, 1.0, RT.w);
 
-// LA DIRECTION DU HALO : une sphère uniforme tirée sur les deux graines. Uniforme et non
-// « un vecteur de bruit normalisé » : normaliser trois bruits concentre les tirages sur les
-// diagonales du cube, et la pièce se condenserait depuis huit coins.
-float cz = r0 * 2.0 - 1.0;
+// LA DIRECTION DU HALO : une sphère uniforme. Uniforme et non « un vecteur de bruit normalisé » :
+// normaliser trois bruits concentre les tirages sur les diagonales du cube, et la pièce se
+// condenserait depuis huit coins.
+//
+// LA LATITUDE PREND SON PROPRE HACHAGE, ET C'EST MESURÉ — voir plus bas.
+float bh = fract(sin(r0 * 96.7 + r1 * 41.3) * 43758.5453);
+float cz = bh * 2.0 - 1.0;
 float sr = sqrt(max(0.0, 1.0 - cz * cz));
 float ca = r1 * TAU;
 vec3 dir = vec3(sr * cos(ca), cz, sr * sin(ca));
 
-vec3 born = dir * uBirthReach * (1.0 - bk) * (1.0 - RT.w);
+vec3 born = dir * uBirthReach * (1.0 - bk);
 ```
+
+**LA LATITUDE NE PEUT PAS ÊTRE `r0`** — corrigé après mesure, et la raison invalide une hypothèse
+que ce spec portait. Une première rédaction posait `cz = 2·r0 − 1` en affirmant que naissance et
+effritement « ne coexistent pas ». **Ils coexistent en permanence** : à `zone` = 2 le seuil vaut
+`smoothstep(−1, 1, aSal)` avec `aSal` clampé dans [0,1], donc `w ≥ 0,5` pour TOUT grain, et `rate`
+vaut 1 hors survol — les trois quarts du nuage s'effritent pendant qu'ils naissent.
+
+Or `r0` **est** la phase du cycle (`ph = fract(uTime/uCycle + r0)`, et `uTime` ≈ 1,5 s contre
+`uCycle` = 60 à la naissance, donc `ph ≈ r0`), donc l'alpha de l'effritement
+`pow(1 − ph/uOut, 1.5)` devenait une fonction monotone de la latitude. Mesuré sur les vraies
+constantes : hémisphère bas **1,64×** plus lumineux que le haut à `w` = 0,75, **2,53×** à `w` = 1.
+La pièce ne se condensait pas hors de la poussière, elle se condensait hors d'une lueur posée
+dessous.
+
+L'azimut, lui, **reste sur `r1`** : `r1` n'entre dans `esc` que par un terme d'ouverture latérale,
+jamais dans l'alpha — donc départ et arrivée gardent leur parenté sans le dégradé.
+
+Et `(1 − RT.w)` a disparu du halo : `bk` valant déjà 1 pour la poussière, le facteur ne pouvait
+rien changer. Deux gardes pour une condition font chercher au lecteur le cas qui demande les deux.
 
 `born` s'ajoute **après** les rotations, au même endroit et pour la même raison que `esc` : le
 fichier a déjà tranché que le panache calculé avant la rotation « s'inclinerait comme si la

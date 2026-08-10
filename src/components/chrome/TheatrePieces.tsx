@@ -208,15 +208,16 @@ void main() {
    * naissance de CETTE pièce (voir stationBirth), et c'est l'ARRIVÉE du grain qui fait l'alpha.
    * L'extinction reste exacte : à RT.z = 0, bk vaut 0 pour tous les grains.
    *
-   * L'ÉCHELONNAGE PAR GRAIN vient d'un hachage NEUF, pas de « pick » réutilisé : corrélés, les
-   * grains qui s'effritent seraient aussi les derniers arrivés, et les deux gestes se
-   * confondraient.
+   * L'ÉCHELONNAGE PAR GRAIN vient d'un hachage NEUF, pas de « pick » réutilisé : sur bd = pick,
+   * les grains qui s'effritent (pick petit) seraient exactement les PREMIERS arrivés (bd petit),
+   * et les deux gestes se confondraient au lieu de se superposer.
    */
   float bd = fract(sin(r1 * 269.5 + r0 * 183.3) * 43758.5453) * uBirthWave;
   float bk = ease(clamp((RT.z - bd) / max(1e-3, 1.0 - uBirthWave), 0.0, 1.0));
   // LA POUSSIÈRE EST NÉE D'AVANCE — par le drapeau qui existe déjà (RT.w, voir vDust). C'est
   // elle qui peuple le noir avant que les pièces n'arrivent : la faire naître aussi aurait vidé
-  // ce passage de la seule chose qu'il montre.
+  // ce passage de la seule chose qu'il montre. C'est aussi ce qui l'empêche de VOYAGER : bk vaut
+  // alors 1, donc le (1 − bk) du halo plus bas est nul — un seul garde, une seule raison.
   bk = mix(bk, 1.0, RT.w);
 
   /*
@@ -226,15 +227,26 @@ void main() {
    * tirages sur les diagonales du cube, et la pièce se condenserait depuis ses huit coins. Le
    * z uniforme + l'angle uniforme est la seule méthode qui couvre la sphère à plat.
    *
-   * La direction partage r0/r1 avec le panache de l'effritement, donc départ et arrivée sont de
-   * la même famille — assumé : les deux ne coexistent pas, et une pièce dont la matière rentre
-   * par où elle sortira se tient mieux qu'une qui mélange deux champs indépendants.
+   * LA LATITUDE NE PEUT PAS ÊTRE r0, ET C'EST MESURÉ. Une première rédaction posait
+   * bz = 2·r0 − 1 en affirmant que naissance et effritement « ne coexistent pas ». Ils
+   * coexistent, en permanence : à zone = 2 le seuil vaut smoothstep(−1, 1, aSal) avec aSal
+   * clampé dans [0,1], donc w ≥ 0,5 pour TOUT grain, et rate vaut 1 hors survol — les trois
+   * quarts du nuage sont dans la branche esc pendant qu'ils naissent. Or r0 EST la phase du
+   * cycle (ph = fract(uTime/uCycle + r0), et uTime ≈ 1,5 s contre uCycle = 60 à la naissance,
+   * donc ph ≈ r0) : l'alpha de l'effritement, pow(1 − ph/uOut, 1.5), devenait une fonction
+   * monotone de la latitude. Mesuré sur les vraies constantes : l'hémisphère bas du halo
+   * ressortait 1,64× plus lumineux que le haut à w = 0,75, et 2,53× à w = 1. La pièce ne se
+   * condensait pas hors de la poussière, elle se condensait hors d'une lueur posée dessous.
+   *
+   * D'où un hachage pour la latitude. L'AZIMUT RESTE SUR r1, lui : r1 n'entre dans esc que par
+   * un terme d'ouverture latérale, jamais dans l'alpha — donc départ et arrivée gardent la
+   * parenté qu'on voulait, sans le dégradé.
    */
-  float bz = r0 * 2.0 - 1.0;
+  float bh = fract(sin(r0 * 96.7 + r1 * 41.3) * 43758.5453);
+  float bz = bh * 2.0 - 1.0;
   float brd = sqrt(max(0.0, 1.0 - bz * bz));
   float ban = r1 * TAU;
-  vec3 born = vec3(brd * cos(ban), bz, brd * sin(ban))
-            * (uBirthReach * (1.0 - bk) * (1.0 - RT.w));
+  vec3 born = vec3(brd * cos(ban), bz, brd * sin(ban)) * (uBirthReach * (1.0 - bk));
 
   // L'ARRIVÉE REMPLACE LE FONDU, ELLE NE S'Y AJOUTE PAS. Multiplier bk PAR RT.z aurait laissé le
   // fondu plat par-dessus la convergence : les deux rampes se seraient composées et on aurait
@@ -500,7 +512,11 @@ export function TheatrePieces({ reduced }: Props) {
     u.uOut.value = g.out;
     u.uFloat.value = g.float;
     // À ZÉRO SOUS `reduced` : une convergence est du mouvement, et cette préférence demande
-    // qu'il n'y en ait pas. Il reste la montée d'alpha, c'est-à-dire l'image d'avant.
+    // qu'il n'y en ait pas. Il reste la montée d'alpha, c'est-à-dire l'image d'avant À UN
+    // `smoothstep` PRÈS — `bk` vaut alors `ease(on)` là où l'ancien code multipliait par `on`
+    // tout court. Même bornes, même monotonie, aucun déplacement : c'est une approximation
+    // documentée, pas une identité (voir la spec, qui exige qu'on le dise plutôt que de
+    // laisser croire au bit près).
     u.uBirthReach.value = reduced ? 0 : g.birthReach;
     u.uBirthWave.value = reduced ? 0 : g.birthWave;
     u.uGain.value = g.gain;
