@@ -734,8 +734,34 @@ export function advanceFormClock(
   // l'ordinateur au centre le temps du plan large, et si l'entrée est déjà plus près que `aimFrom`
   // la rampe repart d'elle — elle vaut 0 au départ dans les deux cas (voir posteTweak).
   const xStart = Math.min(dv.aimFrom, xEntry);
+  /*
+   * ET LA BORNE D'ARRIVÉE AUSSI EST BORNÉE PAR L'ENTRÉE — sans quoi la rampe s'inverse et le
+   * recentrage est DÉJÀ FINI à la première frame de Work.
+   *
+   * `xStart` couvrait le cas « l'entrée est plus près que `aimFrom` » ; il ne couvrait pas
+   * « l'entrée est plus près que `aimBy` », c'est-à-dire plus près que l'endroit où le
+   * recentrage doit être TERMINÉ. Le `Math.max(xStart, aimBy + 1e-3)` qui suivait n'était là
+   * que pour éviter un intervalle dégénéré, et dans ce cas-là il retourne la garantie qu'il
+   * était censé protéger : les deux bornes passent AU-DESSUS de la position réelle, le
+   * smoothstep sort 0, `tAim` vaut 1 — la caméra visait la lettre dès l'ouverture de la
+   * section, donc le blob s'ouvrait décalé vers le bas (mesuré : camY = holeY = 2.179 au lieu
+   * de 0, avec le blob centré à l'origine).
+   *
+   * MESURÉ, et le coupable est un nombre voisin : `pt.fill` est passé de 0.42 à 0.5 pour
+   * grossir le poste (voir posteTweak), ce qui grossit le rectangle du tube et donc
+   * `tubeMouth.frontZ` — l'entrée s'est retrouvée à 1.261 écran du verre, sous les 1.5 de
+   * `aimBy`. Le commentaire de `fill` prévenait de cette dépendance et la marge du fondu (T6)
+   * avait bien été revérifiée ; la rampe de visée, non.
+   *
+   * LA MOITIÉ DE CE QUI RESTE : quand l'entrée est déjà en dessous de `aimBy`, le recentrage
+   * n'a plus que l'approche pour se faire, donc il se termine à mi-chemin du verre. Le facteur
+   * est un repli, pas un réglage — dans le régime pour lequel les nombres du panneau ont été
+   * trouvés (entrée au-delà de `aimFrom`, donc xStart = 3.5) `min(1.5, 1.75)` vaut 1.5 et
+   * cette ligne ne change RIEN, au bit près.
+   */
+  const xEnd = Math.min(dv.aimBy, xStart * 0.5);
   const tAim =
-    1 - smoothstep(dv.aimBy, Math.max(xStart, dv.aimBy + 1e-3), screenFill(state.camZ, 0.1, tanHalfCam));
+    1 - smoothstep(xEnd, Math.max(xStart, xEnd + 1e-3), screenFill(state.camZ, 0.1, tanHalfCam));
   /*
    * LA COURBE EST DÉFINIE SUR L'ÉCART PROJETÉ, PAS SUR LA POSITION MONDE — et c'est ce qui
    * supprime le coude. Interpoler camX/camY linéairement vers la lettre donnait une dérive

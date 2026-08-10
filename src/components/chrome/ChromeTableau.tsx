@@ -242,8 +242,8 @@ void main(){
   // renforcer le flow (0.25 + 0.35·uPres) : c'est la même bascule que le crâne fait
   // avec SON uPres (= s.pres), et le relais n'est invisible que si les deux valent LE
   // MÊME NOMBRE au même instant — deux sphères déguisées qui ne s'accordent que sur
-  // leur rayon (voir buildPart, ~ligne 533 : le même repli de 0.96 que le crâne) mais
-  // pas sur leur grain restent deux objets reconnaissables l'un sous l'autre.
+  // leur rayon (voir withLining : la doublure est à FORM_RADIUS exactement, celui du
+  // crâne) mais pas sur leur grain restent deux objets reconnaissables l'un sous l'autre.
   //
   // MESURÉ (avant ce correctif) : au cœur du relais (crâne à ~40 % d'opacité,
   // poste à ~20 %, scrollY ≈ 2040 sur un chargement de test), s.pres valait 0.41
@@ -572,11 +572,39 @@ void main(){
 /* geometry                                                                   */
 /* -------------------------------------------------------------------------- */
 
+/*
+ * LA COQUE DE HOMES NE PEUT PAS ÊTRE LA SPHÈRE — MESURÉ, PAS SUPPOSÉ.
+ *
+ * L'appariement radial du crâne (chaque sommet part de sa propre direction, à
+ * FORM_RADIUS) donne une sphère PARCE QUE le crâne est un maillage dense et compact :
+ * vu du centre, chacun de ses triangles ne couvre qu'un angle minuscule, donc sa corde
+ * ne s'écarte pas de la sphère.
+ *
+ * L'ordinateur est un maillage de surfaces dures DÉCIMÉ (meshopt 0.35, voir FRAME_SRC) :
+ * ses panneaux plats portent de longs triangles qui, vus du centre de l'objet, couvrent
+ * des dizaines de degrés — un sommet à r = 1.08 et son voisin à r = 7.43. Projetés
+ * radialement, leurs trois coins atterrissent aux quatre coins de la sphère et le
+ * triangle devient une PLAQUE qui la traverse.
+ *
+ * Relevé sur les 107 541 triangles des sept parties (creux de la corde, en fraction du
+ * rayon) : médiane 0,005 %, mais 12 % au-dessus de 2 %, 6,8 % au-dessus de 15 %, et
+ * 7 296 triangles dont le plan passe à moins de 1 % du centre. C'est exactement ce qu'on
+ * voyait à l'écran : un polyèdre à facettes plates, arêtes droites et coutures dures là
+ * où deux couches se croisent, à côté du crâne qui est lisse. Aucun réglage de `distort`,
+ * `freq` ou de tuck radial ne pouvait le corriger — déplacer les sommets d'un triangle
+ * de 40° le long de leurs rayons ne le rend pas plus petit.
+ *
+ * DONC : la sphère de repos est une VRAIE sphère (la doublure, voir withLining), et la
+ * coque de homes est ENFOUIE dessous. C'est le renversement de l'ancien contrat (« la
+ * doublure, un demi-pourcent SOUS les homes, bouche les trous ») : c'était la coque qui
+ * gagnait le test de profondeur, donc c'était le polyèdre qu'on voyait.
+ */
+const SHELL_IN = 0.97;
+
 /**
  * Pair every vertex of a built geometry with its home on the resting sphere — the
- * skull's radial pairing, with the same inward tuck for anything that cannot reach
- * the silhouette (here: the sheet's back half, which would otherwise stack on its
- * front at the sphere state and z-fight through the crossfade).
+ * skull's radial pairing, sunk under the lining (SHELL_IN above): at rest the eye reads
+ * the lining and nothing else, and the parts pour OUT of it as the morph runs.
  */
 function toMorph(geo: BufferGeometry, seedOf: (x: number, y: number, z: number) => number): BufferGeometry {
   const pos = geo.getAttribute("position");
@@ -592,8 +620,10 @@ function toMorph(geo: BufferGeometry, seedOf: (x: number, y: number, z: number) 
     target[i * 3 + 1] = y;
     target[i * 3 + 2] = z;
     const r = Math.hypot(x, y, z) || 1e-4;
-    const back = z < 0 ? 0.96 : 1;
-    const k = (FORM_RADIUS * back) / r;
+    // Un seul repli, isotrope : l'ancien `z < 0 ? 0.96 : 1` séparait la face avant de
+    // la face arrière d'une PLAQUE (deux couches, un seul axe). Sept coques fermées ont
+    // des couches dans toutes les directions, et le signe de z n'en sépare aucune.
+    const k = (FORM_RADIUS * SHELL_IN) / r;
     home[i * 3] = x * k;
     home[i * 3 + 1] = y * k;
     home[i * 3 + 2] = z * k;
@@ -636,6 +666,20 @@ function buildCanvas(): BufferGeometry {
  * complétée ou le modèle remplacé.
  */
 const FRAME_SRC = "/models/computer.glb";
+
+/**
+ * Le matériau UDIM de la pièce VERRE dans l'atlas du glb — celui qui porte le rectangle
+ * sombre du tube. Deux endroits en dépendent (le verrou uTube de frameMats et le choix
+ * de l'hôte de la doublure), d'où la constante : un nom recopié aurait dérivé au premier
+ * changement de modèle, et la panne serait silencieuse des deux côtés.
+ */
+const TUBE_MAT = "default_1003";
+
+/** Le nom du matériau d'un mesh du glb — tableau ou pas, absent ou pas. */
+function materialName(src: Mesh): string | undefined {
+  const raw = src.material;
+  return ((Array.isArray(raw) ? raw[0] : raw) as { name?: string } | undefined)?.name;
+}
 
 /**
  * LE REPÈRE PARTAGÉ DES PARTIES. Le poste n'est plus un mesh : l'ordinateur en a SEPT
@@ -706,23 +750,53 @@ function buildPart(src: Mesh, toForm: Matrix4): BufferGeometry {
 }
 
 /**
- * THE LINING. The disguise's sphere is a SHELL of projected homes — the canvas's
- * faces and the moulding's band — and radial projection leaves the cap behind them
- * bare: seen alone (the corridor, where the raymarcher stays dark on purpose), the
- * resting "sphere" read as a glass bauble with its back missing. The liquid used to
- * hide this by accident, at fullscreen-march price, whenever its fade leaked back in.
+ * LA DOUBLURE — ET C'EST ELLE, DÉSORMAIS, LA SPHÈRE DE REPOS.
  *
- * So the frame carries a lining: a real sphere, HALF A PERCENT under the homes so
- * the shell always wins the depth test where it exists, filling the holes where it
- * does not. Its seats tuck it inside the canvas slab — an ellipsoid the closed box
- * hides at every aspect — so the settled work carries no trace of it, and its seeds
- * sit with the moulding's crowd: the sheets pour OUT of a mass that is still whole,
- * and the mass itself drains into the work behind them.
+ * Elle existait déjà, un demi-pourcent SOUS les homes, pour boucher la calotte que la
+ * plaque (un slab et un anneau, ouverts) laissait nue. Ce contrat est INVERSÉ : elle est
+ * maintenant à FORM_RADIUS exactement — le rayon du crâne et du liquide, celui que le
+ * fondu croisé exige — et c'est la coque de homes qui est enfouie sous elle (SHELL_IN,
+ * voir son commentaire pour la mesure qui l'impose).
+ *
+ * TROIS CHOSES LA RENDENT INVISIBLE UNE FOIS LE POSTE FORMÉ, et il en faut trois :
+ *
+ *  · SON SIÈGE EST DÉRIVÉ DU MODÈLE, pas taillé pour l'ancienne plaque. C'est ce qui
+ *    l'avait fait retirer : son ellipsoïde (PLATE_H · 0.7) sortait du moniteur — « le
+ *    disque visible à droite du poste », la souris élargissant la boîte, le moniteur
+ *    n'étant pas au centre. Ici `seatR` est une fraction du rayon de la surface la PLUS
+ *    INTÉRIEURE de l'objet (mesuré : 1.076 en unités de forme), donc la bille est dedans
+ *    par construction, quel que soit le glb.
+ *  · ELLE PART EN DERNIER (aSeed ≈ 1) : la masse reste ENTIÈRE pendant que les tôles en
+ *    sortent, puis se vide dans l'objet déjà refermé sur elle. L'ancien seed (0.55…0.85)
+ *    la faisait fondre au milieu du morph, quand rien ne la cachait encore.
+ *  · SES INDICES SONT DESSINÉS EN PREMIER (voir plus bas) : le test de profondeur retire
+ *    alors la coque au repos, au lieu de retirer la doublure.
  */
-const LINING_R = 0.995;
+/*
+ * (Plus de LINING_R : elle valait 0.995 pour passer SOUS les homes, et le rayon de la
+ * doublure est maintenant FORM_RADIUS tout court — la constante partagée. Un facteur à 1
+ * n'aurait fait qu'inviter à le rebouger, alors que c'est SHELL_IN qui porte l'écart.)
+ */
+/** La bille du siège, en fraction du rayon de la surface la plus intérieure du poste. */
+const LINING_SEAT = 0.55;
 
-function withLining(geo: BufferGeometry): BufferGeometry {
-  const sph = new SphereGeometry(FORM_RADIUS * LINING_R, 96, 64);
+/**
+ * Le rayon sous lequel rien de l'objet formé n'existe — le minimum de |aTarget| sur
+ * toutes ses parties. Mesuré sur le glb servi : 1.076.
+ */
+function innerRadius(parts: BufferGeometry[]): number {
+  let min = Infinity;
+  for (const g of parts) {
+    const a = g.getAttribute("aTarget");
+    for (let i = 0; i < a.count; i++) {
+      min = Math.min(min, Math.hypot(a.getX(i), a.getY(i), a.getZ(i)));
+    }
+  }
+  return Number.isFinite(min) ? min : PLATE_H;
+}
+
+function withLining(geo: BufferGeometry, seatR: number): BufferGeometry {
+  const sph = new SphereGeometry(FORM_RADIUS, 96, 64);
   const sp = sph.getAttribute("position") as BufferAttribute;
   const gp = geo.getAttribute("position") as BufferAttribute;
   const gn = geo.getAttribute("normal") as BufferAttribute;
@@ -767,21 +841,36 @@ function withLining(geo: BufferGeometry): BufferGeometry {
     nrm[j * 3] = x / r;
     nrm[j * 3 + 1] = y / r;
     nrm[j * 3 + 2] = z / r;
-    // The seat: an ellipsoid tucked inside the canvas slab. x rides uAspX in the
-    // shader exactly as the slab's own width does, so it fits at every aspect.
-    tgt[j * 3] = (x / r) * PLATE_H * 0.7;
-    tgt[j * 3 + 1] = (y / r) * PLATE_H * 0.7;
-    tgt[j * 3 + 2] = (z / r) * PLATE_T * 0.5;
-    seed[j] = 0.55 + 0.3 * Math.min(1, Math.max(0, 0.5 + y / (2 * FORM_RADIUS)));
+    // Le siège : une bille enfouie sous la surface la plus intérieure du poste (seatR).
+    // Sphérique et non ellipsoïdale — elle ne se cale plus sur un slab dont l'aspect
+    // bougeait, donc elle n'a plus de raison d'en épouser les proportions.
+    tgt[j * 3] = (x / r) * seatR;
+    tgt[j * 3 + 1] = (y / r) * seatR;
+    tgt[j * 3 + 2] = (z / r) * seatR;
+    // ELLE PART EN DERNIER — voir l'en-tête. Un reste de dégradé du bas vers le haut
+    // pour que la masse se vide avec un grain plutôt que d'un bloc.
+    seed[j] = 0.94 + 0.06 * Math.min(1, Math.max(0, 0.5 + y / (2 * FORM_RADIUS)));
   }
 
+  /*
+   * LA DOUBLURE D'ABORD, LA COQUE ENSUITE — et cet ordre EST le correctif.
+   *
+   * Les deux vivent dans une seule géométrie, donc un seul draw : les primitives sont
+   * rasterisées dans l'ordre des indices, et le matériau écrit la profondeur. La doublure
+   * dessinée en premier pose sa profondeur à FORM_RADIUS, et la coque — enfouie 3 % plus
+   * bas — échoue au test partout : au repos on ne voit QU'UNE couche de chrome, la sphère.
+   * L'ordre inverse (celui d'avant) faisait gagner la coque, c'est-à-dire le polyèdre.
+   *
+   * Et il ne fige rien pour la suite : dès que le morph fait sortir un sommet de la
+   * doublure, il est devant, donc il passe. Le test de profondeur arbitre, pas l'ordre.
+   */
   const gi = geo.index;
   const si = sph.index!;
   const giCount = gi ? gi.count : n0;
-  const idx = new Uint32Array(giCount + si.count);
-  if (gi) for (let i = 0; i < giCount; i++) idx[i] = gi.getX(i);
-  else for (let i = 0; i < n0; i++) idx[i] = i;
-  for (let i = 0; i < si.count; i++) idx[giCount + i] = n0 + si.getX(i);
+  const idx = new Uint32Array(si.count + giCount);
+  for (let i = 0; i < si.count; i++) idx[i] = n0 + si.getX(i);
+  if (gi) for (let i = 0; i < giCount; i++) idx[si.count + i] = gi.getX(i);
+  else for (let i = 0; i < n0; i++) idx[si.count + i] = i;
   sph.dispose();
 
   const out = new BufferGeometry();
@@ -900,14 +989,27 @@ export function ChromeTableau({ reduced }: Props) {
     const forms = partsFrame(frameSrcs);
     const parts = frameSrcs.map((src, i) => buildPart(src, forms[i]));
     /*
-     * PAS DE DOUBLURE. Elle bouchait la calotte que la plaque — un slab et un anneau,
-     * OUVERTS — laissait nue derrière sa coquille de homes projetés. L'ordinateur est
-     * sept coques FERMÉES autour de l'origine : leur projection radiale couvre la
-     * sphère entière, et la doublure ne servait plus qu'à dépasser — son siège,
-     * l'ellipsoïde taillé pour la plaque, sortait du moniteur (le « disque » visible
-     * à droite du poste : la souris élargit la boîte, le moniteur n'est pas au
-     * centre). withLining reste défini pour le jour où un modèle ouvert reviendra.
+     * LA DOUBLURE EST REVENUE, ET POUR UNE AUTRE RAISON QUE LA PREMIÈRE FOIS.
+     *
+     * Elle avait été retirée comme inutile : « l'ordinateur est sept coques FERMÉES autour
+     * de l'origine, leur projection radiale couvre la sphère entière ». Le premier membre
+     * est vrai, la conclusion ne l'est pas — couvrir la sphère n'est pas ÊTRE la sphère.
+     * Voir SHELL_IN pour le relevé : un dixième des triangles de ces coques, projeté
+     * radialement, traverse la sphère au lieu de l'épouser. La doublure ne bouche plus des
+     * trous, elle EST la sphère de repos, et la coque se cache dessous.
+     *
+     * SUR UNE PARTIE QUI N'EST PAS LE VERRE : la doublure hérite du matériau de son hôte,
+     * et celui du verre porte uTube = 1 (voir frameMats) — donc la projection planaire du
+     * tube s'appliquerait à elle. Elle est éteinte au repos (uGlow · uTv = 0) et enfouie
+     * une fois le tube allumé, mais dépendre de deux coïncidences plutôt que de zéro n'a
+     * aucun intérêt : le rectangle du tube contient l'origine, où la bille du siège finit.
      */
+    const host = Math.max(0, frameSrcs.findIndex((src) => materialName(src) !== TUBE_MAT));
+    const lined = withLining(parts[host], innerRadius(parts) * LINING_SEAT);
+    // L'hôte non doublé n'est référencé par personne : le nettoyage plus bas ne voit que
+    // ce que ce memo RETOURNE, donc sans ça ses 17k sommets fuient à chaque glb.
+    parts[host].dispose();
+    parts[host] = lined;
     return parts;
   }, [frameSrcs]);
   // A swapped-out frame geometry is not auto-disposed: R3F frees on unmount, and this
@@ -922,7 +1024,7 @@ export function ChromeTableau({ reduced }: Props) {
    * dérivé de la mauvaise dimension (le glb est normalisé sur sa LARGEUR, l'axe le
    * plus long, pas sur sa hauteur). Mesuré, il ne peut pas dériver du glb.
    * (La doublure interne participe au scan et ne change pas les maxima : ses sièges
-   * sont un ellipsoïde enfoui sous la coque.)
+   * sont une bille enfouie sous la surface la plus intérieure du poste — voir withLining.)
    */
   /*
    * `glassZ` — LE FRONT DU VERRE SOUS LE RECTANGLE DU TUBE, PAS LE FRONT DE L'OBJET.
@@ -1087,13 +1189,12 @@ export function ChromeTableau({ reduced }: Props) {
        * pièce tourné vers +Z dans le rectangle — le biseau du moniteur, en pente,
        * en attrapait une copie décalée par le warp de normale.
        */
-      const raw = frameSrcs[i]?.material;
-      const name = ((Array.isArray(raw) ? raw[0] : raw) as { name?: string } | undefined)?.name;
+      const src = frameSrcs[i];
       return new ShaderMaterial({
         uniforms: {
           ...shared(),
           uSkin: { value: tex ?? blank },
-          uTube: { value: name === "default_1003" ? 1 : 0 },
+          uTube: { value: src && materialName(src) === TUBE_MAT ? 1 : 0 },
         },
         vertexShader: VERT,
         fragmentShader: FRAG_FRAME,
@@ -1126,10 +1227,7 @@ export function ChromeTableau({ reduced }: Props) {
       mouth: tubeMouth,
       mats: () =>
         frameMats.map((m, i) => ({
-          name: (() => {
-            const raw = frameSrcs[i]?.material;
-            return ((Array.isArray(raw) ? raw[0] : raw) as { name?: string } | undefined)?.name;
-          })(),
+          name: frameSrcs[i] && materialName(frameSrcs[i]),
           tube: m.uniforms.uTube.value as number,
           glow: +(m.uniforms.uGlow.value as number).toFixed(3),
           screenW: (m.uniforms.uScreen.value as { image?: { width?: number } })?.image?.width,
