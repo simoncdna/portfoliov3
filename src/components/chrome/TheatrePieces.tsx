@@ -596,9 +596,25 @@ export function TheatrePieces({ reduced }: Props) {
       theatreScreen.freeY[i] = (-home.y * size.height) / 2;
     }
     xf[DUST_SLOT].set(c.cx, c.cy, c.cz, 1);
+    /*
+     * LA POUSSIÈRE CÈDE QUELQUE CHOSE — une cloche, pas une rampe.
+     *
+     * `4·on·(1−on)` vaut exactement 0 aux deux bouts, donc le facteur vaut EXACTEMENT 1 : la
+     * poussière seule du noir peuplé (où `on` est encore nul alors que `dustOn` vaut déjà 1 —
+     * les deux montent sur des fenêtres distinctes, voir formClock) et la poussière de la salle
+     * posée sont inchangées au bit près. Seul le PASSAGE creuse, jusqu'à 1 − dustGive au milieu,
+     * et il se rebouche tout seul — y compris à la sortie, puisque `on` redescend par la même
+     * cloche.
+     *
+     * CE N'EST PAS UNE CONSERVATION et ça ne prétend pas l'être : 30 000 grains de poussière
+     * contre ~140 000 pour les quatre pièces, les comptes ne s'équilibrent pas et ne le peuvent
+     * pas. C'est un effet de CAUSE — sans lui la poussière reste indifférente à ce qui naît
+     * dedans, et le lien que la naissance doit établir n'existe que dans un sens.
+     */
+    const give = 1 - (reduced ? 0 : g.dustGive) * 4 * on * (1 - on);
     // …et w = 1, LE DRAPEAU DE POUSSIÈRE, qui part au fragment via vDust (voir sa déclaration dans
     // le vertex). Les pièces gardent 0, posé juste au-dessus.
-    rot[DUST_SLOT].set(0, 0, dustOn * g.dustGain, 1);
+    rot[DUST_SLOT].set(0, 0, dustOn * g.dustGain * give, 1);
 
     // Le grain est relatif à l'ESPACEMENT des particules : à ×1 elles se touchent tout
     // juste, quelle que soit la densité. Régler la densité ne dérègle donc pas la matière.
