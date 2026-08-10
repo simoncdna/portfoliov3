@@ -6,6 +6,7 @@ import {
   RING_RADIUS,
   STATIONS,
   shortestDelta,
+  stationBirth,
   stationPosition,
   theatreCamera,
 } from "../src/lib/theatre.ts";
@@ -139,5 +140,88 @@ test("la densité fait varier le nombre de points, pas l'encombrement", () => {
     const lo = buildPiece(kind, 16);
     const hi = buildPiece(kind, 32);
     assert.ok(hi.count > lo.count * 2, `${kind} : ${lo.count} → ${hi.count}, la densité ne porte pas`);
+  }
+});
+/**
+ * LA NEUTRALITÉ, ET C'EST LE TEST QUI COMPTE LE PLUS. À cascade nulle, la naissance vaut
+ * exactement la présence partagée — donc la cascade est strictement opt-in, et l'image
+ * d'avant cette mécanique se retrouve en mettant un seul nombre à zéro. Sans ce test, une
+ * refonte de la formule pourrait décaler les quatre pièces d'un cheveu sans que rien ne le
+ * dise.
+ */
+test("à cascade nulle, la naissance vaut exactement la présence", () => {
+  for (const s of STATIONS) {
+    for (const on of [0, 0.25, 0.5, 0.75, 1]) {
+      const b = stationBirth(0, s.phi, on, 0);
+      assert.equal(b, on, `φ=${s.phi} on=${on} : ${b}`);
+    }
+  }
+});
+
+test("les deux bouts sont exacts, quelle que soit la cascade", () => {
+  for (const s of STATIONS) {
+    for (const cascade of [0, 0.2, 0.35, 0.6, 0.9]) {
+      assert.equal(stationBirth(0, s.phi, 0, cascade), 0, `φ=${s.phi} cascade=${cascade}`);
+      assert.equal(stationBirth(0, s.phi, 1, cascade), 1, `φ=${s.phi} cascade=${cascade}`);
+    }
+  }
+});
+
+test("la naissance ne repart jamais en arrière quand la présence monte", () => {
+  for (const s of STATIONS) {
+    let last = -1;
+    for (let i = 0; i <= 40; i++) {
+      const b = stationBirth(0, s.phi, i / 40, 0.35);
+      assert.ok(b >= last, `φ=${s.phi} on=${i / 40} : ${b} après ${last}`);
+      last = b;
+    }
+  }
+});
+
+/**
+ * LA CASCADE EXISTE VRAIMENT — et l'invariant est CONDITIONNEL, pas absolu.
+ *
+ * Le devant est strictement plus avancé que le fond TANT QUE le fond n'est pas né ; une fois le
+ * fond arrivé, les deux valent 1 et il n'y a plus d'écart à mesurer.
+ *
+ * Une première rédaction affirmait « le fond ne peut saturer qu'à on = 1 ». C'est vrai d'un
+ * antipode exact et faux des stations réelles : la plus lointaine vue de φ = 0 est à 148°, donc
+ * d = 0,822, et elle sature dès on = 1 − cascade·(1 − d) ≈ 0,938. Le test échouait à on = 0,95,
+ * où les deux valent 1 — et il aurait fait accuser la formule, qui est correcte : une pièce née
+ * reste née. La forme ci-dessous ne dépend d'aucun seuil et balaie toute la rampe.
+ */
+test("la pièce dans l'axe naît avant celle du fond", () => {
+  const phi = STATIONS[0].phi;
+  // La plus lointaine en écart angulaire, mesurée et non supposée.
+  const far = STATIONS.reduce((a, s) =>
+    Math.abs(shortestDelta(phi, s.phi)) > Math.abs(shortestDelta(phi, a.phi)) ? s : a
+  );
+  assert.notEqual(far.phi, phi, "il faut deux stations distinctes pour comparer");
+  for (let i = 0; i <= 40; i++) {
+    const on = i / 40;
+    const front = stationBirth(phi, phi, on, 0.35);
+    const back = stationBirth(phi, far.phi, on, 0.35);
+    if (on === 0) {
+      assert.equal(front, 0, "rien n'est né à présence nulle");
+      assert.equal(back, 0, "rien n'est né à présence nulle");
+    } else if (back < 1) {
+      assert.ok(front > back, `on=${on} : devant ${front} n'est pas devant le fond ${back}`);
+    } else {
+      assert.equal(front, 1, `on=${on} : le fond est né (${back}) mais pas le devant (${front})`);
+    }
+  }
+});
+
+/**
+ * L'ANGLE DE L'HORLOGE S'ACCUMULE ET N'EST PAS RAMENÉ DANS UN TOUR — mesuré au navigateur :
+ * `theatrePhi` valait −22 rad après quelques allers-retours. Une naissance calculée sur un
+ * écart non replié sortirait de [0,1] et la salle s'éteindrait sans raison visible.
+ */
+test("un angle accumulé hors d'un tour ne sort pas la naissance de [0,1]", () => {
+  for (const phi of [-22, -6.5, 0, 7.1, 43.9]) {
+    for (const s of STATIONS) {
+      const b = stationBirth(phi, s.phi, 0.5, 0.35);
+      assert.ok(b >= 0 && b <= 1, `φ=${phi} station=${s.phi} : ${b}`);
+    }
   }
 });

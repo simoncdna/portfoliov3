@@ -122,6 +122,39 @@ export function shortestDelta(from: number, to: number) {
   return d;
 }
 
+/**
+ * L'AVANCEMENT DE LA NAISSANCE D'UNE PIÈCE — la cascade, sans état ni tri.
+ *
+ * Les quatre pièces partageaient une seule présence (`theatre.on`), donc elles apparaissaient
+ * ensemble. Ici chacune reçoit la sienne, RETARDÉE DE SON ÉCART ANGULAIRE À LA CAMÉRA : celle
+ * qu'on regarde naît d'abord, celles du dos suivent. On voit la salle se peupler au lieu d'un
+ * interrupteur.
+ *
+ * CONTINU, DONC NI CLASSEMENT NI ÉTAT. Trier les stations par distance aurait demandé un rang —
+ * un entier qui saute, donc quelque chose à intégrer, donc de l'état dans un fichier qui n'en a
+ * pas. Le retard est ici une FONCTION de l'écart, et l'ordre en sort tout seul : avec les angles
+ * actuels (0, 62, 148, 218) et la caméra à φ = 0 à l'arrivée, il vaut 0, 1, puis 3 (142°) et 2
+ * (148°) quasi ex æquo. Il reste juste si les angles changent.
+ *
+ * ET LA SORTIE EST GRATUITE. Quand `on` retombe (voir `hallLeft` dans formClock), la même
+ * formule défait les pièces dans le même ordre, en commençant par le fond : les grains repartent
+ * dans leur halo et la salle se rend à la poussière, sans une ligne de code de sortie.
+ *
+ * `phi` EST L'ANGLE COURANT DE LA CAMÉRA, PAS CELUI DE LA STATION VISÉE. Pendant la fenêtre de
+ * naissance la caméra est immobile (le scroll est verrouillé par le film — voir tubeGate), donc
+ * les deux coïncident alors ; mais à la sortie, prendre le courant fait défaire la salle depuis
+ * là où on regarde vraiment.
+ *
+ * À `cascade` = 0 le résultat vaut EXACTEMENT `on` pour toute station — la cascade est
+ * strictement opt-in, et un test le fixe. Borné à 0,999 parce que la formule divise par
+ * (1 − cascade) : à 1, toutes les pièces naîtraient au même instant infiniment court.
+ */
+export function stationBirth(phi: number, stationPhi: number, on: number, cascade: number) {
+  const k = Math.max(0, Math.min(0.999, cascade));
+  const d = Math.abs(shortestDelta(phi, stationPhi)) / Math.PI;
+  return Math.max(0, Math.min(1, (on - d * k) / (1 - k)));
+}
+
 export type CamPose = { x: number; y: number; z: number; rotY: number };
 
 /**
