@@ -17,6 +17,10 @@ import {
 } from "@/lib/theatre";
 import { buildPiece } from "@/lib/theatreShapes";
 
+type Props = {
+  reduced?: boolean;
+};
+
 /**
  * LE THÉÂTRE — les quatre projets en nuages de particules, dans la salle qu'on traverse
  * après la plongée.
@@ -282,7 +286,7 @@ function seeded(seed: number, n: number) {
  */
 const HOLD_RATE = 7;
 
-export function TheatrePieces() {
+export function TheatrePieces({ reduced }: Props) {
   const points = useRef<Points>(null);
   /** L'avancement de la tenue, par pièce. Voir HOLD_RATE. */
   const hold = useRef(new Float32Array(STATIONS.length));

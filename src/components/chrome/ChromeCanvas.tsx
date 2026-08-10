@@ -394,7 +394,7 @@ export function ChromeCanvas({
               elle-même tant que sa présence est nulle — un montage conditionnel
               paierait la construction de ses nuages au moment précis où le lecteur
               arrive, c'est-à-dire à l'image la plus chargée de la page. */}
-          <TheatrePieces />
+          <TheatrePieces reduced={reduced} />
           {/* The skull mesh — the About section's form, so always present. */}
           {/* Its glb is ~1 MB, so it keeps its own boundary: inside the outer one it
               would hold the liquid (which needs nothing but a shader) off the
