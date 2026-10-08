@@ -476,7 +476,7 @@ export function TheatrePieces({ reduced }: Props) {
     });
   }, []);
 
-  useFrame(({ camera, size }, delta) => {
+  useFrame(({ camera, gl, size }, delta) => {
     const pts = points.current;
     if (!pts) return;
     const st = formState();
@@ -619,9 +619,29 @@ export function TheatrePieces({ reduced }: Props) {
     // Le grain est relatif à l'ESPACEMENT des particules : à ×1 elles se touchent tout
     // juste, quelle que soit la densité. Régler la densité ne dérègle donc pas la matière.
     u.uSize.value = g.grain * (2 / g.density);
-    // Le facteur qui convertit « unités monde » en pixels — c'est lui qui rend la taille
-    // des particules indépendante de la taille de la fenêtre.
-    u.uScale.value = ((size.height * Math.min(2, window.devicePixelRatio || 1)) / 2) / Math.tan((fov * Math.PI) / 360);
+    /*
+     * Le facteur qui convertit « unités monde » en pixels — c'est lui qui rend la taille des
+     * particules indépendante de la taille de la fenêtre.
+     *
+     * LE RATIO EST CELUI DU RENDERER, JAMAIS CELUI DE L'ÉCRAN. `gl_PointSize` s'exprime en
+     * pixels du TAMPON DE DESSIN, donc ce facteur doit porter le ratio qui dimensionne ce
+     * tampon — `gl.getPixelRatio()`. `window.devicePixelRatio` n'est pas ce nombre : le canvas
+     * est plafonné à DPR_CEIL (1,75, ou 1,4 en petit écran — voir ChromeCanvas), et il descend
+     * en cours de route, à deux titres au moins. `PerformanceMonitor` le fait glisser jusqu'à
+     * DPR_FLOOR sous charge ; `stageLoad` le pose à 1 pendant qu'un plan plein écran se lève.
+     *
+     * Ce que coûte la confusion, mesuré dans la salle au ratio écran 2 : les grains gardent
+     * leur taille en pixels de tampon, donc ils GRANDISSENT à l'écran de 2/ratio réel —
+     * ×1,14 en régime normal, et ×2 pendant la levée du rideau du menu, soit ×1,75 en
+     * diamètre et ×3,06 en surface d'un état à l'autre. Sur un nuage additif réglé « sur la
+     * SOMME, pas sur l'unité », la salle sature puis retombe quand le plan est parti.
+     *
+     * Corollaire à connaître avant de retoucher `grain` : c'est CE facteur qui rend vraie la
+     * phrase « à 1 les particules se touchent juste » (theatreLook). Le rapport entre le
+     * diamètre d'un grain et l'écartement projeté de deux voisins vaut exactement `grain`, et
+     * seulement parce que le ratio du tampon s'annule entre les deux.
+     */
+    u.uScale.value = ((size.height * gl.getPixelRatio()) / 2) / Math.tan((fov * Math.PI) / 360);
 
     // La rampe de profondeur est centrée sur la pièce visée, pas sur la scène entière :
     // avec quatre pièces étalées, une plage calée sur toutes les écraserait au noir.

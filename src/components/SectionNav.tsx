@@ -134,18 +134,18 @@ const EXIT_DELAY_MS = (i: number, c: number) =>
 const CLOSE_FALLBACK_MS = 2800;
 
 /*
- * THE BLOB IS ALIVE FROM THE FIRST FRAME OF THE CLOSE — at reduced resolution, not paused.
+ * THE BLOB IS ALIVE FROM THE FIRST FRAME OF THE CLOSE — at reduced cadence, not paused.
  *
  * A resume DELAY was tried at every setting. At the end of the lift, the form sits fully
  * uncovered and visibly frozen for the last third, then snaps into motion. At 300ms the
- * freeze was shorter and still read as a stutter. At 0ms, full resolution under the
+ * freeze was shorter and still read as a stutter. At 0ms, an unthrottled loop under the
  * curtain's heaviest overlap stalled the compositor outright — a window with ZERO frames
  * rendered, the curtain frozen at -111px, then a jump to -744.
  *
- * What buys the 0ms is resolution, not time: stageLoad's "cheap" drops the canvas to dpr 1
- * for the length of the lift, which was measured to keep the compositor fed at full overlap.
- * (This exact arrangement was tried once before and abandoned for degrading the render on
- * every open — that was the form clock's resume-delta bug, since fixed. See stageLoad.)
+ * What buys the 0ms is how OFTEN the canvas repaints, not when it starts: stageLoad's "cheap"
+ * holds it to one frame per CHEAP_FRAME_MS for the length of the lift, which is what keeps the
+ * compositor fed at full overlap. Resolution is deliberately not the lever — see stageLoad for
+ * what it cost the projects room when it was.
  *
  * Note what the target is: NOT the frame rate. It drops from ~120fps to ~50fps the moment the
  * blob resumes, and that is not a regression — ~45fps is this page's normal cost with the form
@@ -232,8 +232,8 @@ function hatch(
  * eyeball, and a photograph cannot survive here: at 40px a dithered image has ~1600 cells to
  * spend and grain needs gaps between its dots, so it lands as grey mush — the same
  * arithmetic that sent the dust to Contact. Line art is what reads at icon size, and it puts
- * the eye in the family the page already owns: ControlPanel draws its three form icons
- * exactly like this, hairlines in a 40-unit box (see IconDots / IconBlob / IconMesh).
+ * the eye in the family the page already owns: ControlPanel draws its form icons
+ * exactly like this, hairlines in a 40-unit box (see IconDots / IconBlob).
  *
  * WHY A SPHERE IS THE EASIER DRAWING. An almond with a lid was the first attempt and it
  * fights the size: its silhouette is mostly the thin corners, which is where a 1px stroke
@@ -555,8 +555,8 @@ export function SectionNav() {
    * Arriving: the screen is now fully covered, so the stage cannot be seen at all and its
    * loop is stopped outright.
    *
-   * Leaving: full resolution comes back and the rows leave the tab order. ("cheap" was
-   * already set when the close began, so the blob has been alive throughout the lift.)
+   * Leaving: the free-running cadence comes back and the rows leave the tab order. ("cheap"
+   * was already set when the close began, so the blob has been alive throughout the lift.)
    * Nothing has to be hidden behind this hide any more — the letters are parked at their
    * resting transform by the time it runs, which is where `!open` already had them going.
    */
@@ -589,16 +589,16 @@ export function SectionNav() {
       // reduced motion collapsing the transition, a resize interrupting it.
       timers.push(window.setTimeout(() => stageLoad.set("paused"), OPEN_MS + 150));
     } else {
-      // The blob is alive for the whole lift, at reduced resolution — see the compositor
-      // note above OPEN_MS. Full resolution returns in finish(), once the veil is off.
+      // The blob is alive for the whole lift, at reduced cadence — see the compositor
+      // note above OPEN_MS. The free-running loop returns in finish(), once the veil is off.
       // Since the curtain holds for --nav-exit-hold, this resume lands a full 1068ms BEFORE
       // the lift, behind a screen that is still entirely black: the form is warm and
       // running by the time any of it can be seen, which is what that note was trying to
       // buy with a 0ms delay. Left at the top of the close rather than moved onto a timer
       // of its own — a resume nobody can see needs no timing.
       // Guarded on the veil actually being up: this effect also runs on MOUNT with
-      // open=false, and a page that loads into low resolution for nobody is the bug the
-      // guard prevents. The inline style is `show`'s reflection in the DOM, which keeps
+      // open=false, and a page that loads into a throttled cadence for nobody is the bug
+      // the guard prevents. The inline style is `show`'s reflection in the DOM, which keeps
       // the effect's deps at [open] — putting `show` in the deps would re-run this branch
       // when finish() drops it and turn the stage back down right after handing it back.
       if (veil.style.visibility === "visible") stageLoad.set("cheap");

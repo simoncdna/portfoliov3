@@ -353,7 +353,9 @@ export function ChromeBlob({
     // the filled surface first, then the fill melts away (and the reverse).
     // form is driven only by the control panel now (no hover dissolve)
     const surfaceTarget = tw.mode === "particles" ? 0 : 1;
-    const wireTarget = tw.mode === "wire" ? 1 : 0;
+    // Le sélecteur de forme n'offre que le liquide et les particules (voir BlobMode), donc
+    // rien ne peut plus demander le filaire : le fondu ci-dessous ne quitte jamais 0.
+    const wireTarget = 0;
     const er = reduced ? 1 : 1 - Math.pow(0.02, delta); // smoother settle
     surfaceP.current += (surfaceTarget - surfaceP.current) * er;
     wireMix.current += (wireTarget - wireMix.current) * er;

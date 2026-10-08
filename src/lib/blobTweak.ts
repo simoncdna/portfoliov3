@@ -11,13 +11,13 @@ import { useSyncExternalStore } from "react";
  * re-render); React components use `useBlobTweak()` (e.g. for `open` and for the
  * particle density, which changes geometry and must re-render).
  */
-export type BlobMode = "blob" | "particles" | "wire";
+export type BlobMode = "blob" | "particles";
 
 /* ---------------------------------------------------------------------------
- * Shared material constants. The panel drives ONE material shown through three
- * representations, so the mapping from a dial to a physical quantity lives here
- * rather than in each renderer — otherwise the same dial drifts into meaning
- * something different per form (which it did).
+ * Shared material constants. The panel drives ONE material shown through more
+ * than one representation, so the mapping from a dial to a physical quantity
+ * lives here rather than in each renderer — otherwise the same dial drifts into
+ * meaning something different per form (which it did).
  * ------------------------------------------------------------------------- */
 
 /**
@@ -33,14 +33,14 @@ export const TIME_RATE = 1.3;
 export const SPIN_RATE = 0.7;
 /**
  * Radius of the resting sphere, shared by every representation: the liquid's SDF
- * radius, the particle cluster's rest radius, the wireframe's sphere. Noise
- * domains are normalised by it so Freq means the same feature size everywhere.
+ * radius, the particle cluster's rest radius. Noise domains are normalised by it
+ * so Freq means the same feature size everywhere.
  */
 export const FORM_RADIUS = 2.1;
 
 export type BlobTweak = {
   open: boolean;
-  /** blob = solid (hover→particles), particles = always dots, wire = wireframe */
+  /** blob = solid (hover→particles), particles = always dots */
   mode: BlobMode;
   distort: number;
   freq: number;
@@ -70,17 +70,15 @@ const emit = () => listeners.forEach((l) => l());
  * focused or clicked.
  *
  * The panel is an easter egg: a cipher on a barcode that most visitors never read,
- * let alone click. What hangs off this flag is the two ALTERNATIVE REPRESENTATIONS
- * of the form, which nothing but the panel's Form switch can ever select — and which
- * were being built on every page load for a switch nobody had touched:
+ * let alone click. What hangs off this flag is the ALTERNATIVE REPRESENTATION of the
+ * form — DnaParticles, a MeshSurfaceSampler run over the whole skull — which nothing
+ * but the panel's Form switch can ever select, and which would otherwise pay its
+ * construction on every page load for a switch nobody has touched.
  *
- *  - MeshDna, a 22 848-vertex line geometry;
- *  - DnaParticles, a MeshSurfaceSampler run over the whole skull.
- *
- * Both bail out on their first frame when their mode is not selected, so they drew
- * nothing; they simply cost their construction. They are mounted from this flag
- * instead — see ChromeCanvas. Nothing is lost: with the panel untouched, `mode` can
- * never leave "blob".
+ * It bails out on its first frame when its mode is not selected, so mounting it
+ * unconditionally would draw nothing and still cost that construction; it is mounted
+ * from this flag instead — see ChromeCanvas. Nothing is lost: with the panel
+ * untouched, `mode` can never leave "blob".
  *
  * Armed on HOVER rather than on click (see Hero's barcode), because hovering is what
  * reveals the word TWEAK — so the construction lands a beat before the panel can be

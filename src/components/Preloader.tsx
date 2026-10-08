@@ -103,7 +103,7 @@ export function Preloader() {
       /* The lift is a full-screen transform, and this page has already been bitten once by
          exactly that: a moving full-screen layer composited against a WebGL canvas that repaints
          every frame starves the compositor (see stageLoad for the frame counts). Same remedy as
-         the menu's exit: the form's loop keeps running at reduced resolution for the length of
+         the menu's exit: the form's loop keeps running at a throttled cadence for the length of
          the lift, so the first thing the visitor sees is metal already moving — not a still that
          snaps to life partway up. */
       stageLoad.set("cheap");

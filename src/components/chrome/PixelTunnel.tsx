@@ -7,11 +7,12 @@ import {
   DoubleSide,
   FrontSide,
   InstancedBufferAttribute,
+  InstancedBufferGeometry,
   PlaneGeometry,
   ShaderMaterial,
   Vector2,
 } from "three";
-import type { InstancedMesh, PerspectiveCamera } from "three";
+import type { Mesh, PerspectiveCamera } from "three";
 import { formState } from "@/lib/formClock";
 import { smoothstep } from "@/lib/formChoreo";
 import { screenFill, screenFillUnit, tubeMouth, tunnelCross } from "@/lib/tubeMouth";
@@ -99,9 +100,9 @@ const ROWS = 36;
  *  profondeur illimitée ». Réduire ici EN PREMIER si le budget de frame déborde (voir plus
  *  bas) : la profondeur du corridor se remarque moins que la résolution de sa grille. */
 const SLICES = 16;
-/* LE NOMBRE D'INSTANCES N'EST PLUS UNE CONSTANTE : il est calculé dans le composant depuis la
- * grille vivante (`gridOf`) et passé au mesh — voir `count` là-bas pour ce que la constante
- * cassait. COLS/ROWS/SLICES ne servent plus qu'à la grille RÉFÉRENCE (REF_HW/REF_HH) et aux
+/* LE NOMBRE D'INSTANCES N'EST PAS UNE CONSTANTE : il se déduit de la grille vivante
+ * (`gridOf`) et se pose sur la géométrie elle-même — voir buildGrid pour ce qu'une constante
+ * y cassait. COLS/ROWS/SLICES ne servent qu'à la grille RÉFÉRENCE (REF_HW/REF_HH) et aux
  * valeurs initiales des uniformes. */
 
 /**
@@ -972,24 +973,52 @@ void main() {
 
 /* -------------------------------------------------------------------------- */
 
-/** Le cube unité, plus deux attributs PAR INSTANCE : quelle cellule du canvas (aCell) et
+/** Le bloc unité, plus deux attributs PAR INSTANCE : quelle cellule du canvas (aCell) et
  *  quelle tranche du corridor (aSlice). Aucun instanceMatrix — la position de chaque
  *  instance est entièrement recalculée dans le vertex shader à partir de ces deux
- *  attributs, jamais posée depuis le CPU. */
+ *  attributs, jamais posée depuis le CPU.
+ *
+ *  D'OÙ LE COUPLE `InstancedBufferGeometry` + `<mesh>`, ET PAS `<instancedMesh>`. Les deux
+ *  dessinent le même nombre d'instances (WebGLRenderer.renderBufferDirect prend
+ *  `object.count` pour un InstancedMesh, `geometry.instanceCount` sinon), mais le
+ *  constructeur d'InstancedMesh alloue TOUJOURS son instanceMatrix : count × 16 flottants,
+ *  qu'un shader le lise ou non. À la grille livrée (gridScale 5.5, slices 40 → 264 × 198 × 40
+ *  = 2 090 880 instances) cela fait 127,6 Mio de tas JS, puis un unique `gl.bufferData`
+ *  BLOQUANT de 180 à 288 ms sur la première frame où le mesh devient visible — c'est-à-dire
+ *  au moment précis où le lecteur entre dans la plongée — et autant de VRAM retenue pour un
+ *  tampon que VERT ne nomme nulle part.
+ *
+ *  `instanceCount` est posé ICI, sur la géométrie qui porte déjà aCell/aSlice, et c'est ce
+ *  qui rend l'ancien piège inatteignable : three ne regarde pas la taille des attributs,
+ *  il dessine le nombre qu'on lui donne, donc un compte tenu à part du tableau (la constante
+ *  COUNT, 48×36×16) tronquait tout réglage de « Pixels » aux 27 648 PREMIÈRES entrées — et
+ *  comme le remplissage se fait tranche par tranche, il ne restait qu'un morceau de la
+ *  tranche 0 : la bouche amputée par le haut et zéro profondeur, quel que soit le réglage.
+ *  Le compte ne peut plus diverger du tableau : il est calculé une fois, à côté de lui. */
 function buildGrid(
   cols: number,
   rows: number,
   slices: number,
   quad: boolean
-): BoxGeometry | PlaneGeometry {
+): InstancedBufferGeometry {
   /*
    * PLAQUE OU CUBE — voir `blockQuad` dans posteTweak pour ce que ça coûte et ce que ça perd.
    * PlaneGeometry(1,1) est bien dans le même repère que BoxGeometry(1,1,1) sur X/Y ([-0.5, 0.5],
    * donc « position » garde le même sens dans le vertex shader) et vaut z=0 partout, ce qui
    * annule simplement le terme uFillZ.
    */
-  const geo = quad ? new PlaneGeometry(1, 1) : new BoxGeometry(1, 1, 1);
+  const block = quad ? new PlaneGeometry(1, 1) : new BoxGeometry(1, 1, 1);
+  const geo = new InstancedBufferGeometry();
+  geo.index = block.index;
+  /*
+   * Les attributs du bloc sont PARTAGÉS avec `block`, pas copiés : ils font 4 ou 24 sommets.
+   * `block` n'est donc jamais disposé — WebGLGeometries libère au `dispose` d'une géométrie
+   * les tampons GPU de SES attributs, et ceux-ci sont désormais les nôtres.
+   */
+  for (const [name, attr] of Object.entries(block.attributes)) geo.setAttribute(name, attr);
+
   const count = cols * rows * slices;
+  geo.instanceCount = count;
   const cell = new Float32Array(count * 2);
   const slice = new Float32Array(count);
   let i = 0;
@@ -1040,7 +1069,7 @@ function buildGrid(
  * lire. AUCUNE réduction de SLICES appliquée non plus.
  */
 export function PixelTunnel() {
-  const meshRef = useRef<InstancedMesh>(null);
+  const meshRef = useRef<Mesh>(null);
   /*
    * LA GÉOMÉTRIE SE RECONSTRUIT QUAND LA RÉSOLUTION CHANGE, et seulement là : c'est le seul
    * des réglages du corridor qui touche à une RESSOURCE (le tableau d'instances) plutôt qu'à
@@ -1060,16 +1089,9 @@ export function PixelTunnel() {
     () => buildGrid(grid.cols, grid.rows, grid.slices, grid.quad),
     [grid.cols, grid.rows, grid.slices, grid.quad]
   );
+  // Libère aussi les attributs du bloc unité, qui n'ont pas d'autre propriétaire — voir
+  // buildGrid, où ils sont partagés plutôt que copiés.
   useEffect(() => () => geometry.dispose(), [geometry]);
-  /*
-   * LE NOMBRE D'INSTANCES DESSINÉES SUIT LA GRILLE, PAS LA CONSTANTE. three ne regarde pas la
-   * taille des attributs d'un InstancedMesh, il dessine `object.count` instances
-   * (WebGLRenderer.renderBufferDirect). Passer COUNT (48×36×16) ici tronquait donc tout
-   * réglage de « Pixels » aux 27 648 PREMIÈRES entrées du tableau — et comme buildGrid remplit
-   * tranche par tranche, ça ne laissait qu'un morceau de la tranche 0 : la bouche amputée par
-   * le haut et zéro profondeur, quel que soit le réglage.
-   */
-  const count = grid.cols * grid.rows * grid.slices;
   // .tex seulement : ce composant ne peint jamais le canvas, il ne fait que le lire (voir
   // l'en-tête du fichier pour pourquoi TV_LINES vient de ChromeTableau plutôt que d'être
   // redéclarée ici).
@@ -1496,9 +1518,9 @@ export function PixelTunnel() {
         const u = (mesh.material as ShaderMaterial).uniforms;
         return {
           visible: mesh.visible,
-          // Le nombre d'instances RÉELLEMENT dessinées (voir `count` plus haut) — la seule
-          // façon de vérifier de l'extérieur que le réglage « Pixels » arrive au mesh.
-          count: mesh.count,
+          // Le nombre d'instances RÉELLEMENT dessinées (voir buildGrid) — la seule façon de
+          // vérifier de l'extérieur que le réglage « Pixels » arrive au mesh.
+          count: (mesh.geometry as InstancedBufferGeometry).instanceCount,
           position: mesh.position.toArray(),
           scale: mesh.scale.toArray(),
           uTravel: u.uTravel.value as number,
@@ -1520,9 +1542,10 @@ export function PixelTunnel() {
   }, []);
 
   return (
-    <instancedMesh
+    <mesh
       ref={meshRef}
-      args={[geometry, material, count]}
+      geometry={geometry}
+      material={material}
       visible={false}
       // Les instances sont déplacées en vertex shader ; la boîte englobante que three
       // calculerait depuis le cube unité (1×1×1 à l'origine) n'a aucun rapport avec

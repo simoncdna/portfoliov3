@@ -28,7 +28,15 @@ export type TheatreLook = {
 
   /* ---- MATIÈRE ---- */
 
-  /** Diamètre du grain, en pas de grille. À 1 les particules d'une pièce se touchent juste. */
+  /**
+   * Diamètre du grain, en pas de grille. À 1 les particules d'une pièce se touchent juste.
+   *
+   * CETTE ÉQUIVALENCE TIENT À `uScale`, qui porte le ratio de pixels du RENDERER et pas celui
+   * de l'écran (voir TheatrePieces) : c'est en s'annulant entre le diamètre du grain et
+   * l'écartement projeté de deux voisins que ce ratio laisse le rapport valoir exactement
+   * `grain`. Si `uScale` repassait au ratio de l'écran, ce nombre — réglé à l'œil, comme tous
+   * ceux de ce fichier — cesserait de décrire ce qu'il décrit, et d'une machine à l'autre.
+   */
   grain: number;
   /** L'intensité du nuage. Se règle sur la SOMME des recouvrements, pas sur un grain isolé. */
   gain: number;
@@ -143,7 +151,7 @@ export const THEATRE_LOOK: TheatreLook = {
   density: 124,
   dust: 30000,
   spread: 1,
-  grain: 0.6,
+  grain: 0.686,
   gain: 2.05,
   dustGain: 1.25,
   depthSpan: 30.5,

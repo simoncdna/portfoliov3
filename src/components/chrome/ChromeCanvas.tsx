@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer, PerformanceMonitor } from "@react-three/drei";
 import type { Group } from "three";
 import type { BlobShape } from "./ChromeBlob";
@@ -12,8 +12,8 @@ import { TheatrePieces } from "./TheatrePieces";
 import { LiquidDna } from "./LiquidDna";
 import { ChromeSkull } from "./ChromeSkull";
 import { DnaParticles } from "./DnaParticles";
-import { MeshDna } from "./MeshDna";
-import { useStageLoad } from "@/lib/stageLoad";
+import { StageWarmup } from "./StageWarmup";
+import { stageLoad, useStageLoad } from "@/lib/stageLoad";
 import { useBlobArmed } from "@/lib/blobTweak";
 import { ENV_FILE } from "@/lib/formField";
 
@@ -140,6 +140,46 @@ const DPR_FLOOR = 0.75;
 /** Resolution changes reallocate the drawing buffer, so they are quantised. */
 const dprStep = (v: number) => Math.round(v * 20) / 20;
 
+/* -------------------------------------------------------------------------- */
+/* cadence                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * L'INTERVALLE MINIMUM ENTRE DEUX IMAGES pendant qu'un plan plein écran se lève — voir
+ * stageLoad pour ce que cet état achète et pourquoi il existe.
+ *
+ * En millisecondes et non en nombre d'images sautées : « une sur trois » vaut 40 Hz sur
+ * l'écran 120 Hz où ce chiffre a été réglé, et 20 Hz sur un écran 60 Hz, où c'est trop peu.
+ * Un intervalle donne la même cadence partout.
+ */
+const CHEAP_FRAME_MS = 25;
+
+/**
+ * Le pilote de la cadence réduite : sous `frameloop="demand"`, r3f ne dessine que sur
+ * `invalidate()`, et c'est cette boucle qui décide quand.
+ *
+ * SA BOUCLE EST UN requestAnimationFrame À ELLE, pas un useFrame — un useFrame ne
+ * s'exécuterait que sur les images rendues, donc il ne pourrait pas cadencer celles qui
+ * ne le sont pas. Il lui faut battre au rythme de l'écran pour n'en retenir qu'une partie.
+ */
+function CheapCadence({ active }: { active: boolean }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    if (!active) return;
+    let raf = 0;
+    let last = -Infinity;
+    const tick = (t: number) => {
+      raf = requestAnimationFrame(tick);
+      if (t - last < CHEAP_FRAME_MS) return;
+      last = t;
+      invalidate();
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [active, invalidate]);
+  return null;
+}
+
 type Vec3 = [number, number, number];
 type Lamp = { intensity: number; color: string; position: Vec3 };
 export type LightsConfig = {
@@ -197,8 +237,17 @@ export function ChromeCanvas({
    * Degrade under load, recover when it lifts. Quantised and clamped to this
    * device's ceiling, so a machine that copes simply sits at the ceiling and this
    * never fires at all.
+   *
+   * SOURD TANT QUE LA SCÈNE N'EST PAS EN RÉGIME LIBRE, et c'est indispensable depuis que
+   * "cheap" bride la CADENCE plutôt que la résolution : PerformanceMonitor échantillonne
+   * dans un useFrame, sa borne basse vaut 60 images/s au-dessus de 100 Hz (voir `bounds`
+   * dans drei), et CHEAP_FRAME_MS en vise 40. Il lirait donc une chute là où il n'y a
+   * qu'un plafond posé exprès, et dégraderait la résolution pour la durée qui suit — en
+   * réallouant le tampon de dessin au pire moment, celui que tout ceci sert à protéger.
+   * Le compteur interne de drei continue de tourner ; c'est l'ÉCRITURE qu'on refuse.
    */
   const onPerf = useCallback(({ factor }: { factor: number }) => {
+    if (stageLoad.get() !== "live") return;
     setDpr(dprStep(DPR_FLOOR + factor * (ceil.current - DPR_FLOOR)));
   }, []);
   /** How hard this stage may work right now. The section menu turns it down while its
@@ -275,16 +324,26 @@ export function ChromeCanvas({
   return (
     <div aria-hidden style={{ width: "100%", height: "100%" }}>
       <Canvas
-        // "never" stops the loop without unmounting anything: the scene, the geometry and
-        // every uniform survive, and drawing resumes from exactly where it stopped.
-        frameloop={load === "paused" ? "never" : "always"}
-        // "cheap" keeps the loop RUNNING at a fraction of the pixels — the menu's exit and
-        // the preloader's lift set it so the blob stays alive under the moving curtain
-        // instead of visibly freezing. Measured on the menu: resuming at full resolution
-        // under the curtain's heaviest overlap stalls the compositor outright (a zero-frame
-        // window), at dpr 1 it keeps up. The softness is under a black plane for nearly all
-        // of it; full resolution returns the frame the curtain is gone.
-        dpr={load === "cheap" ? 1 : dpr}
+        /*
+         * "never" stops the loop without unmounting anything: the scene, the geometry and
+         * every uniform survive, and drawing resumes from exactly where it stopped.
+         *
+         * "demand" ne dessine que sur `invalidate()`, et c'est CheapCadence qui le cadence :
+         * la boucle reste vivante sous le plan qui se lève, à pleine résolution, mais elle
+         * cesse de produire une texture neuve à chaque image de l'écran — ce qui est
+         * exactement la cause décrite dans stageLoad, et donc ce qu'il faut relâcher.
+         */
+        frameloop={load === "paused" ? "never" : load === "cheap" ? "demand" : "always"}
+        /*
+         * LA RÉSOLUTION NE DÉPEND PLUS DE `load`. Elle l'a fait, et c'était une mitigation
+         * de performance qui touchait à L'IMAGE : la salle convertit des unités monde en
+         * pixels pour la taille de ses grains (voir uScale dans TheatrePieces), donc un
+         * changement de résolution changeait la surface additionnée du nuage et la salle
+         * s'allumait le temps de la levée. Le ratio y est désormais lu sur le renderer, ce
+         * qui ferme cette porte-là ; la marge se prend sur la cadence, où l'œil ne la voit
+         * pas — voir CHEAP_FRAME_MS.
+         */
+        dpr={dpr}
         /*
          * toneMappingExposure : 0.3, DEPUIS 1.15 — et c'est un réglage GLOBAL, réglé sur
          * une seule section. Trouvé au panneau du poste (dev/poste) pendant l'étalonnage
@@ -314,6 +373,7 @@ export function ChromeCanvas({
             stops a borderline device oscillating for ever and pins it at the
             floor instead. */}
         <PerformanceMonitor factor={1} flipflops={3} onChange={onPerf} onFallback={onPerf} />
+        <CheapCadence active={load === "cheap"} />
         <Suspense fallback={null}>
           {/* No scene background → canvas stays transparent so the chrome form
               floats on the page's void. Glow is done in CSS behind the canvas. */}
@@ -348,10 +408,10 @@ export function ChromeCanvas({
           ) : (
             <ChromeClean intensity={lights.streaks} />
           )}
-          {/* The central form, in 3 panel-selectable representations (Form
-              switch): liquid / particles / wireframe mesh — plus the skull mesh the
-              liquid hands the frame to. The scroll choreography they all follow is
-              integrated ONCE, here, and only read by the forms: see formClock. */}
+          {/* The central form, in 2 panel-selectable representations (Form
+              switch): liquid / particles — plus the skull mesh the liquid hands the
+              frame to. The scroll choreography they all follow is integrated ONCE,
+              here, and only read by the forms: see formClock. */}
           {/*
             FORMDRIVER MUST STAY FIRST AMONG THESE SIBLINGS. It does not just advance the
             clock, it WRITES THE CAMERA (see FormDriver), and the forms below read that
@@ -403,17 +463,15 @@ export function ChromeCanvas({
             <ChromeSkull reduced={reduced} />
           </Suspense>
           {/*
-            THE TWO ALTERNATIVE REPRESENTATIONS — wireframe and particles — exist
-            only for the barcode panel's Form switch, and they are MOUNTED only once
-            that panel has been reached for (see blobTweak.arm).
+            THE ALTERNATIVE REPRESENTATION — particles — exists only for the barcode
+            panel's Form switch, and it is MOUNTED only once that panel has been
+            reached for (see blobTweak.arm).
 
-            They drew nothing before this gate — both bail on `fade <= 0.004` in
-            their first frame — but they were paying their construction on every
-            single page load, for an easter egg most visitors never open:
-
-              MeshDna       a 22 848-vertex line geometry, built on mount
-              DnaParticles  a MeshSurfaceSampler over the whole skull, ~60 ms on
-                            the main thread — one of the page's two long tasks
+            It would draw nothing without this gate — it bails on `fade <= 0.004` in
+            its first frame — but it would pay its construction on every single page
+            load, for an easter egg most visitors never open: DnaParticles runs a
+            MeshSurfaceSampler over the whole skull, ~60 ms on the main thread, which
+            was one of the page's two long tasks.
 
             Arming happens on the barcode's HOVER, i.e. a beat before the panel can
             possibly be open, so the construction lands while the cascade plays
@@ -422,10 +480,12 @@ export function ChromeCanvas({
           */}
           {armed && (
             <Suspense fallback={null}>
-              <MeshDna reduced={reduced} />
               <DnaParticles reduced={reduced} />
             </Suspense>
           )}
+          {/* Compiles and draws once, out of sight, every form that is still hidden — so
+              that no transition pays its first frame. See StageWarmup. */}
+          <StageWarmup />
         </Suspense>
       </Canvas>
     </div>

@@ -56,34 +56,11 @@ function IconBlob() {
   );
 }
 
-/** Line-art icon: a lat/long wireframe globe (mesh). */
-function IconMesh() {
-  const { c, r } = ICON;
-  const lats = [-0.72, -0.44, -0.16, 0.16, 0.44, 0.72];
-  const lons = [0.3, 0.58, 0.82];
-  return (
-    <svg viewBox="0 0 40 40" width="100%" height="100%" aria-hidden fill="none" stroke="currentColor" strokeWidth="0.7" preserveAspectRatio="xMidYMid meet">
-      <circle cx={c} cy={c} r={r} strokeWidth="1" />
-      {lats.map((v, i) => {
-        const rx = r * Math.sqrt(1 - v * v);
-        return (
-          <ellipse key={"la" + i} cx={c} cy={(c - r * v).toFixed(2)} rx={rx.toFixed(2)} ry={(rx * 0.26).toFixed(2)} />
-        );
-      })}
-      <line x1={c} y1={c - r} x2={c} y2={c + r} />
-      {lons.map((f, i) => (
-        <ellipse key={"lo" + i} cx={c} cy={c} rx={(r * f).toFixed(2)} ry={r} />
-      ))}
-    </svg>
-  );
-}
-
-/** 3-way form selector spread across the full panel width, as line-art icons. */
+/** Form selector spread across the full panel width, as line-art icons. */
 function ModeSwitch({ value }: { value: BlobMode }) {
   const opts: [BlobMode, string, () => React.ReactElement][] = [
     ["particles", "Particles", IconDots],
     ["blob", "Blob", IconBlob],
-    ["wire", "Mesh", IconMesh],
   ];
   return (
     <div>

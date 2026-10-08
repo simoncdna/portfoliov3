@@ -31,16 +31,30 @@ import { useSyncExternalStore } from "react";
  * failure: handing the canvas back to the compositor at the END of the lift is when it died
  * instead — a frozen page with no blob on it.
  *
- * AND ONE FALSE CONVICTION, OVERTURNED. Dropping the canvas's dpr during the lift — the blob
- * live from the first frame — worked, and was abandoned because the render came back a little
- * worse on every single open. That degradation was blamed on the buffer reallocation and it
- * was never that: the resume frame was handing formClock the whole pause as one delta, uTime
- * leapt by tens of thousands of seconds, and fp32 noise at those magnitudes quantises into
- * stair-steps. The clock now clamps its delta (see advanceFormClock), the accumulation is
- * gone, and the dpr route is reinstated as "cheap" below: the loop keeps running through the
- * lift at reduced resolution, so the blob never visibly freezes, and the compositor keeps the
- * headroom the pause used to buy. "paused" remains for when the stage is fully covered —
- * a canvas nobody can see has no business rendering at all.
+ * SO "cheap" KEEPS THE LOOP ALIVE AND TAKES THE HEADROOM OUT OF THE CADENCE. Full resolution,
+ * but at most one drawn frame per CHEAP_FRAME_MS (see ChromeCanvas) instead of one per screen
+ * refresh: the canvas stops handing the compositor a new texture on every single frame, which
+ * is the sentence above, while the form keeps moving so nothing ever visibly freezes.
+ * "paused" remains for when the stage is fully covered — a canvas nobody can see has no
+ * business rendering at all.
+ *
+ * ET CE N'EST PAS LA RÉSOLUTION QUI PAIE, DÉLIBÉRÉMENT. Baisser le dpr le temps de la levée
+ * marche aussi, et c'est une mitigation de performance qui touche à l'image : la salle des
+ * projets convertit des unités monde en pixels pour dimensionner ses grains, donc ses
+ * particules grandissaient à l'écran quand le tampon rétrécissait — mesuré ×1,75 en diamètre,
+ * ×3,06 en surface — et un nuage additif réglé sur la somme des recouvrements s'allumait le
+ * temps du plan, puis retombait. La règle qu'il faut garder : ON ACHÈTE LA MARGE SUR CE QUE
+ * L'ŒIL NE VOIT PAS. Une cadence bridée sous un plan noir qui monte ne se voit pas ; un
+ * changement de résolution, si — soit par la netteté, soit, comme ici, par un réglage
+ * artistique qui en dépendait sans le dire.
+ *
+ * UNE FAUSSE CONVICTION, RENVERSÉE, à connaître avant de retoucher ceci. La route dpr avait
+ * été essayée puis abandonnée pour un rendu qui revenait dégradé à chaque ouverture, et la
+ * réallocation du tampon avait été accusée. Ce n'était pas elle : l'image de reprise passait
+ * toute la pause à formClock comme un seul delta, uTime bondissait de dizaines de milliers de
+ * secondes, et le bruit fp32 à ces magnitudes se quantifiait en marches d'escalier. L'horloge
+ * borne désormais son delta (voir advanceFormClock). Ce n'est donc pas ce défaut-là qui écarte
+ * la résolution, c'est le paragraphe au-dessus.
  *
  * A module singleton rather than context: the stage lives in a different subtree from the
  * menu, and there is exactly one page.
